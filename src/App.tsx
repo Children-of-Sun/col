@@ -544,19 +544,7 @@ if (r.id.includes('Maintenance') && r.id.includes('Recycling')) {
 
   setIsSolving(true);
   try {
-    // 使用内联 Worker，避免外部文件加载问题
-const workerCode = `
-self.onmessage = function(e) {
-  const { lpString, requestId } = e.data;
-  // 模拟求解器返回 Optimal（实际应用时应替换为真实求解逻辑）
-  // 如果需要真实求解，可以在这里通过 importScripts 加载 highs.js，
-  // 但为了测试，先返回空结果
-  const result = { Status: 'Optimal', Columns: {}, ObjectiveValue: 0 };
-  self.postMessage({ requestId, result });
-};
-`;
-const blob = new Blob([workerCode], { type: 'application/javascript' });
-const worker = new Worker(URL.createObjectURL(blob));
+    const worker = new Worker('solver.worker.js');
     const requestId = Date.now();
 
     const timeoutId = setTimeout(() => {
@@ -596,7 +584,7 @@ const worker = new Worker(URL.createObjectURL(blob));
     worker.onerror = (err) => {
       clearTimeout(timeoutId);
       setIsSolving(false);
-      setDiagnostic(`Worker 错误: ${err.message}`);
+      setDiagnostic(`Worker 错误: ${err.message} | 文件名: ${err.filename} | 行号: ${err.lineno}`);
       worker.terminate();
     };
 
