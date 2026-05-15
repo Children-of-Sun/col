@@ -4,20 +4,37 @@ on:
   push:
     branches: [ "main" ]
 
+# 关键：配置工作流的写入权限
+permissions:
+  contents: write
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      # 1. 检出代码，并禁用子模块更新，避免潜在问题
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      # 2. 设置 Node.js 环境
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: 18
-      - run: npm install --legacy-peer-deps
-      - name: Grant execute permissions for vite
-        run: chmod +x ./node_modules/.bin/vite
 
-      - run: npm run build
-      - uses: peaceiris/actions-gh-pages@v4
+      # 3. 使用 npm ci 进行快速、可靠的依赖安装
+      - name: Install dependencies
+        run: npm ci
+
+      # 4. 构建项目
+      - name: Build project
+        run: npm run build
+
+      # 5. 部署到 gh-pages 分支
+      - name: Deploy to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
