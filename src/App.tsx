@@ -544,7 +544,7 @@ if (r.id.includes('Maintenance') && r.id.includes('Recycling')) {
 
   setIsSolving(true);
   try {
-    const worker = new Worker('/solver.worker.js');
+    const worker = new Worker('solver.worker.js');
     const requestId = Date.now();
 
     const timeoutId = setTimeout(() => {
