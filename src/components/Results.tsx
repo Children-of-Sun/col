@@ -75,15 +75,16 @@ return (
         <span dangerouslySetInnerHTML={{ __html: diagnostic }} />
       </div>
     )}
-    {result && result.status === 'Optimal' && (
+    const resultStatus = result?.Status ?? result?.status;
+    {result && result.Status === 'Optimal' && (
       <ResultDisplay result={result} recipes={recipes} demands={demands} fixedDemands={fixedDemands}
         hideStage={hideStage} ignoredItems={ignoredItems} excludedItems={excludedItems}
         statueCount={statueCount} translation={translation}
         mainSeriesList={mainSeriesList} powerSeriesList={powerSeriesList}
         enableSeriesForItem={enableSeriesForItem} />
     )}
-    {result && result.status !== 'Optimal' && (
-      <div><div>❌ 状态: {result.status}</div></div>
+    {result && result.Status !== 'Optimal' && (
+      <div><div>❌ 状态: {result.Status}</div></div>
     )}
   </div>
  );
