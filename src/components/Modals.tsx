@@ -71,6 +71,7 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
     ];
     return fullData.machines_and_buildings
       .filter(b => !hiddenKeywords.some(k => b.name.toLowerCase().includes(k.toLowerCase())))
+      .filter(b => !b.id.toLowerCase().startsWith('researchlab'))
       .map(b => {
         // 查找该建筑在主模块中的配方（module === 'main'）
         const mainRecipes = recipes.filter(r => r.buildingId === b.id && r.module === 'main');

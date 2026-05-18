@@ -5,17 +5,28 @@ import { LevelModal, RecipeModal, PowerRecipeModal, DemandModal, ExcludeModal } 
 import { Results } from './components/Results';
 import { Btn, ModalShell } from './components/UI';
 import PopTechPanel from './components/PopTechPanel';
+import { TradePanel } from './components/TradePanel';
 import { buildLp } from './lpBuilder';
 import { ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getRecycleRate, calcResidentDemands, calcResidentWaste, getMaintenanceWasteMap } from './utils';
-import { getMaintenanceReduction, t, isRaw, isPowerItem, getSeriesName } from './utils';
-import { Demand, Recipe } from './types';
+import { getMaintenanceReduction, t, isRaw, isPowerItem, getSeriesName, isMaintenanceRecyclingRecipe } from './utils';
+import { Demand, Recipe, DockLevel, TradeFuel } from './types';
+import { calculateTrade } from './tradeCalculator';
 import './App.css';
+
+const DEBUG = (() => {
+  if (typeof window !== 'undefined') {
+    return window.localStorage.getItem('factoryDebug') === 'true';
+  }
+  return false;
+})();
 
 declare global {
   interface Window {
     __hasAutoLoadedSettings?: boolean;
+    __store: any;
   }
 }
+
 export default function App() {
   const loadData = useStore(s => s.loadData);
   const loadTranslation = useStore(s => s.loadTranslation);
@@ -28,6 +39,10 @@ export default function App() {
   const setSolverMissing = useStore(s => s.setSolverMissing);
   const setUnityProduced = useStore(s => s.setUnityProduced);
   const setUnityConsumed = useStore(s => s.setUnityConsumed);
+  const setTradeContracts = useStore(s => s.setTradeContracts);
+  const selectedTradeRecipes = useStore(s => s.selectedTradeRecipes);
+  const solarEfficiency = useStore(s => s.solarEfficiency);
+  const gameData = useStore(s => s.gameData);
 
   const [levelModalOpen, setLevelModalOpen] = useState(false);
   const [recipeModalOpen, setRecipeModalOpen] = useState(false);
@@ -35,13 +50,9 @@ export default function App() {
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [excludeModalOpen, setExcludeModalOpen] = useState(false);
   const [popTechModalOpen, setPopTechModalOpen] = useState(false);
-  const gameData = useStore(s => s.gameData);
-  const setGameData = useStore(s => s.setGameData);
 
-  // Auto-load on mount
   useEffect(() => {
-
-    (window as any).__store = useStore;
+    window.__store = useStore;
     
     (async () => {
       try {
@@ -58,13 +69,42 @@ export default function App() {
       } catch (e) { /* ignore */ }
       try {
         const resp = await fetch('./GameData.json');
-        if (resp.ok) setGameData(await resp.json());
+        if (resp.ok) useStore.getState().setGameData(await resp.json());
       } catch (e) { /* ignore */ }
-      // 自动加载 localStorage 中的配置
+      // 加载贸易合同
+      try {
+        const resp = await fetch('./contracts.json');
+        if (resp.ok) {
+          const contractsData = await resp.json();
+          const contracts = contractsData.contracts.map((c: any) => ({
+            id: c.id,
+            name: c.name || c.id,
+            buyItem: c.product_to_buy_name.toLowerCase(),
+            sellItem: c.product_to_pay_with_name.toLowerCase(),
+            buyRate: c.product_to_buy_quantity,
+            sellRate: c.product_to_pay_with_quantity,
+            unity_per_100_bought: c.unity_per_100_bought,
+            unity_per_month: c.unity_per_month,
+            min_reputation_required: c.min_reputation_required,
+          }));
+          setTradeContracts(contracts);
+        }
+      } catch (e) { /* ignore */ }
       if (!window.__hasAutoLoadedSettings && localStorage.getItem('factorySettings')) {
         try {
           const s = JSON.parse(localStorage.getItem('factorySettings')!);
           useStore.getState().importSettings(s);
+          const state = useStore.getState();
+          const labBuildings = state.labMeta.map(meta => meta.buildingId);
+          for (const buildingId of labBuildings) {
+            const recipesForBuilding = state.recipes.filter(r => r.buildingId === buildingId && r.module === 'special');
+            const enabledRecipes = recipesForBuilding.filter(r => state.recipeEnabled[r.id]);
+            if (enabledRecipes.length > 1) {
+              for (let i = 1; i < enabledRecipes.length; i++) {
+                state.setRecipeEnabled(enabledRecipes[i].id, false);
+              }
+            }
+          }
           window.__hasAutoLoadedSettings = true;
         } catch(e) {}
       }
@@ -72,47 +112,13 @@ export default function App() {
   }, []);
 
   const getFixedDemands = useCallback((): Demand[] => {
-  const s = useStore.getState();
-  const fd: Demand[] = [];
-  if (s.stationLevel > 0) {
-   const rocket = ROCKET_BASE[s.rocketType];
-  // 只保留火箭需求，不要直接物资需求
-  // 人员火箭
-  const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (s.techLevel / 10);
-  const crew = Math.max(0, (s.stationLevel - 1) * 2);
-  const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
-  const crewRocketRate = rocketsPerLaunch / 20;
-  if (crewRocketRate > 0) fd.push({ item: rocket.crewKey, rate: crewRocketRate });
+    return [];
+  }, []);
 
-  // 货物火箭（仍需要计算总货物量，但货物明细已在 stationRecipe 中体现）
-  let labCargoRate = 0;
-  const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
-  if (meta && s.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * s.labCount;
-  const userSpaceCargoRate = s.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).reduce((acc, d) => acc + d.rate, 0);
-  const totalCargoRate = (s.stationLevel * STATION_PARTS_RATE) + (s.stationLevel > 1 ? (s.stationLevel - 1) * 2 : 0) + labCargoRate + userSpaceCargoRate;
-  const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (s.techLevel / 10);
-  const cargoRocketRate = cargoCap > 0 ? totalCargoRate / cargoCap : 0;
-  if (cargoRocketRate > 0) fd.push({ item: rocket.cargoKey, rate: cargoRocketRate });
-}
-  if (s.statueCount > 0) fd.push({ item: 'fuel gas', rate: s.statueCount * 2 });
-  const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
-  if (meta && s.labCount > 0) {
-    meta.recipes.forEach(r => {
-      for (const [item, qty] of Object.entries(r.inputs)) {
-        fd.push({ item: item.toLowerCase(), rate: (60 / r.duration) * qty * s.labCount });
-      }
-    });
-    for (const [item, qty] of Object.entries(meta.upkeep)) {
-      fd.push({ item: item.toLowerCase(), rate: qty * s.labCount });
-    }
-  }
-  return fd;
-}, []);
-
-
-  const getActiveRecipes = useCallback(() => {
+  const handleSolve = useCallback(async () => {
     const s = useStore.getState();
-    return s.recipes.filter(r => {
+
+    const active = s.recipes.filter(r => {
       if (!s.recipeEnabled[r.id]) return false;
       const sn = (r.module === 'power') ?
         s.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name :
@@ -126,476 +132,507 @@ export default function App() {
           return s.mainSelectedLevel[sn] === r.buildingLevel;
         }
       } else {
-        // 无系列（如电力建筑的主模块副本），直接依赖 recipeEnabled
         return r.module === 'main';
       }
     });
-  }, []);
-const handleSolve = useCallback(async () => {
-  const s = useStore.getState();
 
-  // 配方/建筑独立开关：不再强制同步电力配方启用状态
-  // 电力配方是否参与计算由 recipeEnabled 独立控制
-  // 系列关闭时只禁用，不启用；系列启用时保持配方原有状态
+    if (!active.length) {
+      setDiagnostic('没有启用的配方。');
+      return;
+    }
 
-  // ✅ 通用活跃配方过滤（主模块 + 电力模块）
-  const active = s.recipes.filter(r => {
-    if (!s.recipeEnabled[r.id]) return false;
-    const sn = (r.module === 'power') ?
-      s.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name :
-      s.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
-    if (sn) {
-      // 有系列，按系列启用/等级检查
-      if (r.module === 'power') {
-        if (!s.powerEnabled[sn]) return false;
-        return s.powerSelectedLevel[sn] === r.buildingLevel;
-      } else {
-        if (!s.mainEnabled[sn]) return false;
-        return s.mainSelectedLevel[sn] === r.buildingLevel;
+    const ignored = new Set(s.ignoredItems);
+    const excluded = new Set(s.excludedItems);
+    const reductionFactorBase = getMaintenanceReduction(s.statueCount);
+    let fixedDemands = getFixedDemands();
+
+    // 深拷贝配方
+    const modifiedActive = active.map(r => ({ ...r, inputs: { ...r.inputs }, outputs: { ...r.outputs }, upkeep: { ...r.upkeep } }));
+
+    // 应用太阳能效率
+    modifiedActive.forEach(recipe => {
+      if (recipe.isSolar && recipe.outputs['electricity']) {
+        recipe.outputs['electricity'] *= solarEfficiency;
       }
-    } else {
-      // 无系列（如电力建筑的主模块副本），直接依赖 recipeEnabled
-      return r.module === 'main'; // 只允许主模块配方，电力配方必须有系列
-    }
-  });
-
-  if (!active.length) {
-    setDiagnostic('没有启用的配方。');
-    return;
-  }
-
-  const ignored = new Set(s.ignoredItems);
-  const excluded = new Set(s.excludedItems);
-  const reductionFactor = getMaintenanceReduction(s.statueCount);
-  let fixedDemands = getFixedDemands();
-
-  // 深拷贝 active 列表，确保不改变原配方
-  const modifiedActive = active.map(r => ({ ...r, inputs: { ...r.inputs }, outputs: { ...r.outputs }, upkeep: { ...r.upkeep } }));
-
-  // 将配方按模块严格分开
-  const mainActive = modifiedActive.filter(r => {
-    if (!s.recipeEnabled[r.id] || r.module !== 'main') return false;
-    const sn = s.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
-    if (sn) {
-      if (!s.mainEnabled[sn]) return false;
-      if (s.mainSelectedLevel[sn] !== r.buildingLevel) return false;
-      // 新增：检查主模块建筑开关
-      return s.mainBuildingEnabledMap[r.buildingId] !== false;
-    }
-    // 无系列建筑直接检查主模块建筑开关
-    return s.mainBuildingEnabledMap[r.buildingId] !== false;
-  });
-
-  const powerActive = modifiedActive.filter(r => {
-    if (!s.recipeEnabled[r.id] || r.module !== 'power') return false;
-    const sn = s.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
-    if (!sn) return false;  // 电力配方必须有系列
-    // 系列关闭时禁用配方，系列启用时保持配方原有状态
-    if (!s.powerEnabled[sn]) return false;
-    if (s.powerSelectedLevel[sn] !== r.buildingLevel) return false;
-    // 检查电力模块建筑开关
-    return s.powerBuildingEnabledMap[r.buildingId] !== false;
-  });
-
-  // 在居民/科技处理之前，单独计算回收率（基础 0.2）
-  const recycleRate = (() => {
-    const gd = useStore.getState().gameData;
-    if (!gd) return 0.2;
-    return getRecycleRate(
-      gd.baseRecycleRate ?? 0.2,
-      gd.edicts,
-      useStore.getState().edictLevels,
-      gd.office,
-      useStore.getState().officeLevels
-    );
-  })();
-
-  const currentGameData = useStore.getState().gameData;
-
-  // 维护废料映射（只要有 GameData 就计算，与居民无关）
-  if (currentGameData) {
-    const maintWasteMap = getMaintenanceWasteMap(currentGameData);
-    modifiedActive.forEach(r => {
-      // 维护 Recycling 配方：只产出废料，不再产出原来的 maintenance 物品
-if (r.id.includes('Maintenance') && r.id.includes('Recycling')) {
-  const maintType = Object.keys(r.outputs).find(k => k.startsWith('maintenance'));
-  if (maintType && maintWasteMap[maintType]) {
-    // 删除原 maintenance 输出，避免重复生产
-    delete r.outputs[maintType];
-    const outputRate = (60 / r.duration) * (r.outputs[maintType] ?? 0);
-    const wasteNames = currentGameData.wasteNames.slice(2);
-    maintWasteMap[maintType].forEach((coeff, idx) => {
-      r.outputs[wasteNames[idx]] = (r.outputs[wasteNames[idx]] || 0) + outputRate * coeff * recycleRate;
     });
-  }
-}
 
-      // 办公用品配方
-      if (r.name.toLowerCase().includes('office supplies')) {
-        const officeWaste = maintWasteMap['办公用品'] || [0, 0, 0, 0, 0];
-        const outputRate = (60 / r.duration) * (r.outputs['office supplies'] ?? 0);
-        const wasteNames = currentGameData.wasteNames.slice(2);
-        officeWaste.forEach((coeff, idx) => {
-          r.outputs[wasteNames[idx]] = (r.outputs[wasteNames[idx]] || 0) + outputRate * coeff * recycleRate;
+    const recycleRate = (() => {
+      const gd = useStore.getState().gameData;
+      if (!gd) return 0.2;
+      return getRecycleRate(
+        gd.baseRecycleRate ?? 0.2,
+        gd.edicts,
+        useStore.getState().edictLevels,
+        gd.office,
+        useStore.getState().officeLevels
+      );
+    })();
+
+    const currentGameData = useStore.getState().gameData;
+    let specialActive: Recipe[] = [];
+
+    if (currentGameData) {
+      const maintWasteMap = getMaintenanceWasteMap(currentGameData);
+      const allWasteNames = currentGameData.wasteNames;
+      const recyclableIndices = [0, 1, 2, 3, 4];
+      const recyclableWasteNames = allWasteNames.slice(2);
+      const recyclableWasteNamesLower = recyclableWasteNames.map(w => w.toLowerCase());
+
+      if (DEBUG) {
+        console.log('[废料调试] ========== 废料系统启动 ==========');
+        console.log('[废料调试] 回收率:', recycleRate);
+        console.log('[废料调试] 所有废料名称:', allWasteNames);
+        console.log('[废料调试] 可回收废料:', recyclableWasteNames);
+        console.log('[废料调试] 维护废物系数表 keys:', Object.keys(maintWasteMap));
+      }
+
+      // 清除已有废料输出
+      modifiedActive.forEach(r => {
+        recyclableWasteNames.forEach(wn => {
+          delete r.outputs[wn];
         });
-      }
+      });
 
-      // 农场加成（需要研究等级）
-      const researchLvls = [...s.researchLevels];
-      if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
-        const cropRes = currentGameData.research.find(res => res.name === '作物产量');
-        const cropLvl = cropRes ? (researchLvls[currentGameData.research.indexOf(cropRes)] || 0) : 0;
-        if (cropLvl > 0 && cropRes) {
-          const bonus = (cropRes.effectPerLevel[0] || 0) * cropLvl;
-          for (const k in r.outputs) {
-            if (k !== 'water') r.outputs[k] *= (1 + bonus);
+      // 废料添加（每周期量）
+      if (DEBUG) console.log('[废料调试] 开始对 modifiedActive 添加废料，配方数量:', modifiedActive.length);
+      modifiedActive.forEach(r => {
+        const hasRecyclables = ((r.outputs['recyclables'] || r.outputs['Recyclables']) || 0) > 0;
+        if (!hasRecyclables) return;
+        if (DEBUG) console.log(`[废料调试] 处理配方: ${r.name}, 输出 recyclables: ${r.outputs['recyclables'] || r.outputs['Recyclables']}`);
+        for (const [inputItem, inputQty] of Object.entries(r.inputs)) {
+          const inputItemLower = inputItem.toLowerCase();
+          let coeffs = maintWasteMap[inputItemLower];
+          if (!coeffs) {
+            const normalized = inputItemLower.replace(/\s/g, '');
+            for (const key of Object.keys(maintWasteMap)) {
+              if (key.replace(/\s/g, '') === normalized) {
+                coeffs = maintWasteMap[key];
+                break;
+              }
+            }
+          }
+          if (coeffs && coeffs.length >= 5) {
+            const perCycleInput = inputQty;
+            if (DEBUG) console.log(`  输入 ${inputItem}: 每周期 ${perCycleInput}, 系数:`, coeffs);
+            recyclableIndices.forEach((idx, i) => {
+              const coeff = coeffs[idx];
+              if (coeff !== 0) {
+                const wasteItem = recyclableWasteNamesLower[i];
+                const added = perCycleInput * coeff * recycleRate;
+                r.outputs[wasteItem] = (r.outputs[wasteItem] || 0) + added;
+                if (DEBUG) console.log(`    添加 ${wasteItem} (每周期): ${added.toFixed(4)}`);
+              }
+            });
+          } else if (DEBUG) {
+            console.log(`  输入 ${inputItem}: 未找到废物系数`);
           }
         }
+      });
 
-        const waterRes = currentGameData.research.find(res => res.name === '定居点用水');
-        const waterLvl = waterRes ? (researchLvls[currentGameData.research.indexOf(waterRes)] || 0) : 0;
-        if (waterLvl > 0 && waterRes) {
-          const waterBonus = (waterRes.effectPerLevel[0] || 0) * waterLvl;
-          if (r.inputs['water']) {
-            r.inputs['water'] *= (1 + waterBonus);
+      // 农场加成
+      modifiedActive.forEach(r => {
+        const researchLvls = [...s.researchLevels];
+        if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
+          const cropRes = currentGameData.research.find(res => res.name === '作物产量');
+          const cropLvl = cropRes ? (researchLvls[currentGameData.research.indexOf(cropRes)] || 0) : 0;
+          if (cropLvl > 0 && cropRes) {
+            const bonus = (cropRes.effectPerLevel[0] || 0) * cropLvl;
+            for (const k in r.outputs) {
+              if (k !== 'water') r.outputs[k] *= (1 + bonus);
+            }
+            if (DEBUG) console.log(`[调试] 农场 ${r.name} 作物产量加成 ${bonus*100}%`);
+          }
+          const waterRes = currentGameData.research.find(res => res.name === '定居点用水');
+          const waterLvl = waterRes ? (researchLvls[currentGameData.research.indexOf(waterRes)] || 0) : 0;
+          if (waterLvl > 0 && waterRes) {
+            const waterBonus = (waterRes.effectPerLevel[0] || 0) * waterLvl;
+            if (r.inputs['water']) {
+              r.inputs['water'] *= (1 + waterBonus);
+              if (DEBUG) console.log(`[调试] 农场 ${r.name} 定居点用水加成 ${waterBonus*100}%，水输入增加`);
+            }
           }
         }
+      });
+
+      // ===== 特殊模块 =====
+      // 雕像
+      if (s.statueCount > 0) {
+        const statueRecipe: Recipe = {
+          id: 'statue_module',
+          name: '雕像 (The Statue of Maintenance)',
+          buildingId: 'statue',
+          buildingName: 'The Statue of Maintenance',
+          category: '雕像',
+          buildingLevel: 0,
+          duration: 60,
+          inputs: { 'fuel gas': s.statueCount * 2 },
+          outputs: {},
+          upkeep: {},
+          powerMultiplier: 1,
+          workers: 0,
+          isSolar: false,
+          isHidden: true,
+          module: 'special',
+        };
+        const statueBuilding = s.fullData?.machines_and_buildings?.find(
+          (b: any) => b.name === 'The Statue of Maintenance'
+        );
+        if (statueBuilding) {
+          if (statueBuilding.maintenance_cost_units && statueBuilding.maintenance_cost_quantity) {
+            statueRecipe.upkeep[statueBuilding.maintenance_cost_units.toLowerCase()] = statueBuilding.maintenance_cost_quantity * s.statueCount;
+          }
+          statueRecipe.workers = (statueBuilding.workers || 0) * s.statueCount;
+          if (statueBuilding.electricity_consumed) {
+            statueRecipe.inputs['electricity'] = (statueRecipe.inputs['electricity'] || 0) + statueBuilding.electricity_consumed * s.statueCount;
+          }
+          if (statueBuilding.computing_consumed) {
+            statueRecipe.inputs['computing'] = (statueRecipe.inputs['computing'] || 0) + statueBuilding.computing_consumed * s.statueCount;
+          }
+        }
+        specialActive.push(statueRecipe);
       }
-    });
-  }
 
-  // ===== 居民/科技处理 =====
-  // 初始化外部供给列表（默认为空）
-  let allExternalSupplies: { item: string; rate: number }[] = [];
+      // 研究所
+      if (s.labCount > 0 && s.labLevel) {
+        const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
+        if (meta) {
+          const labRecipe: Recipe = {
+            id: `lab_module_${s.labLevel}`,
+            name: `研究所 (${meta.name}) ×${s.labCount}`,
+            buildingId: s.labLevel,
+            buildingName: meta.name,
+            category: '研究所',
+            buildingLevel: meta.level,
+            duration: 60,
+            inputs: {},
+            outputs: { 'research': 48 * (1 + s.stationLevel * 0.05) * s.labCount },
+            upkeep: {},
+            powerMultiplier: 1,
+            workers: 0,
+            isSolar: false,
+            isHidden: true,
+            module: 'special',
+            isLab: true,
+          };
+          meta.recipes.forEach((r: any) => {
+            if (!s.recipeEnabled[r.id]) return;
+            for (const [item, qty] of Object.entries(r.inputs)) {
+              const rate = (60 / r.duration) * (qty as number) * s.labCount;
+              labRecipe.inputs[item] = (labRecipe.inputs[item] || 0) + rate;
+              if (r.outputs && (r.outputs.recyclables || r.outputs.Recyclables)) {
+                const recycleRateOut = (60 / r.duration) * ((r.outputs.recyclables || r.outputs.Recyclables) as number) * s.labCount;
+                labRecipe.outputs['recyclables'] = (labRecipe.outputs['recyclables'] || 0) + recycleRateOut;
+              }
+            }
+          });
+          for (const [item, qty] of Object.entries(meta.upkeep || {})) {
+            labRecipe.upkeep[item.toLowerCase()] = (qty as number) * s.labCount;
+          }
 
-  // 创建居民模块配方
-  const residentRecipe: Recipe = {
-    id: 'resident_module',
-    name: '居民模块',
-    buildingId: 'resident',
-    buildingName: '居民',
-    category: '居民',
-    buildingLevel: 0,
-    duration: 60,           // 不缩放
-    inputs: {},
-    outputs: {},
-    upkeep: {},
-    powerMultiplier: 1,
-    workers: 0,
-    isSolar: false,
-    isHidden: true,
-    module: 'resident',
-  };
+          // 实验室配方废料添加（每周期量）
+          const labHasRecyclables = (labRecipe.outputs['recyclables'] || 0) > 0;
+          if (labHasRecyclables) {
+            if (DEBUG) console.log(`[废料调试] 处理实验室配方: ${labRecipe.name}, 输出 recyclables: ${labRecipe.outputs['recyclables']}`);
+            for (const [inputItem, inputQty] of Object.entries(labRecipe.inputs)) {
+              const inputItemLower = inputItem.toLowerCase();
+              let coeffs = maintWasteMap[inputItemLower];
+              if (!coeffs) {
+                const normalized = inputItemLower.replace(/\s/g, '');
+                for (const key of Object.keys(maintWasteMap)) {
+                  if (key.replace(/\s/g, '') === normalized) {
+                    coeffs = maintWasteMap[key];
+                    break;
+                  }
+                }
+              }
+              if (coeffs && coeffs.length >= 5) {
+                const perCycleInput = inputQty;
+                if (DEBUG) console.log(`  输入 ${inputItem}: 每周期 ${perCycleInput}, 系数:`, coeffs);
+                recyclableIndices.forEach((idx, i) => {
+                  const coeff = coeffs[idx];
+                  if (coeff !== 0) {
+                    const wasteItem = recyclableWasteNamesLower[i];
+                    const added = perCycleInput * coeff * recycleRate;
+                    labRecipe.outputs[wasteItem] = (labRecipe.outputs[wasteItem] || 0) + added;
+                    if (DEBUG) console.log(`    添加 ${wasteItem} (每周期): ${added.toFixed(4)}`);
+                  }
+                });
+              } else if (DEBUG) {
+                console.log(`  输入 ${inputItem}: 未找到废物系数`);
+              }
+            }
+          }
 
-  if (currentGameData) {
-    const state = useStore.getState();
-
-    // 读取当前科技等级
-    const edictLvls = { ...state.edictLevels };
-    const officeLvls = [...state.officeLevels];
-    const researchLvls = [...state.researchLevels];
-
-    // 计算居民需求和废料
-    const { demands: residentDemands, unity } = calcResidentDemands(
-      currentGameData,
-      state.population,
-      state.housingIndex,
-      state.selectedFoods,
-      state.selectedMedical,
-      state.selectedOthers,
-      edictLvls,
-      officeLvls,
-      researchLvls,
-      recycleRate
-    );
-    useStore.getState().setUnityProduced(unity);
-    useStore.getState().setUnityConsumed(unity);
-
-    // 居民废物（正数）转为外部供给（calcResidentWaste 已包含 populationWaste）
-    const residentWasteSupplies = calcResidentWaste(
-      currentGameData,
-      residentDemands,
-      recycleRate
-    ).map(w => ({ item: w.item, rate: w.rate }));
-
-    // 合并所有外部供给
-    allExternalSupplies = [...allExternalSupplies, ...residentWasteSupplies];
-
-    // 居民消耗 → 输入（正值）
-    residentDemands.forEach(d => {
-      residentRecipe.inputs[d.item] = d.rate;
-    });
-
-    // 居民废物 → 输出（正值）
-    residentWasteSupplies.forEach(w => {
-      residentRecipe.outputs[w.item] = w.rate;
-    });
-
-    // 居民电力和算力消耗（需求7）
-    const housing = currentGameData.housingTiers[s.housingIndex];
-    const housingMultipliers = housing?.multipliers || {};
-    const elecSvc = currentGameData.services['Electricity'];
-    const compSvc = currentGameData.services['Computing'];
-    if (elecSvc) {
-      const elecDemand = elecSvc.demand * (s.population / currentGameData.populationScale)
-        * (housingMultipliers['Electricity'] || 1);
-      residentRecipe.inputs['electricity'] = (residentRecipe.inputs['electricity'] || 0) + elecDemand;
-    }
-    if (compSvc) {
-      const compDemand = compSvc.demand * (s.population / currentGameData.populationScale)
-        * (housingMultipliers['Computing'] || 1);
-      residentRecipe.inputs['computing'] = (residentRecipe.inputs['computing'] || 0) + compDemand;
+          specialActive.push(labRecipe);
+        }
+      }
     }
 
-    // 保存外部供给到store
-    setExternalSupplies(allExternalSupplies);
-    // 保存正需求（居民消耗）用于显示
-    useStore.getState().setSolverFixedDemands(fixedDemands.filter(d => d.rate > 0));
-  }
+    // 法令减维护效果
+    let reductionFactor = reductionFactorBase;
+    if (currentGameData) {
+      const edictReduce = currentGameData.edicts.find(e => e.name === '减少维护');
+      if (edictReduce) {
+        const lvl = s.edictLevels[currentGameData.edicts.indexOf(edictReduce)] ?? -1;
+        if (lvl >= 0) {
+          reductionFactor += edictReduce.effectPerLevel[lvl];
+        }
+      }
+      reductionFactor = Math.min(reductionFactor, 1);
+    }
 
-  const residentActive = [residentRecipe];
-
-  // ===== 空间站模块配方 =====
-  const stationRecipe: Recipe = {
-    id: 'station_module',
-    name: '空间站模块',
-    buildingId: 'station',
-    buildingName: '空间站',
-    category: '空间站',
-    buildingLevel: 0,
-    duration: 60,
-    inputs: {},
-    outputs: {},
-    upkeep: {},
-    powerMultiplier: 1,
-    workers: 0,
-    isSolar: false,
-    isHidden: true,
-    module: 'station',
-  };
-
-  if (s.stationLevel > 0) {
-    const rocket = ROCKET_BASE[s.rocketType];
-    const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (s.techLevel / 10);
-    const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (s.techLevel / 10);
-
-    const stationPartsRate = s.stationLevel * STATION_PARTS_RATE;
-    const crewSuppliesRate = Math.max(0, (s.stationLevel - 1) * 2);
-    let labCargoRate = 0;
-    const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
-    if (meta && s.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * s.labCount;
-    const userSpaceCargoRate = s.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).reduce((acc, d) => acc + d.rate, 0);
-
-    const totalCargoRate = stationPartsRate + crewSuppliesRate + labCargoRate + userSpaceCargoRate;
-    const cargoRocketRate = cargoCap > 0 ? totalCargoRate / cargoCap : 0;
-
-    const crew = Math.max(0, (s.stationLevel - 1) * 2);
-    const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
-    const crewRocketRate = rocketsPerLaunch / 20;
-
-    // 消耗物品（输入）
-    if (stationPartsRate > 0) stationRecipe.inputs['station parts'] = stationPartsRate;
-    if (crewSuppliesRate > 0) stationRecipe.inputs['crew supplies'] = crewSuppliesRate;
-    if (labCargoRate > 0) stationRecipe.inputs['electronics iv'] = labCargoRate;
-    // 用户空间物品需求
-    s.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).forEach(d => {
-      stationRecipe.inputs[d.item] = (stationRecipe.inputs[d.item] || 0) + d.rate;
+    // 分离主模块和电力模块
+    let mainActive = modifiedActive.filter(r => {
+      if (!s.recipeEnabled[r.id] || r.module !== 'main') return false;
+      const sn = s.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+      if (sn) {
+        if (!s.mainEnabled[sn]) return false;
+        if (s.mainSelectedLevel[sn] !== r.buildingLevel) return false;
+        return s.mainBuildingEnabledMap[r.buildingId] !== false;
+      }
+      return s.mainBuildingEnabledMap[r.buildingId] !== false;
     });
-    // 火箭消耗
-    if (crewRocketRate > 0) stationRecipe.inputs[rocket.crewKey] = crewRocketRate;
-    if (cargoRocketRate > 0) stationRecipe.inputs[rocket.cargoKey] = cargoRocketRate;
-  }
 
-  const stationActive = [stationRecipe];
+    let powerActive = modifiedActive.filter(r => {
+      if (!s.recipeEnabled[r.id] || r.module !== 'power') return false;
+      const sn = s.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+      if (!sn) return false;
+      if (!s.powerEnabled[sn]) return false;
+      if (s.powerSelectedLevel[sn] !== r.buildingLevel) return false;
+      return s.powerBuildingEnabledMap[r.buildingId] !== false;
+    });
 
-  // ===== 特殊模块配方（雕像、研究所） =====
-  const specialActive: Recipe[] = [];
+    // ===== 居民模块 =====
+    let allExternalSupplies: { item: string; rate: number }[] = [];
 
-  // 雕像配方（机器数=statueCount，固定）
-  if (s.statueCount > 0) {
-    const statueRecipe: Recipe = {
-      id: 'statue_module',
-      name: '雕像 (The Statue of Maintenance)',
-      buildingId: 'statue',
-      buildingName: 'The Statue of Maintenance',
-      category: '雕像',
+    const residentRecipe: Recipe = {
+      id: 'resident_module',
+      name: '居民模块',
+      buildingId: 'resident',
+      buildingName: '居民',
+      category: '居民',
       buildingLevel: 0,
       duration: 60,
-      inputs: { 'fuel gas': s.statueCount * 2 },
+      inputs: {},
       outputs: {},
       upkeep: {},
       powerMultiplier: 1,
       workers: 0,
       isSolar: false,
       isHidden: true,
-      module: 'special',
+      module: 'resident',
     };
-    // 从JSON数据读取雕像建筑的维护消耗
-    const statueBuilding = s.fullData?.machines_and_buildings?.find(
-      (b: any) => b.name === 'The Statue of Maintenance'
-    );
-    if (statueBuilding) {
-      if (statueBuilding.maintenance_cost_units && statueBuilding.maintenance_cost_quantity) {
-        statueRecipe.upkeep[statueBuilding.maintenance_cost_units.toLowerCase()] =
-          statueBuilding.maintenance_cost_quantity * s.statueCount;
-      }
-      statueRecipe.workers = (statueBuilding.workers || 0) * s.statueCount;
-      // 雕像的电力消耗
-      if (statueBuilding.electricity_consumed) {
-        statueRecipe.inputs['electricity'] =
-          (statueRecipe.inputs['electricity'] || 0) + statueBuilding.electricity_consumed * s.statueCount;
-      }
-      // 雕像的算力消耗
-      if (statueBuilding.computing_consumed) {
-        statueRecipe.inputs['computing'] =
-          (statueRecipe.inputs['computing'] || 0) + statueBuilding.computing_consumed * s.statueCount;
-      }
-    }
-    specialActive.push(statueRecipe);
-  }
 
-  // 研究所配方（机器数=labCount，固定）
-  if (s.labCount > 0 && s.labLevel) {
-    const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
-    if (meta) {
-      const labRecipe: Recipe = {
-        id: `lab_module_${s.labLevel}`,
-        name: `研究所 (${meta.name}) ×${s.labCount}`,
-        buildingId: s.labLevel,
-        buildingName: meta.name,
-        category: '研究所',
-        buildingLevel: meta.level,
-        duration: 60,
-        inputs: {},
-        outputs: { 'research': 48 * (1 + s.stationLevel * 0.05) * s.labCount },
-        upkeep: {},
-        powerMultiplier: 1,
-        workers: 0,
-        isSolar: false,
-        isHidden: true,
-        module: 'special',
-      };
-      // 输入：lab equipment、electronics iv 等
-      meta.recipes.forEach((r: any) => {
-        for (const [item, qty] of Object.entries(r.inputs)) {
-          const rate = (60 / r.duration) * (qty as number) * s.labCount;
-          labRecipe.inputs[item] = (labRecipe.inputs[item] || 0) + rate;
-        }
+    if (currentGameData) {
+      const state = useStore.getState();
+
+      const { demands: residentDemands, unityProduced, unityConsumed } = calcResidentDemands(
+        currentGameData,
+        state.population,
+        state.housingIndex,
+        state.selectedFoods,
+        state.selectedMedical,
+        state.selectedOthers,
+        state.edictLevels,
+        state.officeLevels,
+        state.researchLevels,
+        recycleRate,
+        state.stationLevel
+      );
+      useStore.getState().setUnityProduced(unityProduced);
+      useStore.getState().setUnityConsumed(unityConsumed);
+
+      const residentWasteSupplies = calcResidentWaste(
+        currentGameData,
+        residentDemands,
+        recycleRate
+      ).map(w => ({ item: w.item, rate: w.rate }));
+
+      allExternalSupplies = [...allExternalSupplies, ...residentWasteSupplies];
+
+      residentDemands.forEach(d => {
+        residentRecipe.inputs[d.item] = d.rate;
       });
-      // 维护
-      for (const [item, qty] of Object.entries(meta.upkeep || {})) {
-        labRecipe.upkeep[item.toLowerCase()] = (qty as number) * s.labCount;
+
+      residentWasteSupplies.forEach(w => {
+        residentRecipe.outputs[w.item] = w.rate;
+      });
+
+      const popWaste = currentGameData.populationWaste;
+      if (popWaste) {
+        const wasteAmount = popWaste.ratePerPop * state.population;
+        residentRecipe.outputs[popWaste.item.toLowerCase()] = (residentRecipe.outputs[popWaste.item.toLowerCase()] || 0) + wasteAmount;
+        if (DEBUG) console.log(`[调试] 人口垃圾 ${popWaste.item}: ${wasteAmount}/分`);
       }
-      specialActive.push(labRecipe);
+
+      setExternalSupplies(allExternalSupplies);
+      useStore.getState().setSolverFixedDemands(fixedDemands.filter(d => d.rate > 0));
     }
-  }
 
-  // 构建 LP（无论是否有 GameData 都会执行）
-  // 合并固定需求（只保留真正的需求，如火箭、研究设备等）
-  // 居民消耗已移入配方，不再放入 fixedDemands
-  const allFixedDemands = getFixedDemands(); // 不含居民
-  const positiveDemands = [...s.demands, ...allFixedDemands.filter(d => !ignored.has(d.item) && !excluded.has(d.item) && d.rate >= 0)];
+    const residentActive = [residentRecipe];
 
-  console.log('allowExternal value:', s.allowExternal);
-  // 临时强制设为 true
-  const effectiveAllowExternal = true;
+    // ===== 空间站模块 =====
+    const stationRecipe: Recipe = {
+      id: 'station_module',
+      name: '空间站模块',
+      buildingId: 'station',
+      buildingName: '空间站',
+      category: '空间站',
+      buildingLevel: 0,
+      duration: 60,
+      inputs: {},
+      outputs: {},
+      upkeep: {},
+      powerMultiplier: 1,
+      workers: 0,
+      isSolar: false,
+      isHidden: true,
+      module: 'station',
+    };
 
-  const { lpString, varNames, missing } = buildLp({
-    mainActive,
-    powerActive,
-    residentActive,
-    stationActive,
-    specialActive,
-    ignored,
-    demands: positiveDemands,
-    externalSupplies: allExternalSupplies,
-    reductionFactor,
-    steamLowMode: s.steamLowMode as 'internal' | 'shared',
-    excludedItems: excluded,
-    constraintMode: s.constraintMode,
-    allowExternal: effectiveAllowExternal,
-  });
+    if (s.stationLevel > 0) {
+      const rocket = ROCKET_BASE[s.rocketType];
+      const rocketCargoResearch = currentGameData?.research.find(r => r.name === '火箭载荷量');
+      const rocketCargoLevel = rocketCargoResearch ? (s.researchLevels[currentGameData.research.indexOf(rocketCargoResearch)] || 0) : 0;
+      const cargoBonus = 1 + rocketCargoLevel * 0.05;
+      const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (cargoBonus - 1);
+      const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (cargoBonus - 1);
 
-  // 保存快照供结果组件使用（顺序：主模块、电力模块、居民模块、空间站模块、特殊模块）
-  useStore.getState().setSolverActive([...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive]);
-  useStore.getState().setSolverVarNames(varNames);
-  setSolverMissing(missing);
+      const stationPartsRate = s.stationLevel * STATION_PARTS_RATE;
+      const crewSuppliesRate = Math.max(0, (s.stationLevel - 1) * 0.2);
+      let labCargoRate = 0;
+      const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
+      if (meta && s.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * s.labCount;
+      const userSpaceCargoRate = s.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).reduce((acc, d) => acc + d.rate, 0);
 
-  console.log('LP 字符串：', lpString);
+      const totalCargoRate = stationPartsRate + crewSuppliesRate + labCargoRate + userSpaceCargoRate;
+      const cargoRocketRate = cargoCap > 0 ? totalCargoRate / cargoCap : 0;
 
-  if (missing.length) {
-    const trans = s.translation;
-    setDiagnostic(`⚠️ 以下物品无生产配方：<br>${missing.map(m =>
-      `${t(m, trans)} (${m}) <span class="missing-producer" data-item="${m}">🔧 启用建筑</span>`
-    ).join('<br>')}`);
-    setTimeout(() => {
-      document.querySelectorAll('.missing-producer').forEach(el => {
-        el.addEventListener('click', () => {
-          const item = (el as HTMLElement).dataset.item;
-          if (item) {
-            useStore.getState().enableSeriesForItem(item);
-            handleSolve();
-          }
+      const crew = Math.max(0, (s.stationLevel - 1) * 2);
+      const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
+      const crewRocketRate = rocketsPerLaunch / 20;
+
+      if (stationPartsRate > 0) stationRecipe.inputs['station parts'] = stationPartsRate;
+      if (crewSuppliesRate > 0) stationRecipe.inputs['crew supplies'] = crewSuppliesRate;
+      if (labCargoRate > 0) stationRecipe.inputs['electronics iv'] = labCargoRate;
+      s.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).forEach(d => {
+        stationRecipe.inputs[d.item] = (stationRecipe.inputs[d.item] || 0) + d.rate;
+      });
+      if (crewRocketRate > 0) stationRecipe.inputs[rocket.crewKey] = crewRocketRate;
+      if (cargoRocketRate > 0) stationRecipe.inputs[rocket.cargoKey] = cargoRocketRate;
+    }
+
+    const stationActive = [stationRecipe];
+
+    // ===== 贸易模块（多选） =====
+    let tradeActive: Recipe[] = [];
+    const selectedTradeRecipes = useStore.getState().selectedTradeRecipes;
+    if (selectedTradeRecipes.length) {
+      tradeActive = [...selectedTradeRecipes];
+    }
+
+    // 构建 LP
+    const allFixedDemands = getFixedDemands();
+    const positiveDemands = [...s.demands, ...allFixedDemands.filter(d => !ignored.has(d.item) && !excluded.has(d.item) && d.rate >= 0)];
+
+    const effectiveAllowExternal = s.allowExternal;
+
+    const { lpString, varNames, missing } = buildLp({
+      mainActive,
+      powerActive,
+      residentActive,
+      stationActive,
+      specialActive,
+      tradeActive,
+      ignored,
+      demands: positiveDemands,
+      externalSupplies: allExternalSupplies,
+      reductionFactor,
+      steamLowMode: s.steamLowMode as 'internal' | 'shared',
+      excludedItems: excluded,
+      constraintMode: s.constraintMode,
+      allowExternal: effectiveAllowExternal,
+    });
+
+    useStore.getState().setSolverActive([...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive]);
+    useStore.getState().setSolverVarNames(varNames);
+    setSolverMissing(missing);
+
+    if (DEBUG) {
+      console.log('[调试] LP 字符串长度:', lpString.length);
+      console.log('[调试] 变量数量:', varNames.length);
+      console.log('[调试] 缺失物品:', missing);
+    }
+
+    if (missing.length) {
+      const trans = s.translation;
+      setDiagnostic(`⚠️ 以下物品无生产配方：<br>${missing.map(m =>
+        `${t(m, trans)} (${m}) <span class="missing-producer" data-item="${m}">🔧 启用建筑</span>`
+      ).join('<br>')}`);
+      setTimeout(() => {
+        document.querySelectorAll('.missing-producer').forEach(el => {
+          el.addEventListener('click', () => {
+            const item = (el as HTMLElement).dataset.item;
+            if (item) {
+              useStore.getState().enableSeriesForItem(item);
+              handleSolve();
+            }
+          });
         });
-      });
-    }, 0);
-    // 注意：不再 return，继续求解，让求解器报告 Infeasible
-  }
+      }, 0);
+    }
 
-  setIsSolving(true);
-  try {
-    const worker = new Worker('solver.worker.js');
-    const requestId = Date.now();
-
-    const timeoutId = setTimeout(() => {
-      worker.terminate();
-      setIsSolving(false);
-      setDiagnostic('求解超时，请简化配方选择或允许外部供给。');
-    }, 30000);
-
-    worker.onmessage = (e) => {
-      clearTimeout(timeoutId);
-      const data = e.data;
-      console.log('Solver result:', data.result);
-      if (data.error) {
-        setDiagnostic(`求解器错误: ${data.error}`);
-        setIsSolving(false);
+    setIsSolving(true);
+    try {
+      const worker = new Worker('solver.worker.js');
+      const requestId = Date.now();
+      const timeoutId = setTimeout(() => {
         worker.terminate();
-        return;
-      }
-      const result = data.result;
-      if (!result || !result.Status) {
-        setDiagnostic('求解器返回了无效结果');
         setIsSolving(false);
+        setDiagnostic('求解超时，请简化配方选择或允许外部供给。');
+      }, 30000);
+
+      worker.onmessage = (e) => {
+        clearTimeout(timeoutId);
+        const data = e.data;
+        if (DEBUG) console.log('[调试] 求解器返回:', data);
+        if (data.error) {
+          setDiagnostic(`求解器错误: ${data.error}`);
+          setIsSolving(false);
+          worker.terminate();
+          return;
+        }
+        const result = data.result;
+        if (!result || !result.Status) {
+          setDiagnostic('求解器返回了无效结果');
+          setIsSolving(false);
+          worker.terminate();
+          return;
+        }
+        setResult(result);
+        setIsSolving(false);
+        if (result.Status === 'Optimal') {
+          setDiagnostic('');
+        } else if (result.Status === 'Infeasible') {
+          const prev = useStore.getState().diagnostic;
+          setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
+        }
         worker.terminate();
-        return;
-      }
-      setResult(result);
+      };
+
+      worker.onerror = (err) => {
+        clearTimeout(timeoutId);
+        setIsSolving(false);
+        setDiagnostic(`Worker 错误: ${err.message} | 文件名: ${err.filename} | 行号: ${err.lineno}`);
+        worker.terminate();
+      };
+
+      worker.postMessage({ lpString, requestId });
+    } catch (err: any) {
       setIsSolving(false);
-      if (result.Status === 'Optimal') {
-        setDiagnostic(''); // 清除之前的警告
-      } else if (result.Status === 'Infeasible') {
-        const prev = useStore.getState().diagnostic;
-        setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
-      }
-      worker.terminate();
-    };
-
-    worker.onerror = (err) => {
-      clearTimeout(timeoutId);
-      setIsSolving(false);
-      setDiagnostic(`Worker 错误: ${err.message} | 文件名: ${err.filename} | 行号: ${err.lineno}`);
-      worker.terminate();
-    };
-
-    worker.postMessage({ lpString, requestId });
-  } catch (err: any) {
-    setIsSolving(false);
-    setDiagnostic(`求解器错误: ${err.message}`);
-  }
-}, [getFixedDemands]);
-  
-
+      setDiagnostic(`求解器错误: ${err.message}`);
+    }
+  }, [getFixedDemands, solarEfficiency, selectedTradeRecipes]); // 依赖 selectedTradeRecipes 数组
 
   return (
     <>
@@ -631,7 +668,6 @@ if (r.id.includes('Maintenance') && r.id.includes('Recycling')) {
         }}>💾 保存当前配置</Btn>
         <Btn onClick={() => {
           if (confirm('恢复默认会丢弃当前设置，确定吗？')) {
-            // 重新加载原始数据并设置默认值
             fetch('./data.json')
               .then(res => res.json())
               .then(d => {
@@ -648,6 +684,7 @@ if (r.id.includes('Maintenance') && r.id.includes('Recycling')) {
       <StatuePanel />
       <LabPanel />
       <DemandPanel onOpenDemandModal={() => setDemandModalOpen(true)} />
+      <TradePanel />
       <OptionsPanel onOpenExcludeModal={() => setExcludeModalOpen(true)} />
       <Btn onClick={() => setPopTechModalOpen(true)} disabled={!dataLoaded}>
         🏙️ 居民与科技

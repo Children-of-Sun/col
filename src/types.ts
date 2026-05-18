@@ -11,6 +11,7 @@ export interface Service {
   category: string;
   'Food Category'?: string;
   waste: number[];
+  extraWaste?: Record<string, number>;
 }
 
 export interface Edict {
@@ -51,6 +52,8 @@ export interface GameData {
   office: Office[];
   research: Research[];
   baseRecycleRate?: number;
+  docks?: DockLevel[];      // 新增：码头等级配置
+  fuels?: TradeFuel[];      // 新增：燃料配置
 }
 
 // ==================== 原始数据类型 ====================
@@ -58,14 +61,21 @@ export interface BuildingRaw {
   id: string;
   name: string;
   category: string;
+  subcategory: string;
   next_tier: string;
   workers: number;
-  electricity_consumed: number;
-  computing_consumed: number;
-  electricity_generated: number;
-  research_speed: number;
   maintenance_cost_units: string;
   maintenance_cost_quantity: number;
+  electricity_consumed: number;
+  electricity_generated: number;
+  computing_consumed: number;
+  computing_generated: number;
+  product_type: string;
+  storage_capacity: number;
+  unity_cost: number;
+  research_speed: number;
+  icon_path: string;
+  build_costs: { product: string; quantity: number }[];
   recipes: RecipeRaw[];
 }
 
@@ -109,7 +119,8 @@ export interface Recipe {
   workers: number;
   isSolar: boolean;
   isHidden: boolean;
-  module: 'main' | 'power' | 'resident' | 'station' | 'special';
+  module: 'main' | 'power' | 'resident' | 'station' | 'special' | 'trade';   // 增加 'trade'
+  isLab?: boolean;
 }
 
 export interface LabMeta {
@@ -146,7 +157,6 @@ export interface ParsedData {
 
 // ==================== Store 状态类型 ====================
 export interface StoreState {
-  // 原始数据
   fullData: DataJson | null;
   recipes: Recipe[];
   allItems: string[];
@@ -156,41 +166,31 @@ export interface StoreState {
   labMeta: LabMeta[];
   dataLoaded: boolean;
 
-  // 主模块状态
   mainEnabled: Record<string, boolean>;
   mainSelectedLevel: Record<string, number>;
-
-  // 电力模块状态
   powerEnabled: Record<string, boolean>;
   powerSelectedLevel: Record<string, number>;
-
-  // 配方启用
   recipeEnabled: Record<string, boolean>;
-  mainBuildingEnabledMap: Record<string, boolean>;  // 主模块建筑启用状态（独立于系列）
-  powerBuildingEnabledMap: Record<string, boolean>; // 电力模块建筑启用状态（独立于系列）
+  mainBuildingEnabledMap: Record<string, boolean>;
+  powerBuildingEnabledMap: Record<string, boolean>;
 
-  // 需求
   demands: Demand[];
 
-  // 固定实体
   stationLevel: number;
   rocketType: number;
-  techLevel: number;
   statueCount: number;
   labLevel: string;
   labCount: number;
   steamLowMode: 'internal' | 'shared' | 'mainonly';
 
-  // 选项
   ignoredItems: string[];
   allowExternal: boolean;
   hideStage: boolean;
   diagnosticMode: boolean;
   excludedItems: string[];
-  constraintMode: 'noProd' | 'noProdOrCons';  // 约束模式
-  showTinyErrors: boolean;                      // 显示微小误差
+  constraintMode: 'noProd' | 'noProdOrCons';
+  showTinyErrors: boolean;
 
-  // 求解结果
   result: SolverResult | null;
   isSolving: boolean;
   diagnostic: string;
@@ -200,11 +200,9 @@ export interface StoreState {
   unityConsumed: number;
   externalSupplies: { item: string; rate: number }[];
 
-  // 求解时的配方快照
   solverActive: Recipe[];
   solverVarNames: string[];
 
-  // 居民/科技
   gameData: GameData | null;
   population: number;
   housingIndex: number;
@@ -215,7 +213,17 @@ export interface StoreState {
   officeLevels: number[];
   researchLevels: number[];
 
-  // Actions
+  // 贸易模块
+  tradeContracts: TradeContract[];
+  tradeSetup: TradeSetup;
+  setTradeContracts: (contracts: TradeContract[]) => void;
+  setTradeContract: (contractId: string) => void;
+  setTradeDockLevel: (level: number) => void;
+  setTradeFuel: (fuelName: string) => void;
+
+  // Actions (原有省略，只保留新加的)
+  // ... 所有现有的 actions (loadData, setMainEnabled 等) 都已经在 stores.ts 中实现，此处不重复列出
+  // 但由于 TypeScript 接口要求，这里只是省略展开，实际项目中应当包含所有已有声明
   loadData: (json: DataJson) => void;
   loadTranslation: (json: Record<string, string>) => void;
   setMainEnabled: (name: string, value: boolean) => void;
@@ -229,7 +237,6 @@ export interface StoreState {
   removeDemand: (index: number) => void;
   setStationLevel: (v: number) => void;
   setRocketType: (v: number) => void;
-  setTechLevel: (v: number) => void;
   setStatueCount: (v: number) => void;
   setLabLevel: (v: string) => void;
   setLabCount: (v: number) => void;
@@ -268,4 +275,34 @@ export interface StoreState {
 export interface SolverResult {
   status: string;
   columns: Record<string, { Primal: number }>;
+}
+
+// ==================== 贸易模块类型 ====================
+export interface TradeContract {
+  id: string;
+  name: string;
+  buyItem: string;      // 买入物品
+  sellItem: string;     // 卖出物品
+  buyRate: number;      // 买入比例
+  sellRate: number;     // 卖出比例
+}
+
+export interface DockLevel {
+  level: number;
+  slots: number;
+  moduleCapacity: number;
+  speedMultiplier: number;
+}
+
+export interface TradeFuel {
+  name: string;
+  speedMultiplier: number;
+  consumptionPerTrip: number;
+  cohesionCost: number;
+}
+
+export interface TradeSetup {
+  contractId: string;
+  dockLevel: number;
+  fuelName: string;
 }

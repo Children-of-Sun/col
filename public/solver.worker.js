@@ -1,7 +1,6 @@
 function init() {
   if (!self.Module) {
-    // 使用 CDN 上的 HiGHS（确保支持跨域）
-    importScripts('https://cdn.jsdelivr.net/npm/highs@1.5.1/highs.js');
+    importScripts('./highs.js');
   }
 }
 

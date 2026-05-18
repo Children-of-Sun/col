@@ -3,6 +3,7 @@ import { useStore } from '../stores';
 import { Btn, Checkbox, Select } from './UI';
 import { t, isPowerBuilding, HIDDEN_SERIES, ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getMaintenanceReduction, getSeriesName } from '../utils';
 import { Recipe, Series } from '../types';
+import { ModalShell } from './UI';
 
 // ==================== 建筑等级面板（主模块） ====================
 export const MainLevelPanel: React.FC<{ onOpenLevelModal: () => void; onOpenRecipeModal: () => void }> = ({ onOpenLevelModal, onOpenRecipeModal }) => {
@@ -41,16 +42,14 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
   const dataLoaded = useStore(s => s.dataLoaded);
   const steamLowMode = useStore(s => s.steamLowMode);
   const setSteamLowMode = useStore(s => s.setSteamLowMode);
+  const solarEfficiency = useStore(s => s.solarEfficiency);
+  const setSolarEfficiency = useStore(s => s.setSolarEfficiency);
 
-  // 当系列启用状态或等级改变时，自动同步该系列对应的电力配方
-  // 修改：只禁用不启用（配方启用状态独立）
   const syncRecipes = (seriesName: string, enabled: boolean, level: number) => {
     const series = powerSeriesList.find(ps => ps.name === seriesName);
     if (!series) return;
     const levelEntry = series.levels.find(lv => lv.level === level);
     if (!levelEntry) return;
-    // 遍历该等级的所有 recipeId，找出 module === 'power' 的配方
-    // 只在禁用时同步，启用时保持配方原有状态
     if (!enabled) {
       levelEntry.recipeIds.forEach(rid => {
         const recipe = recipes.find(r => r.id === rid && r.module === 'power');
@@ -74,11 +73,9 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
                 onChange={e => {
                   const checked = e.target.checked;
                   setPowerEnabled(ps.name, checked);
-                  // 若启用，默认选最高级（不强制开启配方）；否则禁用所有配方
                   if (checked) {
                     const maxLv = ps.levels[ps.levels.length - 1].level;
                     setPowerLevel(ps.name, maxLv);
-                    // 启用时不强制开启配方
                   } else {
                     syncRecipes(ps.name, false, powerSelectedLevel[ps.name] || ps.levels[0].level);
                   }
@@ -92,10 +89,8 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
                   const lv = parseInt(v);
                   setPowerLevel(ps.name, lv);
                   if (!powerEnabled[ps.name]) {
-                    // 如果当前系列未启用，自动启用
                     setPowerEnabled(ps.name, true);
                   }
-                  // 不再强制开启配方
                 }}
               />
             </div>
@@ -119,6 +114,23 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
           </label>
         ))}
       </div>
+      {/* 太阳能有效功率设置 */}
+      <div style={{ marginTop: 12, borderTop: '1px solid #ddd', paddingTop: 8 }}>
+        <label>☀️ {t('太阳能有效功率', translation)}: </label>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={solarEfficiency}
+          onChange={e => setSolarEfficiency(parseFloat(e.target.value))}
+          style={{ width: 200, verticalAlign: 'middle' }}
+        />
+        <span style={{ marginLeft: 8 }}>
+          {Math.round(solarEfficiency * 100)}%
+        </span>
+        <span className="hint" style={{ marginLeft: 8 }}>{t('（仅影响太阳能面板输出）', translation)}</span>
+      </div>
     </div>
   );
 };
@@ -127,20 +139,25 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
 export const SpaceStationPanel: React.FC = () => {
   const stationLevel = useStore(s => s.stationLevel);
   const rocketType = useStore(s => s.rocketType);
-  const techLevel = useStore(s => s.techLevel);
   const setStationLevel = useStore(s => s.setStationLevel);
   const setRocketType = useStore(s => s.setRocketType);
-  const setTechLevel = useStore(s => s.setTechLevel);
   const demands = useStore(s => s.demands);
   const labLevel = useStore(s => s.labLevel);
   const labCount = useStore(s => s.labCount);
   const labMeta = useStore(s => s.labMeta);
   const translation = useStore(s => s.translation);
   const dataLoaded = useStore(s => s.dataLoaded);
+  const gameData = useStore(s => s.gameData);
+  const researchLevels = useStore(s => s.researchLevels);
+
+  // 从研究等级获取火箭载荷量加成
+  const rocketCargoResearch = gameData?.research.find(r => r.name === '火箭载荷量');
+  const rocketCargoLevel = rocketCargoResearch ? (researchLevels[gameData.research.indexOf(rocketCargoResearch)] || 0) : 0;
+  const cargoBonus = 1 + rocketCargoLevel * 0.05;
 
   const rocket = ROCKET_BASE[rocketType];
-  const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (techLevel / 10);
-  const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (techLevel / 10);
+  const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (cargoBonus - 1);
+  const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (cargoBonus - 1);
   const crew = stationLevel === 0 ? 0 : Math.max(0, (stationLevel - 1) * 2);
   const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
   const crewRocketRate = rocketsPerLaunch / 20;
@@ -172,9 +189,8 @@ export const SpaceStationPanel: React.FC = () => {
           <option value={0}>Rocket T1</option><option value={1}>Rocket T2</option>
         </select></label>
       </div>
-      <div className="space-station-row slider-container">
-        <label>火箭科技: <span>{techLevel}</span></label>
-        <input type="range" min={0} max={10} value={techLevel} step={1} style={{ width: 150 }} disabled={!dataLoaded} onChange={e => setTechLevel(parseInt(e.target.value))} />
+      <div className="space-station-row">
+        <span>火箭载荷科技: <b>Lv{rocketCargoLevel}</b> (加成 {((cargoBonus-1)*100).toFixed(0)}%)</span>
       </div>
       <div className="space-station-row">
         <span>人口: <b>{crew}</b></span>
@@ -197,7 +213,6 @@ export const StatuePanel: React.FC = () => {
   const dataLoaded = useStore(s => s.dataLoaded);
   const fullData = useStore(s => s.fullData);
 
-  // 从数据中读取雕像建筑信息
   const statueBuilding = fullData?.machines_and_buildings?.find(
     (b: any) => b.name === 'The Statue of Maintenance'
   );
@@ -239,11 +254,16 @@ export const LabPanel: React.FC = () => {
   const translation = useStore(s => s.translation);
   const dataLoaded = useStore(s => s.dataLoaded);
 
+  const [labRecipeModalOpen, setLabRecipeModalOpen] = useState(false);
+  const recipeEnabled = useStore(s => s.recipeEnabled);
+  const setRecipeEnabled = useStore(s => s.setRecipeEnabled);
+
   const meta = labMeta.find(l => l.buildingId === labLevel);
   let researchOutput = 0;
   const labEqMap = new Map<string, number>();
   if (meta && labCount > 0) {
     meta.recipes.forEach(r => {
+      if (!recipeEnabled[r.id]) return;
       Object.entries(r.inputs).forEach(([item, qty]) => {
         if (item.startsWith('lab equipment') || item === 'electronics iv') {
           const rate = (60 / r.duration) * qty * labCount;
@@ -274,7 +294,43 @@ export const LabPanel: React.FC = () => {
         ) : (
           <span>无设备消耗</span>
         )}
+        <Btn onClick={() => setLabRecipeModalOpen(true)} disabled={!dataLoaded} style={{ marginLeft: 10 }}>🧪 配方选择</Btn>
       </div>
+
+      {/* 研究所配方选择模态框 */}
+      <ModalShell open={labRecipeModalOpen} onClose={() => setLabRecipeModalOpen(false)} title="研究所配方选择" maxWidth="700px">
+        {meta && (
+          <div>
+            <h4>{meta.name}</h4>
+            {meta.recipes.map(r => (
+              <div key={r.id} style={{ marginBottom: 8, borderBottom: '1px solid #eee', padding: 6 }}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={recipeEnabled[r.id] !== false}
+                    onChange={e => {
+                      const checked = e.target.checked;
+                      if (checked) {
+                        // 勾选当前配方时，禁用同一研究所的其他配方
+                        meta.recipes.forEach(other => {
+                          if (other.id !== r.id && recipeEnabled[other.id]) {
+                            setRecipeEnabled(other.id, false);
+                          }
+                        });
+                      }
+                      setRecipeEnabled(r.id, checked);
+                    }}
+                  />
+                  {' '}{r.id}
+                </label>
+              </div>
+            ))}
+          </div>
+        )}
+        <div style={{ marginTop: 10, textAlign: 'right' }}>
+          <Btn onClick={() => setLabRecipeModalOpen(false)}>关闭</Btn>
+        </div>
+      </ModalShell>
     </div>
   );
 };
