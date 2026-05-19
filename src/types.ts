@@ -266,8 +266,8 @@ export interface StoreState {
   setSolverVarNames: (names: string[]) => void;
   setSolverMissing: (missing: string[]) => void;
   setSolverFixedDemands: (demands: Demand[]) => void;
-  setUnityProduced: (v: number) => void;
-  setUnityConsumed: (v: number) => void;
+  setUnityProduction: (v: number) => void;
+  setUnityConsumption: (v: number) => void;
   setExternalSupplies: (supplies: { item: string; rate: number }[]) => void;
   importSettings: (s: any) => void;
   exportSettings: () => any;

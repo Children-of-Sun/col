@@ -68,7 +68,7 @@ export const ROCKET_BASE = [
 ];
 
 export const STATION_PARTS_RATE = 0.25;
-export const CREW_SUPPLIES_RATE = 0.2;
+export const CREW_SUPPLIES_RATE = 0.4;
 export const SPACE_CARGO_ITEMS = new Set(["station parts","crew supplies","electronics iv","asteroid booster parts","space probe parts"]);
 
 export function getSeriesName(
@@ -271,9 +271,11 @@ export function calcResidentDemands(
     }
   });
 
-  let netUnity = (unityProduced + unityConsumed) * housingMult * (1 + officeUnityPct) * (1 + stationLevel * 0.05);
+  const multFactor = housingMult * (1 + officeUnityPct) * (1 + stationLevel * 0.05);
+  const unityProduction = unityProduced * multFactor;
+  const unityConsumption = Math.abs(unityConsumed) * multFactor;
 
-  return { demands, unityProduced: netUnity, unityConsumed: 0, recycleRate };
+  return { demands, unityProduction, unityConsumption, recycleRate };
 }
 
 export function calcResidentWaste(

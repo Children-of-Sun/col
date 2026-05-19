@@ -1,8 +1,13 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { Btn } from './UI';
-import { t, getMaintenanceReduction, isNonScalable } from '../utils';
+import { t, getMaintenanceReduction } from '../utils';
 import { Recipe } from '../types';
+
+// 判断物品是否为持续类型（不缩放）
+const isContinuous = (item: string): boolean => {
+  return item === 'electricity' || item === 'computing' || item === '人力' || item === 'mechanical power';
+};
 
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number) {
   // 贸易配方特殊处理
@@ -22,25 +27,28 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
   }
 
   // 非贸易配方
-  const getScale = (item: string) => isNonScalable(item) ? 1 : (60 / recipe.duration);
   const inputs: Record<string, number> = {};
   const outputs: Record<string, number> = {};
   let workers = 0, electricity = 0, computing = 0, maintI = 0, maintII = 0, maintIII = 0;
 
-  // 处理 inputs
   for (const [item, qty] of Object.entries(recipe.inputs)) {
-    const scale = getScale(item);
+    const isContinuousItem = isContinuous(item);
+    const isMaintenanceOutput = false; // 输入不涉及维护产出
+    let scale = 1;
+    if (!isContinuousItem) scale = 60 / recipe.duration;
     inputs[item] = (inputs[item] || 0) + qty * scale * machineCount;
   }
-  // 处理 outputs
   for (const [item, qty] of Object.entries(recipe.outputs)) {
-    const scale = getScale(item);
+    const isContinuousItem = isContinuous(item);
+    const isMaintenanceOutput = (item === 'maintenance i' || item === 'maintenance ii' || item === 'maintenance iii');
+    let scale = 1;
+    if (isMaintenanceOutput) scale = 60 / recipe.duration;
+    else if (!isContinuousItem) scale = 60 / recipe.duration;
     outputs[item] = (outputs[item] || 0) + qty * scale * machineCount;
   }
-  // 处理 upkeep：将所有消耗加入 inputs
   for (const [item, qty] of Object.entries(recipe.upkeep)) {
-    const scale = getScale(item);
-    let reducedQty = qty * scale * machineCount;
+    // upkeep 永远不缩放
+    let reducedQty = qty * machineCount;
     if (item.startsWith('maintenance')) {
       reducedQty *= (1 - reductionFactor);
     }
@@ -68,7 +76,7 @@ const SummaryTable: React.FC<{
   splitMode?: boolean;
 }> = ({ data, showTinyErrors, translation, splitMode = false }) => {
   const forcedOrder = ['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research'];
-  const alwaysShow = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research']);
+  const alwaysShow = new Set(forcedOrder);
   const allItems = new Set([...Object.keys(data.prod), ...Object.keys(data.cons)]);
   const items = Array.from(allItems).sort();
   const filtered = items.filter(item => {
@@ -78,7 +86,6 @@ const SummaryTable: React.FC<{
       const cons = data.cons[item] || 0;
       const net = Math.abs(prod - cons);
       const maxVal = Math.max(prod, cons);
-      // 净产出小于 0.01 或者 净产出/最大值 < 0.01 (1%) 时隐藏
       if (net < 0.01 || (maxVal > 0 && net / maxVal < 0.01)) return false;
     }
     return true;
@@ -89,37 +96,21 @@ const SummaryTable: React.FC<{
     return { item, prod, cons, net };
   });
 
-  // 分离强制显示的物品和其他物品
   let forcedItems: { item: string; prod: number; cons: number; net: number }[] = [];
   let otherItems: { item: string; prod: number; cons: number; net: number }[] = [];
   filtered.forEach(item => {
-    if (forcedOrder.includes(item.item)) {
-      forcedItems.push(item);
-    } else {
-      otherItems.push(item);
-    }
+    if (forcedOrder.includes(item.item)) forcedItems.push(item);
+    else otherItems.push(item);
   });
-
-  // 按照 forcedOrder 排序 forcedItems
   forcedItems.sort((a, b) => forcedOrder.indexOf(a.item) - forcedOrder.indexOf(b.item));
-
-  // 其他物品按字母顺序排序
   otherItems.sort((a, b) => a.item.localeCompare(b.item));
-
   const finalItems = [...forcedItems, ...otherItems];
 
   if (!splitMode) {
     return (
       <div className="table-wrapper">
         <table className="data-table">
-          <thead>
-            <tr>
-              <th>{t('物品', translation)}</th>
-              <th>{t('产出/分', translation)}</th>
-              <th>{t('消耗/分', translation)}</th>
-              <th>{t('净产出', translation)}</th>
-            </tr>
-          </thead>
+          <thead><tr><th>{t('物品', translation)}</th><th>{t('产出/分', translation)}</th><th>{t('消耗/分', translation)}</th><th>{t('净产出', translation)}</th></tr></thead>
           <tbody>
             {finalItems.map(({ item, prod, cons, net }) => (
               <tr key={item}>
@@ -144,37 +135,23 @@ const SummaryTable: React.FC<{
     <div className="split-summary">
       <div className="split-column">
         <table className="data-table">
-          <thead>
-            <tr><th>{t('净产出 (正)', translation)}</th><th>{t('数量/分', translation)}</th></tr>
-          </thead>
+          <thead><tr><th>{t('净产出 (正)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
           <tbody>
             {positiveItems.map(({ item, net }) => (
-              <tr key={item}>
-                <td>{t(item, translation)}</td>
-                <td className="positive-value">+{net.toFixed(4)}</td>
-              </tr>
+              <tr key={item}><td>{t(item, translation)}</td><td className="positive-value">+{net.toFixed(4)}</td></tr>
             ))}
-            {Array.from({ length: maxRows - positiveItems.length }).map((_, i) => (
-              <tr key={`empty-pos-${i}`}><td colSpan={2}>&nbsp;</td></tr>
-            ))}
+            {Array.from({ length: maxRows - positiveItems.length }).map((_, i) => <tr key={`empty-pos-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
           </tbody>
         </table>
       </div>
       <div className="split-column">
         <table className="data-table">
-          <thead>
-            <tr><th>{t('净消耗 (负)', translation)}</th><th>{t('数量/分', translation)}</th></tr>
-          </thead>
+          <thead><tr><th>{t('净消耗 (负)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
           <tbody>
             {negativeItems.map(({ item, net }) => (
-              <tr key={item}>
-                <td>{t(item, translation)}</td>
-                <td className="negative-value">{net.toFixed(4)}</td>
-              </tr>
+              <tr key={item}><td>{t(item, translation)}</td><td className="negative-value">{net.toFixed(4)}</td></tr>
             ))}
-            {Array.from({ length: maxRows - negativeItems.length }).map((_, i) => (
-              <tr key={`empty-neg-${i}`}><td colSpan={2}>&nbsp;</td></tr>
-            ))}
+            {Array.from({ length: maxRows - negativeItems.length }).map((_, i) => <tr key={`empty-neg-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
           </tbody>
         </table>
       </div>
@@ -186,6 +163,7 @@ const RecipeList: React.FC<{
   recipes: { recipe: Recipe; count: number; perMin: any }[];
   translation: Record<string, string>;
 }> = ({ recipes, translation }) => {
+  const isTrade = recipes.length > 0 && recipes[0].recipe.module === 'trade';
   return (
     <div className="table-wrapper">
       <table className="data-table">
@@ -197,6 +175,7 @@ const RecipeList: React.FC<{
             <th>{t('电力/分', translation)}</th>
             <th>{t('算力/分', translation)}</th>
             <th>{t('维护', translation)}</th>
+            {isTrade && <th>{t('凝聚力消耗/分', translation)}</th>}
             <th>{t('投入/分', translation)}</th>
             <th>{t('产出/分', translation)}</th>
           </tr>
@@ -213,6 +192,11 @@ const RecipeList: React.FC<{
             if (pm.maintII > 0) maintParts.push(`M II:${pm.maintII.toFixed(2)}`);
             if (pm.maintIII > 0) maintParts.push(`M III:${pm.maintIII.toFixed(2)}`);
             const maintStr = maintParts.join(' ') || '-';
+            let cohesionConsumption = '';
+            if (isTrade) {
+              const unityVal = pm.inputs['凝聚力'] || 0;
+              cohesionConsumption = unityVal.toFixed(4);
+            }
             return (
               <tr key={idx}>
                 <td>{t(r.name, translation)}</td>
@@ -221,6 +205,7 @@ const RecipeList: React.FC<{
                 <td>{pm.electricity.toFixed(2)}</td>
                 <td>{pm.computing.toFixed(2)}</td>
                 <td>{maintStr}</td>
+                {isTrade && <td>{cohesionConsumption}</td>}
                 <td>{inputs}</td>
                 <td>{outputs}</td>
               </tr>
@@ -295,8 +280,8 @@ export const Results: React.FC = () => {
   const statueCount = useStore(s => s.statueCount);
   const showTinyErrors = useStore(s => s.showTinyErrors);
   const setShowTinyErrors = useStore(s => s.setShowTinyErrors);
-  const unityProduced = useStore(s => s.unityProduced);
-
+  const unityProduction = useStore(s => s.unityProduction);
+  const unityConsumption = useStore(s => s.unityConsumption);
   const [selectedTab, setSelectedTab] = useState<string>('全厂总览');
 
   const varValues = useMemo(() => {
@@ -335,9 +320,7 @@ export const Results: React.FC = () => {
       const pm = item.perMin;
       if (r.module === 'main') {
         const cat = r.category || '其他';
-        if (!mainCategories[cat]) {
-          mainCategories[cat] = { recipes: [], prod: {}, cons: {}, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount: 0 };
-        }
+        if (!mainCategories[cat]) mainCategories[cat] = { recipes: [], prod: {}, cons: {}, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount: 0 };
         const catObj = mainCategories[cat];
         catObj.recipes.push(item);
         mergeResources(catObj.prod, pm.outputs);
@@ -349,78 +332,49 @@ export const Results: React.FC = () => {
         catObj.maintII += pm.maintII;
         catObj.maintIII += pm.maintIII;
         catObj.machineCount += item.machineCount;
-      } else if (r.module === 'power') {
-        powerRecipes.push(item);
-      } else if (r.module === 'trade') {
-        tradeRecipes.push(item);
-      } else if (r.module === 'resident' || r.module === 'station' || r.module === 'special') {
-        specialRecipes.push(item);
-      }
+      } else if (r.module === 'power') powerRecipes.push(item);
+      else if (r.module === 'trade') tradeRecipes.push(item);
+      else if (r.module === 'resident' || r.module === 'station' || r.module === 'special') specialRecipes.push(item);
     }
 
-    let powerProd: Record<string, number> = {};
-    let powerCons: Record<string, number> = {};
-    let powerWorkers = 0, powerElectricity = 0, powerComputing = 0, powerMaintI = 0, powerMaintII = 0, powerMaintIII = 0, powerMachineCount = 0;
+    let powerProd = {}, powerCons = {}, powerWorkers=0, powerElectricity=0, powerComputing=0, powerMaintI=0, powerMaintII=0, powerMaintIII=0, powerMachineCount=0;
     for (const item of powerRecipes) {
       const pm = item.perMin;
       mergeResources(powerProd, pm.outputs);
       mergeResources(powerCons, pm.inputs);
-      powerWorkers += pm.workers;
-      powerElectricity += pm.electricity;
-      powerComputing += pm.computing;
-      powerMaintI += pm.maintI;
-      powerMaintII += pm.maintII;
-      powerMaintIII += pm.maintIII;
+      powerWorkers += pm.workers; powerElectricity += pm.electricity; powerComputing += pm.computing;
+      powerMaintI += pm.maintI; powerMaintII += pm.maintII; powerMaintIII += pm.maintIII;
       powerMachineCount += item.machineCount;
     }
-
-    let tradeProd: Record<string, number> = {};
-    let tradeCons: Record<string, number> = {};
-    let tradeWorkers = 0, tradeElectricity = 0, tradeComputing = 0, tradeMaintI = 0, tradeMaintII = 0, tradeMaintIII = 0, tradeMachineCount = 0;
+    let tradeProd = {}, tradeCons = {}, tradeWorkers=0, tradeElectricity=0, tradeComputing=0, tradeMaintI=0, tradeMaintII=0, tradeMaintIII=0, tradeMachineCount=0;
     for (const item of tradeRecipes) {
       const pm = item.perMin;
       mergeResources(tradeProd, pm.outputs);
       mergeResources(tradeCons, pm.inputs);
-      tradeWorkers += pm.workers;
-      tradeElectricity += pm.electricity;
-      tradeComputing += pm.computing;
-      tradeMaintI += pm.maintI;
-      tradeMaintII += pm.maintII;
-      tradeMaintIII += pm.maintIII;
+      tradeWorkers += pm.workers; tradeElectricity += pm.electricity; tradeComputing += pm.computing;
+      tradeMaintI += pm.maintI; tradeMaintII += pm.maintII; tradeMaintIII += pm.maintIII;
       tradeMachineCount += item.machineCount;
     }
-
-    let specialProd: Record<string, number> = {};
-    let specialCons: Record<string, number> = {};
-    let specialWorkers = 0, specialElectricity = 0, specialComputing = 0, specialMaintI = 0, specialMaintII = 0, specialMaintIII = 0, specialMachineCount = 0;
+    let specialProd = {}, specialCons = {}, specialWorkers=0, specialElectricity=0, specialComputing=0, specialMaintI=0, specialMaintII=0, specialMaintIII=0, specialMachineCount=0;
     for (const item of specialRecipes) {
       const pm = item.perMin;
       mergeResources(specialProd, pm.outputs);
       mergeResources(specialCons, pm.inputs);
-      specialWorkers += pm.workers;
-      specialElectricity += pm.electricity;
-      specialComputing += pm.computing;
-      specialMaintI += pm.maintI;
-      specialMaintII += pm.maintII;
-      specialMaintIII += pm.maintIII;
+      specialWorkers += pm.workers; specialElectricity += pm.electricity; specialComputing += pm.computing;
+      specialMaintI += pm.maintI; specialMaintII += pm.maintII; specialMaintIII += pm.maintIII;
       specialMachineCount += item.machineCount;
     }
 
-    const allProd: Record<string, number> = {};
-    const allCons: Record<string, number> = {};
-    let allWorkers = 0, allElectricity = 0, allComputing = 0, allMaintI = 0, allMaintII = 0, allMaintIII = 0, allMachineCount = 0;
+    const allProd = {}, allCons = {};
+    let allWorkers=0, allElectricity=0, allComputing=0, allMaintI=0, allMaintII=0, allMaintIII=0, allMachineCount=0;
     const allCategories = [...Object.values(mainCategories), { prod: powerProd, cons: powerCons, workers: powerWorkers, electricity: powerElectricity, computing: powerComputing, maintI: powerMaintI, maintII: powerMaintII, maintIII: powerMaintIII, machineCount: powerMachineCount },
       { prod: tradeProd, cons: tradeCons, workers: tradeWorkers, electricity: tradeElectricity, computing: tradeComputing, maintI: tradeMaintI, maintII: tradeMaintII, maintIII: tradeMaintIII, machineCount: tradeMachineCount },
       { prod: specialProd, cons: specialCons, workers: specialWorkers, electricity: specialElectricity, computing: specialComputing, maintI: specialMaintI, maintII: specialMaintII, maintIII: specialMaintIII, machineCount: specialMachineCount }];
     for (const cat of allCategories) {
       mergeResources(allProd, cat.prod);
       mergeResources(allCons, cat.cons);
-      allWorkers += cat.workers;
-      allElectricity += cat.electricity;
-      allComputing += cat.computing;
-      allMaintI += cat.maintI;
-      allMaintII += cat.maintII;
-      allMaintIII += cat.maintIII;
+      allWorkers += cat.workers; allElectricity += cat.electricity; allComputing += cat.computing;
+      allMaintI += cat.maintI; allMaintII += cat.maintII; allMaintIII += cat.maintIII;
       allMachineCount += cat.machineCount;
     }
 
@@ -439,116 +393,79 @@ export const Results: React.FC = () => {
   }, [categoryData.mainCategories]);
 
   const currentData = useMemo(() => {
-    if (selectedTab === '全厂总览') {
-      return { type: 'overview', ...categoryData.all };
-    } else if (selectedTab === '电力模块') {
-      return { type: 'power', ...categoryData.power };
-    } else if (selectedTab === '贸易模块') {
-      return { type: 'trade', ...categoryData.trade };
-    } else if (selectedTab === '特殊模块') {
-      return { type: 'special', ...categoryData.special };
-    } else {
-      const cat = categoryData.mainCategories[selectedTab];
-      if (cat) return { type: 'category', ...cat };
-      return null;
-    }
+    if (selectedTab === '全厂总览') return { type: 'overview', ...categoryData.all };
+    if (selectedTab === '电力模块') return { type: 'power', ...categoryData.power };
+    if (selectedTab === '贸易模块') return { type: 'trade', ...categoryData.trade };
+    if (selectedTab === '特殊模块') return { type: 'special', ...categoryData.special };
+    const cat = categoryData.mainCategories[selectedTab];
+    return cat ? { type: 'category', ...cat } : null;
   }, [selectedTab, categoryData]);
 
   const moduleRows = useMemo(() => {
-    const rows: {
-      name: string;
-      machineCount: number;
-      workers: number;
-      netElectricity: number;
-      computing: number;
-      totalMaintenance: number;
-      netProds: { item: string; net: number }[];
-      netCons: { item: string; net: number }[];
-    }[] = [];
-
+    const rows: any[] = [];
     for (const [name, cat] of Object.entries(categoryData.mainCategories)) {
-      const prodElec = cat.prod['electricity'] || 0;
-      const consElec = cat.cons['electricity'] || 0;
+      const prodElec = cat.prod['electricity'] || 0, consElec = cat.cons['electricity'] || 0;
       const netElectricity = prodElec - consElec;
       const totalMaintenance = cat.maintI + cat.maintII + cat.maintIII;
       const allItems = new Set([...Object.keys(cat.prod), ...Object.keys(cat.cons)]);
       const netMap: Record<string, number> = {};
       for (const item of allItems) {
-        const prod = cat.prod[item] || 0;
-        const cons = cat.cons[item] || 0;
-        const net = prod - cons;
+        const prod = cat.prod[item] || 0, cons = cat.cons[item] || 0, net = prod - cons;
         if (Math.abs(net) > 1e-6) netMap[item] = net;
       }
       const netProds = Object.entries(netMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net }));
       const netCons = Object.entries(netMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net }));
       rows.push({ name, machineCount: cat.machineCount, workers: cat.workers, netElectricity, computing: cat.computing, totalMaintenance, netProds, netCons });
     }
-
+    // 电力模块
     const powerNetElec = (categoryData.power.prod['electricity'] || 0) - (categoryData.power.cons['electricity'] || 0);
     const powerAllItems = new Set([...Object.keys(categoryData.power.prod), ...Object.keys(categoryData.power.cons)]);
     const powerNetMap: Record<string, number> = {};
     for (const item of powerAllItems) {
-      const prod = categoryData.power.prod[item] || 0;
-      const cons = categoryData.power.cons[item] || 0;
-      const net = prod - cons;
+      const prod = categoryData.power.prod[item] || 0, cons = categoryData.power.cons[item] || 0, net = prod - cons;
       if (Math.abs(net) > 1e-6) powerNetMap[item] = net;
     }
     rows.push({
-      name: '电力模块',
-      machineCount: categoryData.power.machineCount,
-      workers: categoryData.power.workers,
-      netElectricity: powerNetElec,
-      computing: categoryData.power.computing,
+      name: '电力模块', machineCount: categoryData.power.machineCount, workers: categoryData.power.workers,
+      netElectricity: powerNetElec, computing: categoryData.power.computing,
       totalMaintenance: categoryData.power.maintI + categoryData.power.maintII + categoryData.power.maintIII,
       netProds: Object.entries(powerNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(powerNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
-
+    // 贸易模块
     const tradeNetElec = (categoryData.trade.prod['electricity'] || 0) - (categoryData.trade.cons['electricity'] || 0);
     const tradeAllItems = new Set([...Object.keys(categoryData.trade.prod), ...Object.keys(categoryData.trade.cons)]);
     const tradeNetMap: Record<string, number> = {};
     for (const item of tradeAllItems) {
-      const prod = categoryData.trade.prod[item] || 0;
-      const cons = categoryData.trade.cons[item] || 0;
-      const net = prod - cons;
+      const prod = categoryData.trade.prod[item] || 0, cons = categoryData.trade.cons[item] || 0, net = prod - cons;
       if (Math.abs(net) > 1e-6) tradeNetMap[item] = net;
     }
     rows.push({
-      name: '贸易模块',
-      machineCount: categoryData.trade.machineCount,
-      workers: categoryData.trade.workers,
-      netElectricity: tradeNetElec,
-      computing: categoryData.trade.computing,
+      name: '贸易模块', machineCount: categoryData.trade.machineCount, workers: categoryData.trade.workers,
+      netElectricity: tradeNetElec, computing: categoryData.trade.computing,
       totalMaintenance: categoryData.trade.maintI + categoryData.trade.maintII + categoryData.trade.maintIII,
       netProds: Object.entries(tradeNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(tradeNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
-
+    // 特殊模块
     const specialNetElec = (categoryData.special.prod['electricity'] || 0) - (categoryData.special.cons['electricity'] || 0);
     const specialAllItems = new Set([...Object.keys(categoryData.special.prod), ...Object.keys(categoryData.special.cons)]);
     const specialNetMap: Record<string, number> = {};
     for (const item of specialAllItems) {
-      const prod = categoryData.special.prod[item] || 0;
-      const cons = categoryData.special.cons[item] || 0;
-      const net = prod - cons;
+      const prod = categoryData.special.prod[item] || 0, cons = categoryData.special.cons[item] || 0, net = prod - cons;
       if (Math.abs(net) > 1e-6) specialNetMap[item] = net;
     }
     rows.push({
-      name: '特殊模块',
-      machineCount: categoryData.special.machineCount,
-      workers: categoryData.special.workers,
-      netElectricity: specialNetElec,
-      computing: categoryData.special.computing,
+      name: '特殊模块', machineCount: categoryData.special.machineCount, workers: categoryData.special.workers,
+      netElectricity: specialNetElec, computing: categoryData.special.computing,
       totalMaintenance: categoryData.special.maintI + categoryData.special.maintII + categoryData.special.maintIII,
       netProds: Object.entries(specialNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(specialNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
-
     return rows;
   }, [categoryData]);
 
   if (!result && !isSolving && !diagnostic) return null;
-
   const resultStatus = result?.Status ?? result?.status;
 
   return (
@@ -595,57 +512,29 @@ export const Results: React.FC = () => {
             </Btn>
           </div>
           <div className="stat">
-            ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0)).toFixed(2)}</b> | 净凝聚力: <b>{unityProduced.toFixed(2)}</b>
+            ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0)).toFixed(2)}</b><br/>
+            🎯 凝聚力产量: <b>{unityProduction.toFixed(2)}</b> | 凝聚力消耗: <b>{unityConsumption.toFixed(2)}</b> | 净凝聚力: <b>{(unityProduction - unityConsumption).toFixed(2)}</b>
           </div>
-
           <div className="tab-bar">
-            {tabNames.map(name => (
-              <button key={name} onClick={() => setSelectedTab(name)} className={`tab-button ${selectedTab === name ? 'active' : ''}`}>
-                {t(name, translation)}
-              </button>
-            ))}
+            {tabNames.map(name => <button key={name} onClick={() => setSelectedTab(name)} className={`tab-button ${selectedTab === name ? 'active' : ''}`}>{t(name, translation)}</button>)}
           </div>
-
           <div className="results-layout">
             <div className="summary-panel">
               <h4>{t('资源平衡', translation)}</h4>
-              {currentData && (
-                <SummaryTable
-                  data={{ prod: currentData.prod || {}, cons: currentData.cons || {} }}
-                  showTinyErrors={showTinyErrors}
-                  translation={translation}
-                  splitMode={selectedTab !== '全厂总览'}
-                />
-              )}
+              {currentData && <SummaryTable data={{ prod: currentData.prod || {}, cons: currentData.cons || {} }} showTinyErrors={showTinyErrors} translation={translation} splitMode={selectedTab !== '全厂总览'} />}
             </div>
             <div className="detail-panel">
               {selectedTab === '全厂总览' ? (
                 <>
                   <h4>{t('全厂模块总览', translation)}</h4>
-                  {moduleRows.map(row => (
-                    <ModuleRow
-                      key={row.name}
-                      name={row.name}
-                      machineCount={row.machineCount}
-                      workers={row.workers}
-                      netElectricity={row.netElectricity}
-                      computing={row.computing}
-                      totalMaintenance={row.totalMaintenance}
-                      netProds={row.netProds}
-                      netCons={row.netCons}
-                      onClick={() => setSelectedTab(row.name)}
-                      translation={translation}
-                    />
-                  ))}
+                  {moduleRows.map(row => <ModuleRow key={row.name} {...row} onClick={() => setSelectedTab(row.name)} translation={translation} />)}
                 </>
               ) : (
                 <>
                   <h4>{t('配方列表', translation)}</h4>
                   {currentData && currentData.recipes && currentData.recipes.length > 0 ? (
                     <RecipeList recipes={currentData.recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} />
-                  ) : (
-                    <div className="hint">{t('无配方数据', translation)}</div>
-                  )}
+                  ) : <div className="hint">{t('无配方数据', translation)}</div>}
                 </>
               )}
             </div>

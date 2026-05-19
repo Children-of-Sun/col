@@ -37,8 +37,8 @@ export default function App() {
   const importSettings = useStore(s => s.importSettings);
   const setExternalSupplies = useStore(s => s.setExternalSupplies);
   const setSolverMissing = useStore(s => s.setSolverMissing);
-  const setUnityProduced = useStore(s => s.setUnityProduced);
-  const setUnityConsumed = useStore(s => s.setUnityConsumed);
+  const setUnityProduction = useStore(s => s.setUnityProduction);
+  const setUnityConsumption = useStore(s => s.setUnityConsumption);
   const setTradeContracts = useStore(s => s.setTradeContracts);
   const solarEfficiency = useStore(s => s.solarEfficiency);
   const gameData = useStore(s => s.gameData);
@@ -508,6 +508,8 @@ export default function App() {
 
     // 居民模块
     let allExternalSupplies: { item: string; rate: number }[] = [];
+    let unityProduction = 0;
+    let unityConsumption = 0;
 
     const residentRecipe: Recipe = {
       id: 'resident_module',
@@ -530,7 +532,7 @@ export default function App() {
     if (currentGameData) {
       const state = useStore.getState();
 
-      const { demands: residentDemands, unityProduced, unityConsumed } = calcResidentDemands(
+      const result = calcResidentDemands(
         currentGameData,
         state.population,
         state.housingIndex,
@@ -543,8 +545,11 @@ export default function App() {
         recycleRate,
         state.stationLevel
       );
-      useStore.getState().setUnityProduced(unityProduced);
-      useStore.getState().setUnityConsumed(unityConsumed);
+      const residentDemands = result.demands;
+      unityProduction = result.unityProduction;
+      unityConsumption = result.unityConsumption;
+      setUnityProduction(unityProduction);
+      setUnityConsumption(unityConsumption);
 
       const residentWasteSupplies = calcResidentWaste(
         currentGameData,
@@ -635,6 +640,12 @@ export default function App() {
 
     const effectiveAllowExternal = s.allowExternal;
 
+    // 获取优化模式和固定凝聚力值
+    const optimizationMode = useStore.getState().optimizationMode;
+    const customWeights = useStore.getState().customWeights;
+    const fixedUnityProduction = unityProduction;
+    const fixedUnityConsumption = unityConsumption;
+
     const { lpString, varNames, missing } = buildLp({
       mainActive,
       powerActive,
@@ -651,6 +662,10 @@ export default function App() {
       excludedInputs,
       constraintMode: s.constraintMode,
       allowExternal: effectiveAllowExternal,
+      optimizationMode,
+      customWeights,
+      fixedUnityProduction,
+      fixedUnityConsumption,
     });
 
     useStore.getState().setSolverActive([...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive]);

@@ -259,6 +259,10 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
   const setExcludedOutputs = useStore(s => s.setExcludedOutputs);
   const setExcludedInputs = useStore(s => s.setExcludedInputs);
   const translation = useStore(s => s.translation);
+  const optimizationMode = useStore(s => s.optimizationMode);
+  const setOptimizationMode = useStore(s => s.setOptimizationMode);
+  const customWeights = useStore(s => s.customWeights);
+  const setCustomWeights = useStore(s => s.setCustomWeights);
   const [outputModalOpen, setOutputModalOpen] = useState(false);
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [tempOutputs, setTempOutputs] = useState<Set<string>>(new Set(excludedOutputs));
@@ -289,6 +293,27 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
         </select>
         <div className="hint">{constraintMode === 'noProd' ? '有生产的物品必须被消耗或设为需求' : '无生产或无消耗的物品都不强制平衡'}</div>
       </div>
+      <div style={{ marginBottom: 8 }}>
+        <label>🎯 优化模式: </label>
+        <select value={optimizationMode} onChange={e => setOptimizationMode(e.target.value as any)}>
+          <option value="machines">最小化机器数量</option>
+          <option value="labor">最小化人力</option>
+          <option value="cohesion">最大化凝聚力</option>
+          <option value="area">最小化占地面积</option>
+          <option value="raw">最小化原矿消耗</option>
+          <option value="custom">自定义权重</option>
+        </select>
+      </div>
+      {optimizationMode === 'custom' && (
+        <div style={{ marginBottom: 8, border: '1px solid #ccc', padding: 8, borderRadius: 4 }}>
+          <div>自定义权重 (0-100，总和不必为100)</div>
+          <div><label>机器数量权重: </label><input type="range" min={0} max={100} step={1} value={customWeights.machines} onChange={e => setCustomWeights({ machines: parseInt(e.target.value) })} /> {customWeights.machines}</div>
+          <div><label>人力权重: </label><input type="range" min={0} max={100} step={1} value={customWeights.labor} onChange={e => setCustomWeights({ labor: parseInt(e.target.value) })} /> {customWeights.labor}</div>
+          <div><label>凝聚力权重: </label><input type="range" min={0} max={100} step={1} value={customWeights.cohesion} onChange={e => setCustomWeights({ cohesion: parseInt(e.target.value) })} /> {customWeights.cohesion}</div>
+          <div><label>占地面积权重: </label><input type="range" min={0} max={100} step={1} value={customWeights.area} onChange={e => setCustomWeights({ area: parseInt(e.target.value) })} /> {customWeights.area}</div>
+          <div><label>原矿消耗权重: </label><input type="range" min={0} max={100} step={1} value={customWeights.raw} onChange={e => setCustomWeights({ raw: parseInt(e.target.value) })} /> {customWeights.raw}</div>
+        </div>
+      )}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
         <Btn onClick={openOutputModal} disabled={!dataLoaded}>🚮 排除产出（无限排放）</Btn>
         <Btn onClick={openInputModal} disabled={!dataLoaded}>📥 排除输入（无限获取）</Btn>

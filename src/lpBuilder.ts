@@ -1,5 +1,5 @@
 import { Recipe, Demand } from './types';
-import { isNonScalable } from './utils';
+import { isRaw } from './utils';
 
 export interface LpInput {
   mainActive: Recipe[];
@@ -17,6 +17,10 @@ export interface LpInput {
   excludedInputs: Set<string>;
   constraintMode?: 'noProd' | 'noProdOrCons';
   allowExternal?: boolean;
+  optimizationMode: 'machines' | 'labor' | 'cohesion' | 'area' | 'raw' | 'custom';
+  customWeights?: { machines: number; labor: number; cohesion: number; area: number; raw: number };
+  fixedUnityProduction?: number;
+  fixedUnityConsumption?: number;
 }
 
 export interface LpOutput {
@@ -27,7 +31,8 @@ export interface LpOutput {
 
 export function buildLp(input: LpInput): LpOutput {
   const { mainActive, powerActive, residentActive, stationActive, specialActive = [], tradeActive = [], ignored, demands, externalSupplies,
-          reductionFactor, steamLowMode, excludedOutputs, excludedInputs, constraintMode, allowExternal } = input;
+          reductionFactor, steamLowMode, excludedOutputs, excludedInputs, constraintMode, allowExternal,
+          optimizationMode, customWeights, fixedUnityProduction = 0, fixedUnityConsumption = 0 } = input;
   const isAllowExternal = allowExternal ?? false;
 
   const externalSupplyMap = new Map<string, number>();
@@ -45,14 +50,107 @@ export function buildLp(input: LpInput): LpOutput {
   const tradeVarNames = tradeActive.map((_, i) => `tr${i}`);
   const varNames = [...mainVarNames, ...powerVarNames, ...residentVarNames, ...stationVarNames, ...specialVarNames, ...tradeVarNames];
 
-  const objExpr = [
-    ...mainVarNames.map((v, i) => mainActive[i].isSolar ? `0.01 ${v}` : v),
-    ...powerVarNames.map((v, i) => powerActive[i].isSolar ? `0.01 ${v}` : v),
-    ...residentVarNames.map(v => v),
-    ...stationVarNames.map(v => v),
-    ...specialVarNames.map(v => v),
-    ...tradeVarNames.map(v => v),
-  ].join(' + ');
+  // 判断物品是否为持续类型（不缩放）
+  const isContinuous = (item: string): boolean => {
+    return item === 'electricity' || item === 'computing' || item === '人力' || item === 'mechanical power';
+  };
+
+  // 辅助函数：计算每个配方对某个目标的贡献系数（每单位变量）
+  const computeTargetCoeffs = (target: string): number[] => {
+    const coeffs: number[] = [];
+    const allRecipes = [...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive];
+    for (const recipe of allRecipes) {
+      let coeff = 0;
+      if (target === 'machines') {
+        coeff = recipe.isSolar ? 0.01 : 1;
+      } else if (target === 'labor') {
+        coeff = recipe.upkeep['人力'] || 0;
+      } else if (target === 'cohesion') {
+        if (recipe.module === 'trade') {
+          const buyItem = Object.keys(recipe.outputs)[0];
+          const buyRate = recipe.outputs[buyItem];
+          const contract = tradeActive.find(t => t.id === recipe.id) as any;
+          const unityPer100 = contract?.unity_per_100_bought || 0;
+          coeff = (buyRate / 100) * unityPer100;
+        }
+      } else if (target === 'area') {
+        coeff = 1;
+      } else if (target === 'raw') {
+        for (const [item, qty] of Object.entries(recipe.inputs)) {
+          if (isRaw(item)) {
+            // 原矿消耗不缩放（因为原矿输入本身是持续？但原矿也是间歇产出，需要缩放？这里简化：不缩放）
+            coeff += qty;
+          }
+        }
+      }
+      coeffs.push(coeff);
+    }
+    return coeffs;
+  };
+
+  // 构建目标函数字符串
+  let objExpr = '';
+  const allVarLists = [mainVarNames, powerVarNames, residentVarNames, stationVarNames, specialVarNames, tradeVarNames];
+  const allRecipesList = [mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive];
+
+  if (optimizationMode === 'custom' && customWeights) {
+    const targets = ['machines', 'labor', 'cohesion', 'area', 'raw'];
+    const weights = [customWeights.machines, customWeights.labor, customWeights.cohesion, customWeights.area, customWeights.raw];
+    const totalCoeffs: number[] = new Array(varNames.length).fill(0);
+    let idx = 0;
+    for (let t = 0; t < targets.length; t++) {
+      if (weights[t] === 0) continue;
+      const coeffs = computeTargetCoeffs(targets[t]);
+      for (let i = 0; i < coeffs.length; i++) {
+        totalCoeffs[idx + i] += weights[t] * coeffs[i];
+      }
+      idx += coeffs.length;
+    }
+    const terms: string[] = [];
+    for (let i = 0; i < varNames.length; i++) {
+      if (Math.abs(totalCoeffs[i]) > 1e-9) {
+        terms.push(`${totalCoeffs[i].toFixed(6)} ${varNames[i]}`);
+      }
+    }
+    objExpr = terms.join(' + ');
+  } else {
+    let target = optimizationMode;
+    if (target === 'cohesion') {
+      const coeffs = computeTargetCoeffs('cohesion');
+      const terms: string[] = [];
+      let idx = 0;
+      for (let i = 0; i < allRecipesList.length; i++) {
+        const vars = allVarLists[i];
+        const recipes = allRecipesList[i];
+        for (let j = 0; j < recipes.length; j++) {
+          const coeff = coeffs[idx + j];
+          if (Math.abs(coeff) > 1e-9) {
+            terms.push(`${coeff.toFixed(6)} ${vars[j]}`);
+          }
+        }
+        idx += recipes.length;
+      }
+      objExpr = terms.join(' + ');
+    } else {
+      const coeffs = computeTargetCoeffs(target);
+      const terms: string[] = [];
+      let idx = 0;
+      for (let i = 0; i < allRecipesList.length; i++) {
+        const vars = allVarLists[i];
+        const recipes = allRecipesList[i];
+        for (let j = 0; j < recipes.length; j++) {
+          const coeff = coeffs[idx + j];
+          if (Math.abs(coeff) > 1e-9) {
+            terms.push(`${coeff.toFixed(6)} ${vars[j]}`);
+          }
+        }
+        idx += recipes.length;
+      }
+      objExpr = terms.join(' + ');
+    }
+  }
+
+  if (!objExpr) objExpr = '0';
 
   let lp = `MIN\nOBJ: ${objExpr}\nST\n`;
 
@@ -60,18 +158,50 @@ export function buildLp(input: LpInput): LpOutput {
   stationVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
   specialVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
 
+  // 构建约束表达式
   const makeExpr = (recipes: Recipe[], vars: string[], it: string): string => {
     let expr = '';
     recipes.forEach((r, i) => {
+      // 贸易配方特殊处理（已为每分钟速率，不缩放）
+      if (r.module === 'trade') {
+        let c = 0;
+        if (r.outputs[it]) c += r.outputs[it];
+        if (r.inputs[it]) c -= r.inputs[it];
+        if (r.upkeep[it]) {
+          const reduction = it.startsWith('maintenance') ? reductionFactor : 0;
+          c -= r.upkeep[it] * (1 - reduction);
+        }
+        if (Math.abs(c) > 1e-9) {
+          if (expr) expr += ' ';
+          if (c >= 0 && expr) expr += '+ ';
+          expr += c >= 0 ? `${c} ${vars[i]}` : `- ${-c} ${vars[i]}`;
+        }
+        return; // 跳过后续缩放逻辑
+      }
+
+      // 以下为非贸易配方的缩放逻辑
       let c = 0;
-      // 不可缩放物品（电力、算力、人力、维护等）不缩放，其他物品按周期缩放
-      const shouldScale = !isNonScalable(it) && r.module !== 'resident' && r.module !== 'station' && r.module !== 'special' && r.module !== 'trade';
-      const scale = shouldScale ? (60 / r.duration) : 1;
+      // 决定缩放系数
+      let scale = 1;
+      const isContinuousItem = isContinuous(it);
+      const isMaintenanceOutput = (it === 'maintenance i' || it === 'maintenance ii' || it === 'maintenance iii') && r.outputs[it];
+      
+      if (r.outputs[it]) {
+        if (isMaintenanceOutput) scale = 60 / r.duration;       // 维护产出缩放
+        else if (!isContinuousItem) scale = 60 / r.duration;   // 普通物品产出缩放
+        // 持续物品产出不缩放 (scale=1)
+      }
+      if (r.inputs[it]) {
+        if (!isContinuousItem) scale = 60 / r.duration;        // 普通物品输入缩放
+        // 持续物品输入不缩放 (scale=1)
+      }
+      // 注意：upkeep 永远不缩放，保持 scale=1
+      
       if (r.outputs[it]) c += scale * r.outputs[it];
       if (r.inputs[it]) c -= scale * r.inputs[it];
       if (r.upkeep[it]) {
         const reduction = it.startsWith('maintenance') ? reductionFactor : 0;
-        c -= scale * r.upkeep[it] * (1 - reduction);
+        c -= r.upkeep[it] * (1 - reduction);   // upkeep 不缩放
       }
       if (Math.abs(c) > 1e-9) {
         if (expr) expr += ' ';
@@ -123,15 +253,12 @@ export function buildLp(input: LpInput): LpOutput {
   [...items].forEach((it, idx) => rows[it] = `r${idx}`);
 
   items.forEach(it => {
-    // 研究点不参与 LP 平衡
     if (it === 'research') return;
-
     if (it === 'steam (high)' || it === 'steam (super)') {
       const expr = allExpr(it);
       if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
       return;
     }
-
     if (it === 'steam (low)') {
       if (steamLowMode === 'internal') {
         const expr = makeExpr(powerActive, powerVarNames, it);
@@ -146,44 +273,27 @@ export function buildLp(input: LpInput): LpOutput {
 
     if (demandSet.has(it)) {
       const effectiveDr = Math.max(0, totalDr - supply);
-      if (expr) {
-        lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-      } else {
-        lp += ` ${rows[it]}: 0 >= ${effectiveDr}\n`;
-      }
+      if (expr) lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
+      else lp += ` ${rows[it]}: 0 >= ${effectiveDr}\n`;
     } else if (supply > 0) {
       if (!consumers.has(it)) {
         missing.push(it);
         return;
       }
-      if (expr) {
-        lp += ` ${rows[it]}: ${expr} = ${-supply}\n`;
-      }
+      if (expr) lp += ` ${rows[it]}: ${expr} = ${-supply}\n`;
     } else {
       const isExcludedOutput = excludedOutputs.has(it);
       const isExcludedInput = excludedInputs.has(it);
       const hasProducer = producers.has(it);
       const hasConsumer = consumers.has(it);
-
-      if (isAllowExternal && !hasProducer && hasConsumer) {
-        return;
-      }
-      if ((isExcludedOutput && hasProducer) || (isExcludedInput && hasConsumer)) {
-        return;
-      }
-
+      if (isAllowExternal && !hasProducer && hasConsumer) return;
+      if ((isExcludedOutput && hasProducer) || (isExcludedInput && hasConsumer)) return;
       const shouldConstrain = (hasProd: boolean, hasCons: boolean): boolean => {
-        if (constraintMode === 'noProdOrCons') {
-          return hasProd && hasCons;
-        }
+        if (constraintMode === 'noProdOrCons') return hasProd && hasCons;
         return hasProd;
       };
-      if (!shouldConstrain(hasProducer, hasConsumer)) {
-        return;
-      }
-      if (expr) {
-        lp += ` ${rows[it]}: ${expr} = 0\n`;
-      }
+      if (!shouldConstrain(hasProducer, hasConsumer)) return;
+      if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
     }
   });
 

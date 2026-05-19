@@ -68,8 +68,8 @@ export const useStore = create<StoreState>((set, get) => ({
   solverVarNames: [],
   solverMissing: [],
   solverFixedDemands: [],
-  unityProduced: 0,
-  unityConsumed: 0,
+  unityProduction: 0,
+  unityConsumption: 0,
   externalSupplies: [],
 
   gameData: null,
@@ -96,6 +96,9 @@ export const useStore = create<StoreState>((set, get) => ({
   selectedTradeContractIds: [],
 
   solarEfficiency: 1,
+
+  optimizationMode: 'machines',
+  customWeights: { machines: 100, labor: 0, cohesion: 0, area: 0, raw: 0 },
 
   loadData: (json: DataJson) => {
     const p = parseData(json);
@@ -165,8 +168,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setSolverVarNames: (names: string[]) => set({ solverVarNames: names }),
   setSolverMissing: (missing: string[]) => set({ solverMissing: missing }),
   setSolverFixedDemands: (demands) => set({ solverFixedDemands: demands }),
-  setUnityProduced: (v: number) => set({ unityProduced: v }),
-  setUnityConsumed: (v: number) => set({ unityConsumed: v }),
+  setUnityProduction: (v: number) => set({ unityProduction: v }),
+  setUnityConsumption: (v: number) => set({ unityConsumption: v }),
   setExternalSupplies: (supplies) => set({ externalSupplies: supplies }),
 
   setGameData: (data: GameData) => set({ gameData: data }),
@@ -209,6 +212,9 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(1, Math.max(0, value)) }),
 
+  setOptimizationMode: (mode) => set({ optimizationMode: mode }),
+  setCustomWeights: (weights) => set({ customWeights: { ...get().customWeights, ...weights } }),
+
   importSettings: (s) => {
     const state: Partial<StoreState> = {};
     if (s.mainEnabled) state.mainEnabled = s.mainEnabled;
@@ -235,6 +241,8 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.solarEfficiency !== undefined) state.solarEfficiency = s.solarEfficiency;
     if (s.tradeParams) state.tradeParams = { ...state.tradeParams, ...s.tradeParams };
     if (s.selectedTradeContractIds) state.selectedTradeContractIds = s.selectedTradeContractIds;
+    if (s.optimizationMode) state.optimizationMode = s.optimizationMode;
+    if (s.customWeights) state.customWeights = s.customWeights;
     set(state);
   },
 
@@ -265,6 +273,8 @@ export const useStore = create<StoreState>((set, get) => ({
       solarEfficiency: s.solarEfficiency,
       tradeParams: s.tradeParams,
       selectedTradeContractIds: s.selectedTradeContractIds,
+      optimizationMode: s.optimizationMode,
+      customWeights: s.customWeights,
     };
   },
 
