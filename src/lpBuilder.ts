@@ -1,5 +1,5 @@
 import { Recipe, Demand } from './types';
-import { isRaw, isPowerItem } from './utils';
+import { isNonScalable } from './utils';
 
 export interface LpInput {
   mainActive: Recipe[];
@@ -7,13 +7,14 @@ export interface LpInput {
   residentActive: Recipe[];
   stationActive: Recipe[];
   specialActive?: Recipe[];
-  tradeActive?: Recipe[];          // 新增
+  tradeActive?: Recipe[];
   ignored: Set<string>;
   demands: Demand[];
   externalSupplies: { item: string; rate: number }[];
   reductionFactor: number;
   steamLowMode: 'internal' | 'shared';
-  excludedItems: Set<string>;
+  excludedOutputs: Set<string>;
+  excludedInputs: Set<string>;
   constraintMode?: 'noProd' | 'noProdOrCons';
   allowExternal?: boolean;
 }
@@ -26,19 +27,16 @@ export interface LpOutput {
 
 export function buildLp(input: LpInput): LpOutput {
   const { mainActive, powerActive, residentActive, stationActive, specialActive = [], tradeActive = [], ignored, demands, externalSupplies,
-          reductionFactor, steamLowMode, excludedItems, constraintMode, allowExternal } = input;
+          reductionFactor, steamLowMode, excludedOutputs, excludedInputs, constraintMode, allowExternal } = input;
   const isAllowExternal = allowExternal ?? false;
 
-  // 构建外部供给映射
   const externalSupplyMap = new Map<string, number>();
   for (const s of externalSupplies) {
     externalSupplyMap.set(s.item, s.rate);
   }
 
-  // 合并所有用于变量生成的数组
   const allActive = [...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive];
 
-  // 变量名：主模块 x0,x1,... 电力模块 p0,p1,... 居民模块 r0,r1,... 空间站模块 s0,s1,... 特殊模块 t0,t1,... 贸易模块 tr0,tr1,...
   const mainVarNames = mainActive.map((_, i) => `x${i}`);
   const powerVarNames = powerActive.map((_, i) => `p${i}`);
   const residentVarNames = residentActive.map((_, i) => `r${i}`);
@@ -47,7 +45,6 @@ export function buildLp(input: LpInput): LpOutput {
   const tradeVarNames = tradeActive.map((_, i) => `tr${i}`);
   const varNames = [...mainVarNames, ...powerVarNames, ...residentVarNames, ...stationVarNames, ...specialVarNames, ...tradeVarNames];
 
-  // 目标函数：居民、空间站、特殊、贸易变量权重为1（贸易次数和机器一样要最小化），太阳能建筑权重0.01
   const objExpr = [
     ...mainVarNames.map((v, i) => mainActive[i].isSolar ? `0.01 ${v}` : v),
     ...powerVarNames.map((v, i) => powerActive[i].isSolar ? `0.01 ${v}` : v),
@@ -59,20 +56,17 @@ export function buildLp(input: LpInput): LpOutput {
 
   let lp = `MIN\nOBJ: ${objExpr}\nST\n`;
 
-  // 固定居民、空间站、特殊模块数量为 1
   residentVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
   stationVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
   specialVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
-  // 贸易模块不做固定（变量自由）
 
-  // 辅助函数：根据配方数组和变量名构建表达式
   const makeExpr = (recipes: Recipe[], vars: string[], it: string): string => {
     let expr = '';
     recipes.forEach((r, i) => {
       let c = 0;
-      // 居民、空间站、特殊模块不缩放（duration 已设为 60，变量固定为1）
-      const isScalable = !isPowerItem(it) && r.module !== 'resident' && r.module !== 'station' && r.module !== 'special' && r.module !== 'trade';
-      const scale = isScalable ? (60 / r.duration) : 1;
+      // 不可缩放物品（电力、算力、人力、维护等）不缩放，其他物品按周期缩放
+      const shouldScale = !isNonScalable(it) && r.module !== 'resident' && r.module !== 'station' && r.module !== 'special' && r.module !== 'trade';
+      const scale = shouldScale ? (60 / r.duration) : 1;
       if (r.outputs[it]) c += scale * r.outputs[it];
       if (r.inputs[it]) c -= scale * r.inputs[it];
       if (r.upkeep[it]) {
@@ -88,7 +82,6 @@ export function buildLp(input: LpInput): LpOutput {
     return expr;
   };
 
-  // 合并所有模块表达式
   const allExpr = (it: string) => {
     const e1 = makeExpr(mainActive, mainVarNames, it);
     const e2 = makeExpr(powerActive, powerVarNames, it);
@@ -100,17 +93,16 @@ export function buildLp(input: LpInput): LpOutput {
     return parts.join(' + ');
   };
 
-  // 计算全局生产者和消费者（用于 missing）
   const producers = new Set<string>();
   const consumers = new Set<string>();
   allActive.forEach(r => {
-    Object.keys(r.outputs).forEach(k => { if (!ignored.has(k) && !excludedItems.has(k)) producers.add(k); });
-    Object.keys(r.inputs).forEach(k => { if (!ignored.has(k) && !excludedItems.has(k)) consumers.add(k); });
-    Object.keys(r.upkeep).forEach(k => { if (!ignored.has(k) && !excludedItems.has(k)) consumers.add(k); });
+    Object.keys(r.outputs).forEach(k => { if (!ignored.has(k) && !excludedOutputs.has(k) && !excludedInputs.has(k)) producers.add(k); });
+    Object.keys(r.inputs).forEach(k => { if (!ignored.has(k) && !excludedOutputs.has(k) && !excludedInputs.has(k)) consumers.add(k); });
+    Object.keys(r.upkeep).forEach(k => { if (!ignored.has(k) && !excludedOutputs.has(k) && !excludedInputs.has(k)) consumers.add(k); });
   });
 
   const demandSet = new Set(demands.map(d => d.item));
-  const items = new Set([...demandSet].filter(i => !ignored.has(i) && !excludedItems.has(i)));
+  const items = new Set([...demandSet].filter(i => !ignored.has(i) && !excludedOutputs.has(i) && !excludedInputs.has(i)));
   producers.forEach(i => { if (!demandSet.has(i)) items.add(i); });
   consumers.forEach(i => items.add(i));
   ['steam (high)', 'steam (super)', 'steam (low)'].forEach(s => {
@@ -119,37 +111,35 @@ export function buildLp(input: LpInput): LpOutput {
 
   let missing: string[] = [];
   if (!isAllowExternal) {
-    missing = [...consumers].filter(i => !producers.has(i) && !ignored.has(i) && !excludedItems.has(i) && !demandSet.has(i));
+    missing = [...consumers].filter(i => !producers.has(i) && !ignored.has(i) && !excludedOutputs.has(i) && !excludedInputs.has(i) && !demandSet.has(i));
     for (const d of demands) {
-      if (!ignored.has(d.item) && !excludedItems.has(d.item) && !producers.has(d.item)) {
+      if (!ignored.has(d.item) && !excludedOutputs.has(d.item) && !excludedInputs.has(d.item) && !producers.has(d.item)) {
         if (!missing.includes(d.item)) missing.push(d.item);
       }
     }
   }
 
-  // 行标签
   const rows: Record<string, string> = {};
   [...items].forEach((it, idx) => rows[it] = `r${idx}`);
 
   items.forEach(it => {
-    // 蒸汽高压/超高压
+    // 研究点不参与 LP 平衡
+    if (it === 'research') return;
+
     if (it === 'steam (high)' || it === 'steam (super)') {
       const expr = allExpr(it);
       if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
       return;
     }
 
-    // 蒸汽低压
     if (it === 'steam (low)') {
       if (steamLowMode === 'internal') {
         const expr = makeExpr(powerActive, powerVarNames, it);
         if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
         return;
       }
-      // shared 模式：不额外处理，交给下面普通物品逻辑
     }
 
-    // 普通物品
     const expr = allExpr(it);
     const totalDr = demands.filter(d => d.item === it).reduce((s, d) => s + d.rate, 0);
     const supply = externalSupplyMap.get(it) || 0;
@@ -170,16 +160,25 @@ export function buildLp(input: LpInput): LpOutput {
         lp += ` ${rows[it]}: ${expr} = ${-supply}\n`;
       }
     } else {
-      if (isAllowExternal && !producers.has(it) && consumers.has(it)) {
+      const isExcludedOutput = excludedOutputs.has(it);
+      const isExcludedInput = excludedInputs.has(it);
+      const hasProducer = producers.has(it);
+      const hasConsumer = consumers.has(it);
+
+      if (isAllowExternal && !hasProducer && hasConsumer) {
         return;
       }
-      const shouldConstrain = (hasProducer: boolean, hasConsumer: boolean): boolean => {
+      if ((isExcludedOutput && hasProducer) || (isExcludedInput && hasConsumer)) {
+        return;
+      }
+
+      const shouldConstrain = (hasProd: boolean, hasCons: boolean): boolean => {
         if (constraintMode === 'noProdOrCons') {
-          return hasProducer && hasConsumer;
+          return hasProd && hasCons;
         }
-        return hasProducer;
+        return hasProd;
       };
-      if (!shouldConstrain(producers.has(it), consumers.has(it))) {
+      if (!shouldConstrain(hasProducer, hasConsumer)) {
         return;
       }
       if (expr) {

@@ -1,6 +1,5 @@
-// stores.ts
 import { create } from 'zustand';
-import { StoreState, DataJson, ParsedData, SolverResult, Demand, GameData, Recipe, TradeContract, TradeSetup, DockLevel, TradeFuel } from './types';
+import { StoreState, DataJson, ParsedData, SolverResult, Demand, GameData, Recipe, TradeContract, TradeSetup } from './types';
 import { parseData } from './parseData';
 import { getSeriesName, isPowerBuilding, HIDDEN_SERIES } from './utils';
 
@@ -56,9 +55,10 @@ export const useStore = create<StoreState>((set, get) => ({
   allowExternal: false,
   hideStage: true,
   diagnosticMode: false,
-  excludedItems: [],
+  excludedOutputs: [],
+  excludedInputs: [],
   constraintMode: 'noProd' as const,
-  showTinyErrors: false,
+  showTinyErrors: true,
 
   result: null,
   isSolving: false,
@@ -82,12 +82,19 @@ export const useStore = create<StoreState>((set, get) => ({
   officeLevels: [],
   researchLevels: [],
 
-  // 贸易模块状态（多选）
   tradeContracts: [],
   tradeSetup: { contractId: '', dockLevel: 1, fuelName: 'Diesel' },
   selectedTradeRecipes: [],
+  tradeParams: {
+    baySlots: 4,
+    moduleSize: 'M',
+    fuelTypeRaw: 'Diesel',
+    travelMode: 'normal',
+    profitBonus: 0,
+    unityDiscount: 0,
+  },
+  selectedTradeContractIds: [],
 
-  // 太阳能效率 (0~1)
   solarEfficiency: 1,
 
   loadData: (json: DataJson) => {
@@ -147,7 +154,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setAllowExternal: (v) => set({ allowExternal: v }),
   setHideStage: (v) => set({ hideStage: v }),
   setDiagnosticMode: (v) => set({ diagnosticMode: v }),
-  setExcludedItems: (items) => set({ excludedItems: items }),
+  setExcludedOutputs: (items) => set({ excludedOutputs: items.map(i => i.toLowerCase()) }),
+  setExcludedInputs: (items) => set({ excludedInputs: items.map(i => i.toLowerCase()) }),
   setConstraintMode: (v) => set({ constraintMode: v }),
   setShowTinyErrors: (v) => set({ showTinyErrors: v }),
   setResult: (r) => set({ result: r }),
@@ -191,14 +199,14 @@ export const useStore = create<StoreState>((set, get) => ({
     return { researchLevels: levels };
   }),
 
-  // 贸易 Actions（多选）
   setTradeContracts: (contracts) => set({ tradeContracts: contracts }),
   setTradeContract: (contractId) => set(state => ({ tradeSetup: { ...state.tradeSetup, contractId } })),
   setTradeDockLevel: (level) => set(state => ({ tradeSetup: { ...state.tradeSetup, dockLevel: level } })),
-  setTradeFuel: (fuelName) => set(state => ({ tradeSetup: { ...state.tradeSetup, fuelName } })),
+  setTradeFuel: (fuelName) => set(state => ({ tradeSetup: { ...state.tradeSetup, fuelName: fuelName } })),
   setSelectedTradeRecipes: (recipes) => set({ selectedTradeRecipes: recipes }),
+  setTradeParams: (params) => set(state => ({ tradeParams: { ...state.tradeParams, ...params } })),
+  setSelectedTradeContractIds: (ids) => set({ selectedTradeContractIds: ids }),
 
-  // 太阳能效率
   setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(1, Math.max(0, value)) }),
 
   importSettings: (s) => {
@@ -208,7 +216,8 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.powerEnabled) state.powerEnabled = s.powerEnabled;
     if (s.powerLevels) state.powerSelectedLevel = s.powerLevels;
     if (s.recipes) state.recipeEnabled = s.recipes;
-    if (s.excluded) state.excludedItems = s.excluded.map((x: string) => x.toLowerCase());
+    if (s.excludedOutputs) state.excludedOutputs = s.excludedOutputs.map((x: string) => x.toLowerCase());
+    if (s.excludedInputs) state.excludedInputs = s.excludedInputs.map((x: string) => x.toLowerCase());
     if (s.stationLevel !== undefined) state.stationLevel = s.stationLevel;
     if (s.rocketType !== undefined) state.rocketType = s.rocketType;
     if (s.statueCount !== undefined) state.statueCount = s.statueCount;
@@ -224,6 +233,8 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.tradeDockLevel !== undefined) state.tradeSetup = { ...state.tradeSetup, dockLevel: s.tradeDockLevel };
     if (s.tradeFuel !== undefined) state.tradeSetup = { ...state.tradeSetup, fuelName: s.tradeFuel };
     if (s.solarEfficiency !== undefined) state.solarEfficiency = s.solarEfficiency;
+    if (s.tradeParams) state.tradeParams = { ...state.tradeParams, ...s.tradeParams };
+    if (s.selectedTradeContractIds) state.selectedTradeContractIds = s.selectedTradeContractIds;
     set(state);
   },
 
@@ -235,7 +246,8 @@ export const useStore = create<StoreState>((set, get) => ({
       powerEnabled: s.powerEnabled,
       powerLevels: s.powerSelectedLevel,
       recipes: s.recipeEnabled,
-      excluded: s.excludedItems,
+      excludedOutputs: s.excludedOutputs,
+      excludedInputs: s.excludedInputs,
       stationLevel: s.stationLevel,
       rocketType: s.rocketType,
       statueCount: s.statueCount,
@@ -251,6 +263,8 @@ export const useStore = create<StoreState>((set, get) => ({
       tradeDockLevel: s.tradeSetup.dockLevel,
       tradeFuel: s.tradeSetup.fuelName,
       solarEfficiency: s.solarEfficiency,
+      tradeParams: s.tradeParams,
+      selectedTradeContractIds: s.selectedTradeContractIds,
     };
   },
 

@@ -52,8 +52,8 @@ export interface GameData {
   office: Office[];
   research: Research[];
   baseRecycleRate?: number;
-  docks?: DockLevel[];      // 新增：码头等级配置
-  fuels?: TradeFuel[];      // 新增：燃料配置
+  docks?: DockLevel[];
+  fuels?: TradeFuel[];
 }
 
 // ==================== 原始数据类型 ====================
@@ -119,7 +119,7 @@ export interface Recipe {
   workers: number;
   isSolar: boolean;
   isHidden: boolean;
-  module: 'main' | 'power' | 'resident' | 'station' | 'special' | 'trade';   // 增加 'trade'
+  module: 'main' | 'power' | 'resident' | 'station' | 'special' | 'trade';
   isLab?: boolean;
 }
 
@@ -187,6 +187,8 @@ export interface StoreState {
   allowExternal: boolean;
   hideStage: boolean;
   diagnosticMode: boolean;
+  excludedOutputs: string[];
+  excludedInputs: string[];
   excludedItems: string[];
   constraintMode: 'noProd' | 'noProdOrCons';
   showTinyErrors: boolean;
@@ -213,17 +215,27 @@ export interface StoreState {
   officeLevels: number[];
   researchLevels: number[];
 
-  // 贸易模块
   tradeContracts: TradeContract[];
   tradeSetup: TradeSetup;
+  tradeParams: TradeParams;
+  selectedTradeContractIds: string[];
+  selectedTradeRecipes: Recipe[];
   setTradeContracts: (contracts: TradeContract[]) => void;
   setTradeContract: (contractId: string) => void;
   setTradeDockLevel: (level: number) => void;
   setTradeFuel: (fuelName: string) => void;
+  setTradeParams: (params: Partial<TradeParams>) => void;
+  setSelectedTradeContractIds: (ids: string[]) => void;
+  setSelectedTradeRecipes: (recipes: Recipe[]) => void;
 
-  // Actions (原有省略，只保留新加的)
-  // ... 所有现有的 actions (loadData, setMainEnabled 等) 都已经在 stores.ts 中实现，此处不重复列出
-  // 但由于 TypeScript 接口要求，这里只是省略展开，实际项目中应当包含所有已有声明
+  solarEfficiency: number;
+  setSolarEfficiency: (value: number) => void;
+
+  setExcludedOutputs: (items: string[]) => void;
+  setExcludedInputs: (items: string[]) => void;
+  setExcludedItems: (items: string[]) => void;
+
+  // 原有 actions（省略具体声明，已在 stores.ts 实现）
   loadData: (json: DataJson) => void;
   loadTranslation: (json: Record<string, string>) => void;
   setMainEnabled: (name: string, value: boolean) => void;
@@ -245,7 +257,6 @@ export interface StoreState {
   setAllowExternal: (v: boolean) => void;
   setHideStage: (v: boolean) => void;
   setDiagnosticMode: (v: boolean) => void;
-  setExcludedItems: (items: string[]) => void;
   setConstraintMode: (v: 'noProd' | 'noProdOrCons') => void;
   setShowTinyErrors: (v: boolean) => void;
   setResult: (r: SolverResult | null) => void;
@@ -281,10 +292,13 @@ export interface SolverResult {
 export interface TradeContract {
   id: string;
   name: string;
-  buyItem: string;      // 买入物品
-  sellItem: string;     // 卖出物品
-  buyRate: number;      // 买入比例
-  sellRate: number;     // 卖出比例
+  buyItem: string;
+  sellItem: string;
+  buyRate: number;
+  sellRate: number;
+  unity_per_100_bought?: number;
+  unity_per_month?: number;
+  min_reputation_required?: number;
 }
 
 export interface DockLevel {
@@ -305,4 +319,13 @@ export interface TradeSetup {
   contractId: string;
   dockLevel: number;
   fuelName: string;
+}
+
+export interface TradeParams {
+  baySlots: number;
+  moduleSize: 'S' | 'M' | 'L';
+  fuelTypeRaw: string;
+  travelMode: 'normal' | 'special';
+  profitBonus: number;
+  unityDiscount: number;
 }

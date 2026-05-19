@@ -16,6 +16,16 @@ export const POWER_KEYWORDS = [
   'solar panel'
 ];
 
+export const NON_SCALABLE_ITEMS = new Set([
+  'electricity',
+  'computing',
+  'mechanical power',
+  '人力',
+  'maintenance i',
+  'maintenance ii',
+  'maintenance iii'
+]);
+
 export function t(key: string | undefined, translation: Record<string, string>): string {
   if (!key) return '';
   return translation[key.toLowerCase()] || key;
@@ -31,6 +41,10 @@ export function isPowerItem(name: string): boolean {
 
 export function isPowerBuilding(name: string): boolean {
   return POWER_KEYWORDS.some(k => name.toLowerCase().includes(k));
+}
+
+export function isNonScalable(item: string): boolean {
+  return NON_SCALABLE_ITEMS.has(item.toLowerCase());
 }
 
 export function getMaintenanceReduction(count: number): number {
@@ -77,9 +91,8 @@ export const POWER_OUTPUT_ITEMS = new Set([
   'blanket fuel (enriched)'
 ]);
 
-import { GameData, Edict, Office, Research } from './types';
+import { GameData, Edict, Office, Research, Recipe } from './types';
 
-// 计算回收率
 export function getRecycleRate(
   base: number,
   edicts: Edict[],
@@ -103,7 +116,6 @@ export function getRecycleRate(
   return Math.max(0, rate);
 }
 
-// 计算居民需求和凝聚力
 export function calcResidentDemands(
   data: GameData,
   pop: number,
@@ -123,7 +135,6 @@ export function calcResidentDemands(
   let catMods: Record<string, number> = {};
   let itemMods: Record<string, number> = {};
 
-  // 法令需求影响
   data.edicts.forEach((e, i) => {
     const lvl = edictLevels[i] ?? -1;
     if (lvl >= 0 && lvl < e.effectPerLevel.length) {
@@ -139,7 +150,6 @@ export function calcResidentDemands(
     }
   });
 
-  // 办公需求影响
   data.office.forEach((o, i) => {
     const lvl = officeLevels[i] || 0;
     if (lvl > 0 && o.targetCategory && o.targetCategory !== 'none') {
@@ -151,7 +161,6 @@ export function calcResidentDemands(
     }
   });
 
-  // 研究需求影响
   data.research.forEach((r, i) => {
     const lvl = researchLevels[i] || 0;
     if (lvl > 0) {
@@ -168,7 +177,6 @@ export function calcResidentDemands(
     }
   });
 
-  // 食物分组
   const foodGroups: Record<string, string[]> = {};
   for (const [name, svc] of Object.entries(data.services)) {
     if (svc.category === 'food' && svc['Food Category']) {
@@ -189,7 +197,6 @@ export function calcResidentDemands(
   const demands: { item: string; rate: number }[] = [];
   let foodUnity = 0, otherUnity = 0;
 
-  // 处理食物
   if (numActiveGroups > 0) {
     for (const [grp, enabledList] of Object.entries(activeGroups)) {
       const intraFactor = foodGroups[grp].length / enabledList.length;
@@ -206,7 +213,6 @@ export function calcResidentDemands(
     }
   }
 
-  // 医疗
   if (selectedMedical) {
     const svc = data.services[selectedMedical];
     let demand = svc.demand * factor;
@@ -218,7 +224,6 @@ export function calcResidentDemands(
     otherUnity += svc.unity;
   }
 
-  // 其他服务（包括 Electricity, Computing 等）
   for (const [name, svc] of Object.entries(data.services)) {
     if (svc.category === 'food' || svc.category === 'medical') continue;
     if (!selectedOthers.has(name)) continue;
@@ -231,17 +236,14 @@ export function calcResidentDemands(
     otherUnity += svc.unity;
   }
 
-  // 凝聚力计算：分别统计产量和消耗
-  let unityProduced = foodUnity + otherUnity; // 所有服务产生的凝聚力均为正
-  let unityConsumed = 0; // 法令可能减少凝聚力
+  let unityProduced = foodUnity + otherUnity;
+  let unityConsumed = 0;
 
-  // 住房乘数（影响净凝聚力，不区分产量/消耗）
   const housingMult = housing.unityMultiplierConditions.reduce((best, cond) => {
     const satisfied = cond.requires.every(r => data.services[r] !== undefined);
     return satisfied && cond.multiplier > best ? cond.multiplier : best;
   }, 1);
   
-  // 办公/研究 unity%
   let officeUnityPct = 0;
   data.office.forEach((o, i) => {
     const lvl = officeLevels[i] || 0;
@@ -260,24 +262,20 @@ export function calcResidentDemands(
     }
   });
 
-  // 法令凝聚力增减
   data.edicts.forEach((e, i) => {
     const lvl = edictLevels[i] ?? -1;
     if (lvl >= 0 && e.unityPerLevel[lvl] !== undefined) {
       const val = e.unityPerLevel[lvl];
       if (val > 0) unityProduced += val;
-      else unityConsumed += val; // 负值
+      else unityConsumed += val;
     }
   });
 
-  // 总净凝聚力（包含乘数）
   let netUnity = (unityProduced + unityConsumed) * housingMult * (1 + officeUnityPct) * (1 + stationLevel * 0.05);
-  // 注意 unityConsumed 是负值，所以 netUnity 可能小于 unityProduced
 
-  return { demands, unityProduced: netUnity, unityConsumed: 0, recycleRate }; // 暂时 unityConsumed 为0，因为实际消耗已被计入 netUnity
+  return { demands, unityProduced: netUnity, unityConsumed: 0, recycleRate };
 }
 
-// 计算居民废料（含 extraWaste） 注意：只有一个定义
 export function calcResidentWaste(
   data: GameData,
   demands: { item: string; rate: number }[],
@@ -312,7 +310,6 @@ export function calcResidentWaste(
   return result;
 }
 
-// 获取维护废料系数映射
 export function getMaintenanceWasteMap(data: GameData) {
   const map: Record<string, number[]> = {};
   for (const m of data.maintenance) {
@@ -320,17 +317,11 @@ export function getMaintenanceWasteMap(data: GameData) {
   }
   return map;
 }
-/**
-/**
- * 判断配方是否为维护回收配方（即应产生废料的维护配方）
- */
+
 export function isMaintenanceRecyclingRecipe(recipe: Recipe): boolean {
   return recipe.id.includes('Maintenance') && recipe.id.includes('Recycling');
 }
 
-/**
- * 判断一个物品是否属于“消耗时产生废料”的物品
- */
 export function isConsumptionWasteItem(item: string): boolean {
   const items = [
     'office supplies',

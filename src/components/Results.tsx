@@ -1,39 +1,57 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { Btn } from './UI';
-import { t, getMaintenanceReduction } from '../utils';
+import { t, getMaintenanceReduction, isNonScalable } from '../utils';
 import { Recipe } from '../types';
 
-// 辅助函数：计算配方的每分钟数值
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number) {
-  const scale = 60 / recipe.duration;
+  // 贸易配方特殊处理
+  if (recipe.module === 'trade') {
+    const inputs: Record<string, number> = {};
+    const outputs: Record<string, number> = {};
+    for (const [item, qty] of Object.entries(recipe.inputs)) {
+      inputs[item] = qty * machineCount;
+    }
+    for (const [item, qty] of Object.entries(recipe.outputs)) {
+      outputs[item] = qty * machineCount;
+    }
+    for (const [item, qty] of Object.entries(recipe.upkeep)) {
+      inputs[item] = (inputs[item] || 0) + qty * machineCount;
+    }
+    return { inputs, outputs, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount };
+  }
+
+  // 非贸易配方
+  const getScale = (item: string) => isNonScalable(item) ? 1 : (60 / recipe.duration);
   const inputs: Record<string, number> = {};
   const outputs: Record<string, number> = {};
-  let workers = 0;
-  let electricity = 0;
-  let computing = 0;
-  let maintI = 0, maintII = 0, maintIII = 0;
+  let workers = 0, electricity = 0, computing = 0, maintI = 0, maintII = 0, maintIII = 0;
 
+  // 处理 inputs
   for (const [item, qty] of Object.entries(recipe.inputs)) {
+    const scale = getScale(item);
     inputs[item] = (inputs[item] || 0) + qty * scale * machineCount;
   }
+  // 处理 outputs
   for (const [item, qty] of Object.entries(recipe.outputs)) {
+    const scale = getScale(item);
     outputs[item] = (outputs[item] || 0) + qty * scale * machineCount;
   }
-  workers = recipe.workers * machineCount;
-  const elecInput = recipe.inputs['electricity'] || 0;
-  const elecUpkeep = recipe.upkeep['electricity'] || 0;
-  electricity = (elecInput + elecUpkeep) * scale * machineCount;
-  const compInput = recipe.inputs['computing'] || 0;
-  const compUpkeep = recipe.upkeep['computing'] || 0;
-  computing = (compInput + compUpkeep) * scale * machineCount;
-  const maint = recipe.upkeep['maintenance i'] || 0;
-  if (maint) maintI = maint * scale * machineCount * (1 - reductionFactor);
-  const maint2 = recipe.upkeep['maintenance ii'] || 0;
-  if (maint2) maintII = maint2 * scale * machineCount * (1 - reductionFactor);
-  const maint3 = recipe.upkeep['maintenance iii'] || 0;
-  if (maint3) maintIII = maint3 * scale * machineCount * (1 - reductionFactor);
-
+  // 处理 upkeep：将所有消耗加入 inputs
+  for (const [item, qty] of Object.entries(recipe.upkeep)) {
+    const scale = getScale(item);
+    let reducedQty = qty * scale * machineCount;
+    if (item.startsWith('maintenance')) {
+      reducedQty *= (1 - reductionFactor);
+    }
+    inputs[item] = (inputs[item] || 0) + reducedQty;
+    if (item === 'maintenance i') maintI += reducedQty;
+    if (item === 'maintenance ii') maintII += reducedQty;
+    if (item === 'maintenance iii') maintIII += reducedQty;
+    if (item === 'electricity') electricity += reducedQty;
+    if (item === 'computing') computing += reducedQty;
+    if (item === '人力') workers += reducedQty;
+  }
   return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount };
 }
 
@@ -43,22 +61,25 @@ function mergeResources(target: Record<string, number>, source: Record<string, n
   }
 }
 
-// 汇总表格组件，支持 splitMode（左右分栏显示净产出/净消耗）
 const SummaryTable: React.FC<{
   data: { prod: Record<string, number>; cons: Record<string, number> };
   showTinyErrors: boolean;
   translation: Record<string, string>;
   splitMode?: boolean;
 }> = ({ data, showTinyErrors, translation, splitMode = false }) => {
+  const forcedOrder = ['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research'];
+  const alwaysShow = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research']);
   const allItems = new Set([...Object.keys(data.prod), ...Object.keys(data.cons)]);
   const items = Array.from(allItems).sort();
   const filtered = items.filter(item => {
+    if (alwaysShow.has(item)) return true;
     if (!showTinyErrors) {
       const prod = data.prod[item] || 0;
       const cons = data.cons[item] || 0;
       const net = Math.abs(prod - cons);
       const maxVal = Math.max(prod, cons);
-      if (net < 0.01 && maxVal > 0 && net / maxVal < 0.001) return false;
+      // 净产出小于 0.01 或者 净产出/最大值 < 0.01 (1%) 时隐藏
+      if (net < 0.01 || (maxVal > 0 && net / maxVal < 0.01)) return false;
     }
     return true;
   }).map(item => {
@@ -68,20 +89,46 @@ const SummaryTable: React.FC<{
     return { item, prod, cons, net };
   });
 
+  // 分离强制显示的物品和其他物品
+  let forcedItems: { item: string; prod: number; cons: number; net: number }[] = [];
+  let otherItems: { item: string; prod: number; cons: number; net: number }[] = [];
+  filtered.forEach(item => {
+    if (forcedOrder.includes(item.item)) {
+      forcedItems.push(item);
+    } else {
+      otherItems.push(item);
+    }
+  });
+
+  // 按照 forcedOrder 排序 forcedItems
+  forcedItems.sort((a, b) => forcedOrder.indexOf(a.item) - forcedOrder.indexOf(b.item));
+
+  // 其他物品按字母顺序排序
+  otherItems.sort((a, b) => a.item.localeCompare(b.item));
+
+  const finalItems = [...forcedItems, ...otherItems];
+
   if (!splitMode) {
     return (
       <div className="table-wrapper">
         <table className="data-table">
           <thead>
-            <tr><th>{t('物品', translation)}</th><th>{t('产出/分', translation)}</th><th>{t('消耗/分', translation)}</th><th>{t('净产出', translation)}</th></tr>
+            <tr>
+              <th>{t('物品', translation)}</th>
+              <th>{t('产出/分', translation)}</th>
+              <th>{t('消耗/分', translation)}</th>
+              <th>{t('净产出', translation)}</th>
+            </tr>
           </thead>
           <tbody>
-            {filtered.map(({ item, prod, cons, net }) => (
+            {finalItems.map(({ item, prod, cons, net }) => (
               <tr key={item}>
                 <td>{t(item, translation)}</td>
                 <td>{prod.toFixed(2)}</td>
                 <td>{cons.toFixed(2)}</td>
-                <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>{(net >= 0 ? '+' : '') + net.toFixed(4)}</td>
+                <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>
+                  {(net >= 0 ? '+' : '') + net.toFixed(4)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -90,31 +137,44 @@ const SummaryTable: React.FC<{
     );
   }
 
-  // split 模式：左边净产出为正，右边净产出为负
-  const positiveItems = filtered.filter(f => f.net > 0);
-  const negativeItems = filtered.filter(f => f.net < 0);
+  const positiveItems = finalItems.filter(f => f.net > 0);
+  const negativeItems = finalItems.filter(f => f.net < 0);
   const maxRows = Math.max(positiveItems.length, negativeItems.length);
   return (
     <div className="split-summary">
       <div className="split-column">
         <table className="data-table">
-          <thead><tr><th>{t('净产出 (正)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
+          <thead>
+            <tr><th>{t('净产出 (正)', translation)}</th><th>{t('数量/分', translation)}</th></tr>
+          </thead>
           <tbody>
             {positiveItems.map(({ item, net }) => (
-              <tr key={item}><td>{t(item, translation)}</td><td className="positive-value">+{net.toFixed(4)}</td></tr>
+              <tr key={item}>
+                <td>{t(item, translation)}</td>
+                <td className="positive-value">+{net.toFixed(4)}</td>
+              </tr>
             ))}
-            {Array.from({ length: maxRows - positiveItems.length }).map((_, i) => <tr key={`empty-pos-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
+            {Array.from({ length: maxRows - positiveItems.length }).map((_, i) => (
+              <tr key={`empty-pos-${i}`}><td colSpan={2}>&nbsp;</td></tr>
+            ))}
           </tbody>
         </table>
       </div>
       <div className="split-column">
         <table className="data-table">
-          <thead><tr><th>{t('净消耗 (负)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
+          <thead>
+            <tr><th>{t('净消耗 (负)', translation)}</th><th>{t('数量/分', translation)}</th></tr>
+          </thead>
           <tbody>
             {negativeItems.map(({ item, net }) => (
-              <tr key={item}><td>{t(item, translation)}</td><td className="negative-value">{net.toFixed(4)}</td></tr>
+              <tr key={item}>
+                <td>{t(item, translation)}</td>
+                <td className="negative-value">{net.toFixed(4)}</td>
+              </tr>
             ))}
-            {Array.from({ length: maxRows - negativeItems.length }).map((_, i) => <tr key={`empty-neg-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
+            {Array.from({ length: maxRows - negativeItems.length }).map((_, i) => (
+              <tr key={`empty-neg-${i}`}><td colSpan={2}>&nbsp;</td></tr>
+            ))}
           </tbody>
         </table>
       </div>
@@ -122,7 +182,6 @@ const SummaryTable: React.FC<{
   );
 };
 
-// 配方列表组件
 const RecipeList: React.FC<{
   recipes: { recipe: Recipe; count: number; perMin: any }[];
   translation: Record<string, string>;
@@ -173,7 +232,6 @@ const RecipeList: React.FC<{
   );
 };
 
-// 模块行组件（全厂总览右侧），支持点击头部折叠/展开
 const ModuleRow: React.FC<{
   name: string;
   machineCount: number;
@@ -186,10 +244,8 @@ const ModuleRow: React.FC<{
   onClick: () => void;
   translation: Record<string, string>;
 }> = ({ name, machineCount, workers, netElectricity, computing, totalMaintenance, netProds, netCons, onClick, translation }) => {
-  const [expanded, setExpanded] = useState(true);
-
+  const [expanded, setExpanded] = useState(false);
   const toggleExpand = () => setExpanded(!expanded);
-
   return (
     <div className="module-row">
       <div className="module-header" onClick={toggleExpand} style={{ cursor: 'pointer' }}>
@@ -302,7 +358,6 @@ export const Results: React.FC = () => {
       }
     }
 
-    // 电力模块汇总
     let powerProd: Record<string, number> = {};
     let powerCons: Record<string, number> = {};
     let powerWorkers = 0, powerElectricity = 0, powerComputing = 0, powerMaintI = 0, powerMaintII = 0, powerMaintIII = 0, powerMachineCount = 0;
@@ -319,7 +374,6 @@ export const Results: React.FC = () => {
       powerMachineCount += item.machineCount;
     }
 
-    // 贸易模块汇总
     let tradeProd: Record<string, number> = {};
     let tradeCons: Record<string, number> = {};
     let tradeWorkers = 0, tradeElectricity = 0, tradeComputing = 0, tradeMaintI = 0, tradeMaintII = 0, tradeMaintIII = 0, tradeMachineCount = 0;
@@ -336,7 +390,6 @@ export const Results: React.FC = () => {
       tradeMachineCount += item.machineCount;
     }
 
-    // 特殊模块汇总
     let specialProd: Record<string, number> = {};
     let specialCons: Record<string, number> = {};
     let specialWorkers = 0, specialElectricity = 0, specialComputing = 0, specialMaintI = 0, specialMaintII = 0, specialMaintIII = 0, specialMachineCount = 0;
@@ -353,7 +406,6 @@ export const Results: React.FC = () => {
       specialMachineCount += item.machineCount;
     }
 
-    // 全厂汇总
     const allProd: Record<string, number> = {};
     const allCons: Record<string, number> = {};
     let allWorkers = 0, allElectricity = 0, allComputing = 0, allMaintI = 0, allMaintII = 0, allMaintIII = 0, allMachineCount = 0;
@@ -402,7 +454,6 @@ export const Results: React.FC = () => {
     }
   }, [selectedTab, categoryData]);
 
-  // 准备全厂总览右侧的模块行数据（包括无建筑的类别）
   const moduleRows = useMemo(() => {
     const rows: {
       name: string;
@@ -415,7 +466,6 @@ export const Results: React.FC = () => {
       netCons: { item: string; net: number }[];
     }[] = [];
 
-    // 建筑子类
     for (const [name, cat] of Object.entries(categoryData.mainCategories)) {
       const prodElec = cat.prod['electricity'] || 0;
       const consElec = cat.cons['electricity'] || 0;
@@ -433,7 +483,7 @@ export const Results: React.FC = () => {
       const netCons = Object.entries(netMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net }));
       rows.push({ name, machineCount: cat.machineCount, workers: cat.workers, netElectricity, computing: cat.computing, totalMaintenance, netProds, netCons });
     }
-    // 电力模块
+
     const powerNetElec = (categoryData.power.prod['electricity'] || 0) - (categoryData.power.cons['electricity'] || 0);
     const powerAllItems = new Set([...Object.keys(categoryData.power.prod), ...Object.keys(categoryData.power.cons)]);
     const powerNetMap: Record<string, number> = {};
@@ -453,7 +503,7 @@ export const Results: React.FC = () => {
       netProds: Object.entries(powerNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(powerNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
-    // 贸易模块
+
     const tradeNetElec = (categoryData.trade.prod['electricity'] || 0) - (categoryData.trade.cons['electricity'] || 0);
     const tradeAllItems = new Set([...Object.keys(categoryData.trade.prod), ...Object.keys(categoryData.trade.cons)]);
     const tradeNetMap: Record<string, number> = {};
@@ -473,7 +523,7 @@ export const Results: React.FC = () => {
       netProds: Object.entries(tradeNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(tradeNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
-    // 特殊模块
+
     const specialNetElec = (categoryData.special.prod['electricity'] || 0) - (categoryData.special.cons['electricity'] || 0);
     const specialAllItems = new Set([...Object.keys(categoryData.special.prod), ...Object.keys(categoryData.special.cons)]);
     const specialNetMap: Record<string, number> = {};
@@ -493,6 +543,7 @@ export const Results: React.FC = () => {
       netProds: Object.entries(specialNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(specialNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
+
     return rows;
   }, [categoryData]);
 
@@ -503,157 +554,39 @@ export const Results: React.FC = () => {
   return (
     <div className="results-container">
       <style>{`
-        .results-container {
-          font-size: 1.1rem;
-        }
-        .table-wrapper {
-          overflow-x: auto;
-        }
-        .data-table {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 1rem;
-        }
-        .data-table th, .data-table td {
-          padding: 8px 10px;
-          text-align: left;
-          border-bottom: 1px solid #eee;
-        }
-        .data-table tbody tr:hover {
-          background: #f9f9f9;
-        }
-        .positive-value {
-          color: #2e7d32;
-          font-weight: bold;
-        }
-        .negative-value {
-          color: #c62828;
-          font-weight: bold;
-        }
-        .split-summary {
-          display: flex;
-          gap: 20px;
-        }
-        .split-column {
-          flex: 1;
-        }
-        .module-row {
-          border: 1px solid #e0e0e0;
-          border-radius: 8px;
-          margin-bottom: 16px;
-          background: #fff;
-          transition: box-shadow 0.2s;
-        }
-        .module-row:hover {
-          box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .module-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 8px;
-          padding: 12px;
-          cursor: pointer;
-          font-size: 1rem;
-        }
-        .module-name {
-          font-weight: bold;
-          font-size: 1.2rem;
-        }
-        .module-stats {
-          font-size: 0.95rem;
-          color: #555;
-        }
-        .expand-icon {
-          font-size: 1.2rem;
-          font-weight: bold;
-          background: #f0f0f0;
-          padding: 4px 10px;
-          border-radius: 20px;
-          user-select: none;
-        }
-        .module-details {
-          display: flex;
-          gap: 24px;
-          flex-wrap: wrap;
-          padding: 12px;
-          border-top: 1px solid #eee;
-        }
-        .module-prods, .module-cons {
-          flex: 1;
-          min-width: 200px;
-          font-size: 0.95rem;
-        }
-        .module-prods strong, .module-cons strong {
-          display: block;
-          margin-bottom: 8px;
-        }
-        .net-items {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(180px, auto));
-          gap: 4px 12px;
-        }
-        .net-prod, .net-cons {
-          white-space: nowrap;
-        }
-        .tab-bar {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          border-bottom: 1px solid #ccc;
-          margin-bottom: 20px;
-          padding-bottom: 8px;
-        }
-        .tab-button {
-          padding: 8px 16px;
-          border: none;
-          background: #f5f5f5;
-          border-radius: 20px;
-          cursor: pointer;
-          font-size: 1rem;
-          transition: all 0.2s;
-        }
-        .tab-button.active {
-          background: #2563eb;
-          color: white;
-        }
-        .results-layout {
-          display: flex;
-          gap: 24px;
-          flex-wrap: wrap;
-        }
-        .summary-panel {
-          flex: 2;
-          min-width: 280px;
-        }
-        .detail-panel {
-          flex: 3;
-          min-width: 400px;
-        }
-        .hint {
-          color: #666;
-          font-size: 0.9rem;
-        }
-        .stat {
-          background: #e8f0fe;
-          padding: 10px;
-          border-radius: 6px;
-          margin: 10px 0;
-          font-size: 1rem;
-        }
-        .btn {
-          padding: 6px 12px;
-          font-size: 1rem;
-        }
+        .results-container { font-size: 1.1rem; }
+        .table-wrapper { overflow-x: auto; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 1rem; }
+        .data-table th, .data-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; }
+        .data-table tbody tr:hover { background: #f9f9f9; }
+        .positive-value { color: #2e7d32; font-weight: bold; }
+        .negative-value { color: #c62828; font-weight: bold; }
+        .split-summary { display: flex; gap: 20px; }
+        .split-column { flex: 1; }
+        .module-row { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 16px; background: #fff; transition: box-shadow 0.2s; }
+        .module-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .module-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; cursor: pointer; font-size: 1rem; }
+        .module-name { font-weight: bold; font-size: 1.2rem; }
+        .module-stats { font-size: 0.95rem; color: #555; }
+        .expand-icon { font-size: 1.2rem; font-weight: bold; background: #f0f0f0; padding: 4px 10px; border-radius: 20px; user-select: none; }
+        .module-details { display: flex; gap: 24px; flex-wrap: wrap; padding: 12px; border-top: 1px solid #eee; }
+        .module-prods, .module-cons { flex: 1; min-width: 200px; font-size: 0.95rem; }
+        .module-prods strong, .module-cons strong { display: block; margin-bottom: 8px; }
+        .net-items { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, auto)); gap: 4px 12px; }
+        .net-prod, .net-cons { white-space: nowrap; }
+        .tab-bar { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #ccc; margin-bottom: 20px; padding-bottom: 8px; }
+        .tab-button { padding: 8px 16px; border: none; background: #f5f5f5; border-radius: 20px; cursor: pointer; font-size: 1rem; transition: all 0.2s; }
+        .tab-button.active { background: #2563eb; color: white; }
+        .results-layout { display: flex; gap: 24px; flex-wrap: wrap; }
+        .summary-panel { flex: 2; min-width: 280px; }
+        .detail-panel { flex: 3; min-width: 400px; }
+        .hint { color: #666; font-size: 0.9rem; }
+        .stat { background: #e8f0fe; padding: 10px; border-radius: 6px; margin: 10px 0; font-size: 1rem; }
+        .btn { padding: 6px 12px; font-size: 1rem; }
       `}</style>
 
       {isSolving && <div>🔄 求解中...</div>}
-      {diagnostic && (
-        <div style={{ display: 'block', background: '#fff3cd', padding: 8, whiteSpace: 'pre-wrap', fontSize: 13 }}>
-          <span dangerouslySetInnerHTML={{ __html: diagnostic }} />
-        </div>
-      )}
+      {diagnostic && <div style={{ background: '#fff3cd', padding: 8, whiteSpace: 'pre-wrap', fontSize: 13 }} dangerouslySetInnerHTML={{ __html: diagnostic }} />}
       {result && resultStatus === 'Optimal' && (
         <>
           <div style={{ marginBottom: 8 }}>
@@ -665,22 +598,15 @@ export const Results: React.FC = () => {
             ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0)).toFixed(2)}</b> | 净凝聚力: <b>{unityProduced.toFixed(2)}</b>
           </div>
 
-          {/* 选项卡横条 */}
           <div className="tab-bar">
             {tabNames.map(name => (
-              <button
-                key={name}
-                onClick={() => setSelectedTab(name)}
-                className={`tab-button ${selectedTab === name ? 'active' : ''}`}
-              >
+              <button key={name} onClick={() => setSelectedTab(name)} className={`tab-button ${selectedTab === name ? 'active' : ''}`}>
                 {t(name, translation)}
               </button>
             ))}
           </div>
 
-          {/* 内容区域 */}
           <div className="results-layout">
-            {/* 左侧汇总表 */}
             <div className="summary-panel">
               <h4>{t('资源平衡', translation)}</h4>
               {currentData && (
@@ -692,7 +618,6 @@ export const Results: React.FC = () => {
                 />
               )}
             </div>
-            {/* 右侧配方列表或模块行 */}
             <div className="detail-panel">
               {selectedTab === '全厂总览' ? (
                 <>
@@ -717,10 +642,7 @@ export const Results: React.FC = () => {
                 <>
                   <h4>{t('配方列表', translation)}</h4>
                   {currentData && currentData.recipes && currentData.recipes.length > 0 ? (
-                    <RecipeList
-                      recipes={currentData.recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))}
-                      translation={translation}
-                    />
+                    <RecipeList recipes={currentData.recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} />
                   ) : (
                     <div className="hint">{t('无配方数据', translation)}</div>
                   )}
@@ -730,9 +652,7 @@ export const Results: React.FC = () => {
           </div>
         </>
       )}
-      {result && resultStatus !== 'Optimal' && (
-        <div>❌ 状态: {resultStatus || '未知'}</div>
-      )}
+      {result && resultStatus !== 'Optimal' && <div>❌ 状态: {resultStatus || '未知'}</div>}
     </div>
   );
 };

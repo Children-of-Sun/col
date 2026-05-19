@@ -1,4 +1,4 @@
-import { DockLevel, TradeContract, TradeFuel } from './types';
+import { DockLevel, TradeContract, TradeFuel, Recipe, TradeParams, GameData } from './types';
 
 export interface TradeResult {
   buyAmount: number;      // 单次贸易买入量
@@ -82,4 +82,127 @@ export function calculateTrade(
     buyModules: bestBuyModules,
     sellModules: bestSellModules,
   };
+}
+
+const MODULE_SPEEDS: Record<string, number> = { S: 125, M: 250, L: 500 };
+
+function getModuleCapacity(slots: number): number {
+  return slots <= 4 ? 800 : 1200;
+}
+
+function getDockMaintenance(slots: number, moduleCount: number, moduleSize: 'S' | 'M' | 'L') {
+  let workers = slots * 2;
+  const moduleWorkerMap: Record<string, number> = { S: 2, M: 3, L: 4 };
+  workers += moduleCount * moduleWorkerMap[moduleSize];
+  let electricity = slots * 100 + moduleCount * 50;
+  let maintI = slots * 1 + moduleCount * 1;
+  let maintII = slots * 0.5 + moduleCount * 0.5;
+  let maintIII = 0;
+  return { workers, electricity, maintI, maintII, maintIII };
+}
+
+function getTravelInfo(gameData: GameData | null, slots: number, fuelRaw: string, mode: string) {
+  if (gameData?.ship_fuel_configs) {
+    const dockKey = `dock_${slots}`;
+    const dock = gameData.ship_fuel_configs[dockKey];
+    if (dock && dock[fuelRaw] && dock[fuelRaw][mode]) {
+      return {
+        travelTime: dock[fuelRaw][mode].fuel_per_trip,
+        fuelPerTrip: dock[fuelRaw][mode].travel_time_min,
+      };
+    }
+  }
+  return { travelTime: 3, fuelPerTrip: 200 };
+}
+
+export function buildTradeRecipesFromParams(params: {
+  tradeContracts: TradeContract[];
+  selectedIds: string[];
+  baySlots: number;
+  moduleSize: 'S' | 'M' | 'L';
+  fuelTypeRaw: string;
+  travelMode: 'normal' | 'special';
+  profitBonus: number;
+  unityDiscount: number;
+  gameData: GameData | null;
+  translation: Record<string, string>;
+}): Recipe[] {
+  const {
+    tradeContracts,
+    selectedIds,
+    baySlots,
+    moduleSize,
+    fuelTypeRaw,
+    travelMode,
+    profitBonus,
+    unityDiscount,
+    gameData,
+    translation,
+  } = params;
+
+  const moduleSpeed = MODULE_SPEEDS[moduleSize];
+  const moduleCapacity = getModuleCapacity(baySlots);
+  const { travelTime, fuelPerTrip } = getTravelInfo(gameData, baySlots, fuelTypeRaw, travelMode);
+  const profitFactor = 1 + profitBonus / 100;
+  const unityDiscountFactor = 1 - unityDiscount / 100;
+
+  const recipes: Recipe[] = [];
+
+  for (const contract of tradeContracts) {
+    if (!selectedIds.includes(contract.id)) continue;
+
+    // 计算最佳贸易方案
+    const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
+    const { buyAmount, sellAmount, durationMinutes, buyModules, sellModules } = calculateTrade(
+      adjustedContract,
+      { level: 1, slots: baySlots, moduleCapacity, speedMultiplier: 1 },
+      { name: fuelTypeRaw, speedMultiplier: 1, consumptionPerTrip: fuelPerTrip, cohesionCost: 0 },
+      travelTime
+    ) || { buyAmount: 0, sellAmount: 0, durationMinutes: 1, buyModules: 0, sellModules: 0 };
+
+    if (buyAmount === 0) continue;
+
+    const perMinBuy = buyAmount / durationMinutes;
+    const perMinSell = sellAmount / durationMinutes;
+    const perMinFuel = fuelPerTrip / durationMinutes;
+    const totalModules = buyModules + sellModules;
+    const { workers, electricity, maintI, maintII, maintIII } = getDockMaintenance(baySlots, totalModules, moduleSize);
+    const perMinWorkers = workers / durationMinutes;
+    const perMinElectricity = electricity / durationMinutes;
+    const perMinMaintI = maintI / durationMinutes;
+    const perMinMaintII = maintII / durationMinutes;
+    const perMinMaintIII = maintIII / durationMinutes;
+
+    const recipe: Recipe = {
+      id: `trade_${contract.id}`,
+      name: `贸易: ${translation[contract.name?.toLowerCase()] || contract.name || contract.id}`,
+      buildingId: 'trade',
+      buildingName: translation['trade dock'] || '贸易码头',
+      category: '贸易',
+      buildingLevel: 0,
+      duration: 1,
+      inputs: {
+        [contract.sellItem.toLowerCase()]: perMinSell,
+        [fuelTypeRaw.toLowerCase()]: perMinFuel,
+      },
+      outputs: {
+        [contract.buyItem.toLowerCase()]: perMinBuy,
+      },
+      upkeep: {
+        '人力': perMinWorkers,
+        'electricity': perMinElectricity,
+        ...(perMinMaintI > 0 && { 'maintenance i': perMinMaintI }),
+        ...(perMinMaintII > 0 && { 'maintenance ii': perMinMaintII }),
+        ...(perMinMaintIII > 0 && { 'maintenance iii': perMinMaintIII }),
+      },
+      powerMultiplier: 1,
+      workers: perMinWorkers,
+      isSolar: false,
+      isHidden: false,
+      module: 'trade',
+    };
+    recipes.push(recipe);
+  }
+
+  return recipes;
 }
