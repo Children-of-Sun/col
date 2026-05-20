@@ -121,6 +121,8 @@ export interface Recipe {
   isHidden: boolean;
   module: 'main' | 'power' | 'resident' | 'station' | 'special' | 'trade';
   isLab?: boolean;
+  // 贸易配方专用：每100买入量产生的凝聚力消耗（正数）
+  tradeUnityPer100?: number;
 }
 
 export interface LabMeta {
@@ -235,7 +237,7 @@ export interface StoreState {
   setExcludedInputs: (items: string[]) => void;
   setExcludedItems: (items: string[]) => void;
 
-  // 原有 actions（省略具体声明，已在 stores.ts 实现）
+  // 原有 actions
   loadData: (json: DataJson) => void;
   loadTranslation: (json: Record<string, string>) => void;
   setMainEnabled: (name: string, value: boolean) => void;

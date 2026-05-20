@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useStore } from '../stores';
 import { TradeContract, Recipe } from '../types';
 import { t } from '../utils';
@@ -57,7 +57,6 @@ export const TradePanel: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<Set<string>>(new Set(selectedTradeContractIds));
 
-  // 使用 store 中的参数
   const baySlots = tradeParams.baySlots;
   const moduleSize = tradeParams.moduleSize;
   const fuelTypeRaw = tradeParams.fuelTypeRaw;
@@ -95,19 +94,9 @@ export const TradePanel: React.FC = () => {
     return { travelTime: 3, fuelPerTrip: 200 };
   };
 
-  const computeBestTrade = (
-    contract: TradeContract,
-    slots: number,
-    moduleSpeed: number,
-    moduleCapacity: number
-  ): { buy: number; sell: number; m: number; n: number; loadTime: number } => {
+  const computeBestTrade = (contract: TradeContract, slots: number, moduleSpeed: number, moduleCapacity: number) => {
     const { buyRate, sellRate } = contract;
-    let bestBuy = 0;
-    let bestSell = 0;
-    let bestM = 0;
-    let bestN = 0;
-    let bestLoadTime = 0;
-
+    let bestBuy = 0, bestSell = 0, bestM = 0, bestN = 0, bestLoadTime = 0;
     for (let m = 1; m < slots; m++) {
       const n = slots - m;
       const buy1 = Math.floor(m * moduleCapacity);
@@ -116,11 +105,7 @@ export const TradePanel: React.FC = () => {
       const loadSell1 = n > 0 ? sell1 / (n * moduleSpeed) : 0;
       const load1 = Math.max(loadBuy1, loadSell1);
       if (sell1 <= n * moduleCapacity && buy1 > bestBuy) {
-        bestBuy = buy1;
-        bestSell = sell1;
-        bestM = m;
-        bestN = n;
-        bestLoadTime = load1;
+        bestBuy = buy1; bestSell = sell1; bestM = m; bestN = n; bestLoadTime = load1;
       }
       const sell2 = Math.floor(n * moduleCapacity);
       const buy2 = Math.floor(sell2 * (buyRate / sellRate));
@@ -128,17 +113,12 @@ export const TradePanel: React.FC = () => {
       const loadSell2 = n > 0 ? sell2 / (n * moduleSpeed) : 0;
       const load2 = Math.max(loadBuy2, loadSell2);
       if (buy2 <= m * moduleCapacity && buy2 > bestBuy) {
-        bestBuy = buy2;
-        bestSell = sell2;
-        bestM = m;
-        bestN = n;
-        bestLoadTime = load2;
+        bestBuy = buy2; bestSell = sell2; bestM = m; bestN = n; bestLoadTime = load2;
       }
     }
     return { buy: bestBuy, sell: bestSell, m: bestM, n: bestN, loadTime: bestLoadTime };
   };
 
-  // 构建每分钟速率配方（duration=1）
   const buildTradeRecipe = (contract: TradeContract, result: Omit<TradeResult, 'contract'>): Recipe | null => {
     const { buyAmount, sellAmount, totalTime, fuelPerTrip, workers, electricity, maintI, maintII, maintIII } = result;
     const perMinBuy = buyAmount / totalTime;
@@ -149,6 +129,8 @@ export const TradePanel: React.FC = () => {
     const perMinMaintI = maintI / totalTime;
     const perMinMaintII = maintII / totalTime;
     const perMinMaintIII = maintIII / totalTime;
+    const unityPer100 = contract.unity_per_100_bought || 0;
+    const perMinUnity = (perMinBuy / 100) * unityPer100;
 
     const recipe: Recipe = {
       id: `trade_${contract.id}`,
@@ -168,9 +150,10 @@ export const TradePanel: React.FC = () => {
       upkeep: {
         '人力': perMinWorkers,
         'electricity': perMinElectricity,
-        ...(perMinMaintI > 0 && { 'maintenance i': perMinMaintI }),
-        ...(perMinMaintII > 0 && { 'maintenance ii': perMinMaintII }),
-        ...(perMinMaintIII > 0 && { 'maintenance iii': perMinMaintIII }),
+        'maintenance i': perMinMaintI,
+        'maintenance ii': perMinMaintII,
+        'maintenance iii': perMinMaintIII,
+        '凝聚力': perMinUnity,
       },
       powerMultiplier: 1,
       workers: perMinWorkers,
@@ -181,7 +164,6 @@ export const TradePanel: React.FC = () => {
     return recipe;
   };
 
-  // 实时计算所有合同结果（用于弹窗预览）
   const allContractResults = useMemo(() => {
     if (!tradeContracts.length) return [];
     const moduleSpeed = MODULE_SPEEDS[moduleSize];
@@ -220,20 +202,23 @@ export const TradePanel: React.FC = () => {
       };
     }).filter((r): r is TradeResult => r !== null);
     results.sort((a, b) => t(a.contract.buyItem, translation).localeCompare(t(b.contract.buyItem, translation)));
+    if (typeof window !== 'undefined' && window.localStorage.getItem('factoryDebug') === 'true') {
+      console.log('=== 贸易合同凝聚力消耗（每分钟） ===');
+      results.forEach(res => {
+        console.log(`${res.contract.name}: ${res.unityPerMin} (买入 ${res.buyPerMin}/分)`);
+      });
+    }
     return results;
   }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonus, unityDiscount, translation]);
 
-  // 打开弹窗时，刷新临时选中列表（基于 store 中的选中合同 ID）
   const openModal = () => {
     setTempSelectedIds(new Set(selectedTradeContractIds));
     setModalOpen(true);
   };
 
-  // 保存弹窗选择：更新 store 中的选中合同 ID，并立即生成配方（因为用户主动保存）
   const saveSelection = () => {
     const newIds = Array.from(tempSelectedIds);
     setSelectedTradeContractIds(newIds);
-    // 根据当前参数和新的选中 ID 生成配方
     const newRecipes: Recipe[] = [];
     for (const result of allContractResults) {
       if (tempSelectedIds.has(result.contract.id)) {
@@ -246,9 +231,7 @@ export const TradePanel: React.FC = () => {
   };
 
   const cancelModal = () => setModalOpen(false);
-
   const activeCount = selectedTradeRecipes.length;
-
   const fuelOptions = useMemo(() => availableFuels.map(fuel => ({ value: fuel, label: t(fuel, translation) })), [availableFuels, translation]);
 
   return (
@@ -265,8 +248,7 @@ export const TradePanel: React.FC = () => {
         <div>
           <label>模块尺寸: </label>
           <select value={moduleSize} onChange={e => setModuleSize(e.target.value as any)}>
-            <option value="S">S (125/min)</option><option value="M">M (250/min)</option>
-            <option value="L">L (500/min)</option>
+            <option value="S">S (125/min)</option><option value="M">M (250/min)</option><option value="L">L (500/min)</option>
           </select>
         </div>
         <div>
@@ -315,15 +297,7 @@ export const TradePanel: React.FC = () => {
                 return (
                   <tr key={res.contract.id}>
                     <td style={{ textAlign: 'center' }}>
-                      <input
-                        type="checkbox"
-                        checked={tempSelectedIds.has(res.contract.id)}
-                        onChange={e => {
-                          const newSet = new Set(tempSelectedIds);
-                          e.target.checked ? newSet.add(res.contract.id) : newSet.delete(res.contract.id);
-                          setTempSelectedIds(newSet);
-                        }}
-                      />
+                      <input type="checkbox" checked={tempSelectedIds.has(res.contract.id)} onChange={e => { const newSet = new Set(tempSelectedIds); e.target.checked ? newSet.add(res.contract.id) : newSet.delete(res.contract.id); setTempSelectedIds(newSet); }} />
                     </td>
                     <td>{t(res.contract.name || res.contract.id, translation)}<br/><small>{t('声望要求', translation)} ≥ {res.contract.min_reputation_required || 0}</small></td>
                     <td>{t(res.contract.buyItem, translation)}</td>

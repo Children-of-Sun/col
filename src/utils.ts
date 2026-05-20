@@ -132,6 +132,7 @@ export function calcResidentDemands(
   const factor = pop / data.populationScale;
   const housing = data.housingTiers[housingIdx] || { multipliers: {}, unityMultiplierConditions: [] };
 
+  // 需求乘数（仅用于物品需求，不影响凝聚力）
   let catMods: Record<string, number> = {};
   let itemMods: Record<string, number> = {};
 
@@ -177,6 +178,7 @@ export function calcResidentDemands(
     }
   });
 
+  // 食物分组（仅用于需求计算，不影响凝聚力）
   const foodGroups: Record<string, string[]> = {};
   for (const [name, svc] of Object.entries(data.services)) {
     if (svc.category === 'food' && svc['Food Category']) {
@@ -195,8 +197,10 @@ export function calcResidentDemands(
   const crossGroupFactor = numActiveGroups > 0 ? totalCategories / numActiveGroups : 0;
 
   const demands: { item: string; rate: number }[] = [];
-  let foodUnity = 0, otherUnity = 0;
+  let foodUnity = 0;
+  let nonFoodUnity = 0;
 
+  // 食物需求与凝聚力
   if (numActiveGroups > 0) {
     for (const [grp, enabledList] of Object.entries(activeGroups)) {
       const intraFactor = foodGroups[grp].length / enabledList.length;
@@ -208,11 +212,12 @@ export function calcResidentDemands(
         if (itemMods[name]) mod *= itemMods[name];
         demand *= mod;
         demands.push({ item: name.toLowerCase(), rate: demand });
-        foodUnity += svc.unity;
+        foodUnity += svc.unity;      // 食物Unity直接累加
       }
     }
   }
 
+  // 医疗
   if (selectedMedical) {
     const svc = data.services[selectedMedical];
     let demand = svc.demand * factor;
@@ -221,9 +226,10 @@ export function calcResidentDemands(
     if (itemMods[selectedMedical]) mod *= itemMods[selectedMedical];
     demand *= mod;
     demands.push({ item: selectedMedical.toLowerCase(), rate: demand });
-    otherUnity += svc.unity;
+    nonFoodUnity += svc.unity;
   }
 
+  // 其他服务（非食物、非医疗）
   for (const [name, svc] of Object.entries(data.services)) {
     if (svc.category === 'food' || svc.category === 'medical') continue;
     if (!selectedOthers.has(name)) continue;
@@ -233,21 +239,25 @@ export function calcResidentDemands(
     if (itemMods[name]) mod *= itemMods[name];
     demand *= mod;
     demands.push({ item: name.toLowerCase(), rate: demand });
-    otherUnity += svc.unity;
+    nonFoodUnity += svc.unity;
   }
 
-  let unityProduced = foodUnity + otherUnity;
-  let unityConsumed = 0;
-
-  const housingMult = housing.unityMultiplierConditions.reduce((best, cond) => {
+  // 住房最高乘数
+  let housingMult = 1;
+  for (const cond of housing.unityMultiplierConditions) {
     const satisfied = cond.requires.every(r => data.services[r] !== undefined);
-    return satisfied && cond.multiplier > best ? cond.multiplier : best;
-  }, 1);
-  
-  let officeUnityPct = 0;
+    if (satisfied && cond.multiplier > housingMult) {
+      housingMult = cond.multiplier;
+    }
+  }
+
+  // 办公/研究凝聚力百分比加成
+  let unityPct = 0;
   data.office.forEach((o, i) => {
     const lvl = officeLevels[i] || 0;
-    if (o.targetCategory === 'unity' && lvl > 0) officeUnityPct += o.effectPerLevel * lvl;
+    if (o.targetCategory === 'unity' && lvl > 0) {
+      unityPct += o.effectPerLevel * lvl;
+    }
   });
   data.research.forEach((r, i) => {
     const lvl = researchLevels[i] || 0;
@@ -256,26 +266,28 @@ export function calcResidentDemands(
       targets.forEach((t, idx) => {
         if (t === 'unity') {
           const eff = Array.isArray(r.effectPerLevel) ? (r.effectPerLevel[idx] || 0) : r.effectPerLevel;
-          officeUnityPct += eff * lvl;
+          unityPct += eff * lvl;
         }
       });
     }
   });
 
+  // 法令固定值
+  let edictUnity = 0;
   data.edicts.forEach((e, i) => {
     const lvl = edictLevels[i] ?? -1;
     if (lvl >= 0 && e.unityPerLevel[lvl] !== undefined) {
-      const val = e.unityPerLevel[lvl];
-      if (val > 0) unityProduced += val;
-      else unityConsumed += val;
+      edictUnity += e.unityPerLevel[lvl];
     }
   });
 
-  const multFactor = housingMult * (1 + officeUnityPct) * (1 + stationLevel * 0.05);
-  const unityProduction = unityProduced * multFactor;
-  const unityConsumption = Math.abs(unityConsumed) * multFactor;
+  // 空间站加成
+  const stationBonus = stationLevel * 0.05;
 
-  return { demands, unityProduction, unityConsumption, recycleRate };
+  // 凝聚力公式
+  const cohesion = ((nonFoodUnity + 1) * housingMult + foodUnity) * (1 + unityPct) + stationBonus + edictUnity;
+
+  return { demands, unityProduction: cohesion, unityConsumption: 0, recycleRate };
 }
 
 export function calcResidentWaste(

@@ -119,6 +119,8 @@ export default function App() {
     // 强制刷新贸易配方（基于最新参数和选中的合同）
     const { tradeParams, selectedTradeContractIds, tradeContracts, gameData, translation } = useStore.getState();
     let tradeActive: Recipe[] = [];
+    let tradeUnityConsumptionTotal = 0;  // 累计贸易凝聚力消耗
+
     if (selectedTradeContractIds.length > 0 && tradeContracts.length > 0) {
       const moduleSpeed = { S: 125, M: 250, L: 500 }[tradeParams.moduleSize];
       const moduleCapacity = tradeParams.baySlots <= 4 ? 800 : 1200;
@@ -189,6 +191,12 @@ export default function App() {
         const perMinMaintI = maintI / totalTime;
         const perMinMaintII = maintII / totalTime;
         const perMinMaintIII = maintIII / totalTime;
+        
+        // 计算该合同的凝聚力消耗（每分钟）
+        const unityPer100 = contract.unity_per_100_bought || 0;
+        const perMinUnity = (perMinBuy / 100) * unityPer100;
+        tradeUnityConsumptionTotal += perMinUnity;
+
         const recipe: Recipe = {
           id: `trade_${contract.id}`,
           name: `贸易: ${t(contract.name || contract.id, translation)}`,
@@ -210,12 +218,14 @@ export default function App() {
             'maintenance i': perMinMaintI,
             'maintenance ii': perMinMaintII,
             'maintenance iii': perMinMaintIII,
+            '凝聚力': perMinUnity,   // 记录凝聚力消耗
           },
           powerMultiplier: 1,
           workers: perMinWorkers,
           isSolar: false,
           isHidden: false,
           module: 'trade',
+          tradeUnityPer100: unityPer100,   // 保存凝聚力系数用于优化计算
         };
         newTradeRecipes.push(recipe);
       }
@@ -549,7 +559,6 @@ export default function App() {
       unityProduction = result.unityProduction;
       unityConsumption = result.unityConsumption;
       setUnityProduction(unityProduction);
-      setUnityConsumption(unityConsumption);
 
       const residentWasteSupplies = calcResidentWaste(
         currentGameData,
@@ -608,7 +617,7 @@ export default function App() {
       const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (cargoBonus - 1);
 
       const stationPartsRate = s.stationLevel * STATION_PARTS_RATE;
-      const crewSuppliesRate = Math.max(0, (s.stationLevel - 1) * 0.2);
+      const crewSuppliesRate = Math.max(0, (s.stationLevel - 1) * CREW_SUPPLIES_RATE);
       let labCargoRate = 0;
       const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
       if (meta && s.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * s.labCount;
@@ -633,18 +642,18 @@ export default function App() {
 
     const stationActive = [stationRecipe];
 
-    // 注意：tradeActive 已经在函数开头定义并赋值，这里不再重复定义
+    // 将贸易凝聚力消耗加到居民凝聚力消耗上
+    const totalUnityConsumption = unityConsumption + tradeUnityConsumptionTotal;
+    setUnityConsumption(totalUnityConsumption);
 
     const allFixedDemands = getFixedDemands();
     const positiveDemands = [...s.demands, ...allFixedDemands.filter(d => !ignored.has(d.item) && !excludedOutputs.has(d.item) && !excludedInputs.has(d.item) && d.rate >= 0)];
 
     const effectiveAllowExternal = s.allowExternal;
-
-    // 获取优化模式和固定凝聚力值
     const optimizationMode = useStore.getState().optimizationMode;
     const customWeights = useStore.getState().customWeights;
     const fixedUnityProduction = unityProduction;
-    const fixedUnityConsumption = unityConsumption;
+    const fixedUnityConsumption = totalUnityConsumption;  // 传递给 lpBuilder（用于凝聚力模式，但已通过贸易变量体现）
 
     const { lpString, varNames, missing } = buildLp({
       mainActive,
@@ -725,6 +734,14 @@ export default function App() {
         }
         setResult(result);
         setIsSolving(false);
+        if (DEBUG && result.Status === 'Optimal') {
+          console.log('=== 求解结果 - 贸易变量值 ===');
+          tradeActive.forEach((recipe, idx) => {
+            const varName = `tr${idx}`;
+            const val = result.Columns[varName]?.Primal || 0;
+            console.log(`${recipe.name}: ${val}`);
+          });
+        }
         if (result.Status === 'Optimal') {
           setDiagnostic('');
         } else if (result.Status === 'Infeasible') {
@@ -746,7 +763,7 @@ export default function App() {
       setIsSolving(false);
       setDiagnostic(`求解器错误: ${err.message}`);
     }
-  }, [getFixedDemands, solarEfficiency]); // 注意依赖项中去掉了 selectedTradeRecipes
+  }, [getFixedDemands, solarEfficiency]);
 
   return (
     <>

@@ -1,6 +1,9 @@
 import { Recipe, Demand } from './types';
 import { isRaw } from './utils';
 
+// 全局调试标志（从 localStorage 读取）
+const DEBUG = typeof window !== 'undefined' && window.localStorage?.getItem('factoryDebug') === 'true';
+
 export interface LpInput {
   mainActive: Recipe[];
   powerActive: Recipe[];
@@ -67,18 +70,17 @@ export function buildLp(input: LpInput): LpOutput {
         coeff = recipe.upkeep['人力'] || 0;
       } else if (target === 'cohesion') {
         if (recipe.module === 'trade') {
+          // 直接从配方中读取凝聚力系数（每100买入量的消耗）
+          const unityPer100 = (recipe as any).tradeUnityPer100 || 0;
           const buyItem = Object.keys(recipe.outputs)[0];
           const buyRate = recipe.outputs[buyItem];
-          const contract = tradeActive.find(t => t.id === recipe.id) as any;
-          const unityPer100 = contract?.unity_per_100_bought || 0;
-          coeff = (buyRate / 100) * unityPer100;
+          coeff = (buyRate / 100) * unityPer100;   // 正数，表示凝聚力消耗
         }
       } else if (target === 'area') {
-        coeff = 1;
+        coeff = 1;   // 简化，每个配方占1单位面积
       } else if (target === 'raw') {
         for (const [item, qty] of Object.entries(recipe.inputs)) {
           if (isRaw(item)) {
-            // 原矿消耗不缩放（因为原矿输入本身是持续？但原矿也是间歇产出，需要缩放？这里简化：不缩放）
             coeff += qty;
           }
         }
@@ -113,58 +115,73 @@ export function buildLp(input: LpInput): LpOutput {
       }
     }
     objExpr = terms.join(' + ');
-  } else {
-    let target = optimizationMode;
-    if (target === 'cohesion') {
-      const coeffs = computeTargetCoeffs('cohesion');
-      const terms: string[] = [];
-      let idx = 0;
-      for (let i = 0; i < allRecipesList.length; i++) {
-        const vars = allVarLists[i];
-        const recipes = allRecipesList[i];
-        for (let j = 0; j < recipes.length; j++) {
-          const coeff = coeffs[idx + j];
-          if (Math.abs(coeff) > 1e-9) {
-            terms.push(`${coeff.toFixed(6)} ${vars[j]}`);
-          }
+  } else if (optimizationMode === 'cohesion') {
+    // 凝聚力模式：目标 = Σ(贸易凝聚力消耗 * tr) + 微小机器数量惩罚（确保唯一解）
+    const cohesionCoeffs = computeTargetCoeffs('cohesion');
+    const machineCoeffs = computeTargetCoeffs('machines');
+    const terms: string[] = [];
+    let idx = 0;
+    for (let i = 0; i < allRecipesList.length; i++) {
+      const vars = allVarLists[i];
+      const recipes = allRecipesList[i];
+      for (let j = 0; j < recipes.length; j++) {
+        const cohesion = cohesionCoeffs[idx + j];
+        const machines = machineCoeffs[idx + j];
+        // 主要目标：凝聚力消耗，加上极小的机器数量惩罚（确保唯一解）
+        const total = cohesion + machines * 0.0001;
+        if (Math.abs(total) > 1e-9) {
+          terms.push(`${total.toFixed(6)} ${vars[j]}`);
         }
-        idx += recipes.length;
       }
-      objExpr = terms.join(' + ');
-    } else {
-      const coeffs = computeTargetCoeffs(target);
-      const terms: string[] = [];
-      let idx = 0;
-      for (let i = 0; i < allRecipesList.length; i++) {
-        const vars = allVarLists[i];
-        const recipes = allRecipesList[i];
-        for (let j = 0; j < recipes.length; j++) {
-          const coeff = coeffs[idx + j];
-          if (Math.abs(coeff) > 1e-9) {
-            terms.push(`${coeff.toFixed(6)} ${vars[j]}`);
-          }
-        }
-        idx += recipes.length;
-      }
-      objExpr = terms.join(' + ');
+      idx += recipes.length;
     }
+    objExpr = terms.join(' + ');
+    if (DEBUG) {
+      console.log('=== 凝聚力模式目标函数 ===');
+      console.log(objExpr || '0');
+      console.log('贸易配方系数:');
+      tradeActive.forEach((recipe, i) => {
+        const varName = `tr${i}`;
+        const coeff = cohesionCoeffs[mainVarNames.length + powerVarNames.length + residentVarNames.length + stationVarNames.length + specialVarNames.length + i];
+        console.log(`  ${recipe.name} (${varName}) : ${coeff} 凝聚力/分钟`);
+      });
+    }
+  } else {
+    // 其他预设模式（机器数量、人力、占地面积、原矿消耗）
+    const target = optimizationMode === 'labor' ? 'labor' : (optimizationMode === 'area' ? 'area' : (optimizationMode === 'raw' ? 'raw' : 'machines'));
+    const coeffs = computeTargetCoeffs(target);
+    const terms: string[] = [];
+    let idx = 0;
+    for (let i = 0; i < allRecipesList.length; i++) {
+      const vars = allVarLists[i];
+      const recipes = allRecipesList[i];
+      for (let j = 0; j < recipes.length; j++) {
+        const coeff = coeffs[idx + j];
+        if (Math.abs(coeff) > 1e-9) {
+          terms.push(`${coeff.toFixed(6)} ${vars[j]}`);
+        }
+      }
+      idx += recipes.length;
+    }
+    objExpr = terms.join(' + ');
   }
 
   if (!objExpr) objExpr = '0';
 
   let lp = `MIN\nOBJ: ${objExpr}\nST\n`;
 
+  // 固定居民、空间站、特殊模块数量为 1
   residentVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
   stationVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
   specialVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
 
-  // 构建约束表达式
+  // 构建约束表达式（缩放逻辑：只有维护 I/II/III 产出缩放，其他不缩放；贸易配方不缩放）
   const makeExpr = (recipes: Recipe[], vars: string[], it: string): string => {
     let expr = '';
     recipes.forEach((r, i) => {
-      // 贸易配方特殊处理（已为每分钟速率，不缩放）
+      let c = 0;
+      // 贸易配方特殊处理：不缩放
       if (r.module === 'trade') {
-        let c = 0;
         if (r.outputs[it]) c += r.outputs[it];
         if (r.inputs[it]) c -= r.inputs[it];
         if (r.upkeep[it]) {
@@ -176,32 +193,28 @@ export function buildLp(input: LpInput): LpOutput {
           if (c >= 0 && expr) expr += '+ ';
           expr += c >= 0 ? `${c} ${vars[i]}` : `- ${-c} ${vars[i]}`;
         }
-        return; // 跳过后续缩放逻辑
+        return;
       }
 
-      // 以下为非贸易配方的缩放逻辑
-      let c = 0;
-      // 决定缩放系数
+      // 非贸易配方缩放规则
       let scale = 1;
       const isContinuousItem = isContinuous(it);
       const isMaintenanceOutput = (it === 'maintenance i' || it === 'maintenance ii' || it === 'maintenance iii') && r.outputs[it];
       
       if (r.outputs[it]) {
-        if (isMaintenanceOutput) scale = 60 / r.duration;       // 维护产出缩放
-        else if (!isContinuousItem) scale = 60 / r.duration;   // 普通物品产出缩放
-        // 持续物品产出不缩放 (scale=1)
+        if (isMaintenanceOutput) scale = 60 / r.duration;
+        else if (!isContinuousItem) scale = 60 / r.duration;
       }
       if (r.inputs[it]) {
-        if (!isContinuousItem) scale = 60 / r.duration;        // 普通物品输入缩放
-        // 持续物品输入不缩放 (scale=1)
+        if (!isContinuousItem) scale = 60 / r.duration;
       }
-      // 注意：upkeep 永远不缩放，保持 scale=1
+      // 注意：upkeep 永远不缩放
       
       if (r.outputs[it]) c += scale * r.outputs[it];
       if (r.inputs[it]) c -= scale * r.inputs[it];
       if (r.upkeep[it]) {
         const reduction = it.startsWith('maintenance') ? reductionFactor : 0;
-        c -= r.upkeep[it] * (1 - reduction);   // upkeep 不缩放
+        c -= r.upkeep[it] * (1 - reduction);
       }
       if (Math.abs(c) > 1e-9) {
         if (expr) expr += ' ';

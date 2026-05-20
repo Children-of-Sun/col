@@ -10,10 +10,11 @@ const isContinuous = (item: string): boolean => {
 };
 
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number) {
-  // 贸易配方特殊处理
+  // 贸易配方特殊处理（已为每分钟速率）
   if (recipe.module === 'trade') {
     const inputs: Record<string, number> = {};
     const outputs: Record<string, number> = {};
+    let cohesion = 0;
     for (const [item, qty] of Object.entries(recipe.inputs)) {
       inputs[item] = qty * machineCount;
     }
@@ -21,9 +22,13 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
       outputs[item] = qty * machineCount;
     }
     for (const [item, qty] of Object.entries(recipe.upkeep)) {
-      inputs[item] = (inputs[item] || 0) + qty * machineCount;
+      if (item === '凝聚力') {
+        cohesion = qty * machineCount;
+      } else {
+        inputs[item] = (inputs[item] || 0) + qty * machineCount;
+      }
     }
-    return { inputs, outputs, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount };
+    return { inputs, outputs, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount, cohesion };
   }
 
   // 非贸易配方
@@ -33,7 +38,6 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
 
   for (const [item, qty] of Object.entries(recipe.inputs)) {
     const isContinuousItem = isContinuous(item);
-    const isMaintenanceOutput = false; // 输入不涉及维护产出
     let scale = 1;
     if (!isContinuousItem) scale = 60 / recipe.duration;
     inputs[item] = (inputs[item] || 0) + qty * scale * machineCount;
@@ -117,9 +121,7 @@ const SummaryTable: React.FC<{
                 <td>{t(item, translation)}</td>
                 <td>{prod.toFixed(2)}</td>
                 <td>{cons.toFixed(2)}</td>
-                <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>
-                  {(net >= 0 ? '+' : '') + net.toFixed(4)}
-                </td>
+                <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>{(net >= 0 ? '+' : '') + net.toFixed(4)}</td>
               </tr>
             ))}
           </tbody>
@@ -194,8 +196,7 @@ const RecipeList: React.FC<{
             const maintStr = maintParts.join(' ') || '-';
             let cohesionConsumption = '';
             if (isTrade) {
-              const unityVal = pm.inputs['凝聚力'] || 0;
-              cohesionConsumption = unityVal.toFixed(4);
+              cohesionConsumption = (pm.cohesion || 0).toFixed(4);
             }
             return (
               <tr key={idx}>
@@ -515,9 +516,15 @@ export const Results: React.FC = () => {
             ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0)).toFixed(2)}</b><br/>
             🎯 凝聚力产量: <b>{unityProduction.toFixed(2)}</b> | 凝聚力消耗: <b>{unityConsumption.toFixed(2)}</b> | 净凝聚力: <b>{(unityProduction - unityConsumption).toFixed(2)}</b>
           </div>
+
           <div className="tab-bar">
-            {tabNames.map(name => <button key={name} onClick={() => setSelectedTab(name)} className={`tab-button ${selectedTab === name ? 'active' : ''}`}>{t(name, translation)}</button>)}
+            {tabNames.map(name => (
+              <button key={name} onClick={() => setSelectedTab(name)} className={`tab-button ${selectedTab === name ? 'active' : ''}`}>
+                {t(name, translation)}
+              </button>
+            ))}
           </div>
+
           <div className="results-layout">
             <div className="summary-panel">
               <h4>{t('资源平衡', translation)}</h4>
@@ -544,4 +551,4 @@ export const Results: React.FC = () => {
       {result && resultStatus !== 'Optimal' && <div>❌ 状态: {resultStatus || '未知'}</div>}
     </div>
   );
-};
+}

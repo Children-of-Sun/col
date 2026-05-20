@@ -243,7 +243,6 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.selectedTradeContractIds) state.selectedTradeContractIds = s.selectedTradeContractIds;
     if (s.optimizationMode) state.optimizationMode = s.optimizationMode;
     if (s.customWeights) state.customWeights = s.customWeights;
-    // 居民与科技
     if (s.population !== undefined) state.population = s.population;
     if (s.housingIndex !== undefined) state.housingIndex = s.housingIndex;
     if (s.selectedFoods) state.selectedFoods = new Set(s.selectedFoods);
@@ -284,7 +283,6 @@ export const useStore = create<StoreState>((set, get) => ({
       selectedTradeContractIds: s.selectedTradeContractIds,
       optimizationMode: s.optimizationMode,
       customWeights: s.customWeights,
-      // 居民与科技
       population: s.population,
       housingIndex: s.housingIndex,
       selectedFoods: Array.from(s.selectedFoods),
