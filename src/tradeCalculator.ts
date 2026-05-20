@@ -1,208 +1,338 @@
-import { DockLevel, TradeContract, TradeFuel, Recipe, TradeParams, GameData } from './types';
+import { create } from 'zustand';
+import { StoreState, DataJson, ParsedData, SolverResult, Demand, GameData, Recipe, TradeContract, TradeSetup, IntegerMode } from './types';
+import { parseData } from './parseData';
+import { getSeriesName, isPowerBuilding, HIDDEN_SERIES } from './utils';
 
-export interface TradeResult {
-  buyAmount: number;      // 单次贸易买入量
-  sellAmount: number;     // 单次贸易卖出量
-  durationMinutes: number; // 单次贸易总耗时（分钟）
-  slotsUsed: number;      // 使用的模块总数
-  buyModules: number;     // 用于买入的模块数
-  sellModules: number;    // 用于卖出的模块数
+function initializeFromParsed(p: ParsedData): Partial<StoreState> {
+  const mainEnabled: Record<string, boolean> = {};
+  const mainSelectedLevel: Record<string, number> = {};
+  p.mainSeriesList.forEach(s => {
+    const hi = s.levels[s.levels.length - 1].level;
+    mainSelectedLevel[s.name] = hi;
+    mainEnabled[s.name] = true;
+  });
+  const powerEnabled: Record<string, boolean> = {};
+  const powerSelectedLevel: Record<string, number> = {};
+  p.powerSeriesList.forEach(s => {
+    const hi = s.levels[s.levels.length - 1].level;
+    powerSelectedLevel[s.name] = hi;
+    powerEnabled[s.name] = true;
+  });
+  const recipeEnabled: Record<string, boolean> = {};
+  p.recipes.forEach(r => { recipeEnabled[r.id] = true; });
+  return { mainEnabled, mainSelectedLevel, powerEnabled, powerSelectedLevel, recipeEnabled };
 }
 
-/**
- * 计算单次贸易的最大可行运量及耗时
- * @param contract 贸易合同（比例）
- * @param dock 码头等级配置
- * @param fuel 燃料配置
- * @param baseTravelMinutes 基础航行时间（分钟，可配置为固定值或从游戏数据读取）
- */
-export function calculateTrade(
-  contract: TradeContract,
-  dock: DockLevel,
-  fuel: TradeFuel,
-  baseTravelMinutes: number = 30
-): TradeResult | null {
-  const { slots, moduleCapacity } = dock;
-  const speedFactor = dock.speedMultiplier * fuel.speedMultiplier;
-  const travelTime = baseTravelMinutes / speedFactor;
-  
-  // 归一化比例：使其中一个为 1
-  const sellPerBuy = contract.sellRate / contract.buyRate; // 每买入1单位需卖出多少
-  const buyPerSell = contract.buyRate / contract.sellRate; // 每卖出1单位可买入多少
-  
-  let bestBuyAmount = 0;
-  let bestSellAmount = 0;
-  let bestBuyModules = 0;
-  let bestSellModules = 0;
-  
-  // 遍历所有可能的模块分配方案（买入模块数 m，卖出模块数 n = slots - m）
-  for (let m = 0; m <= slots; m++) {
-    const n = slots - m;
-    if (n < 0) continue;
-    
-    // 方案一：买入模块装满，计算所需卖出量
-    const buyAmount1 = m * moduleCapacity;
-    const sellAmount1 = buyAmount1 * sellPerBuy;
-    if (sellAmount1 <= n * moduleCapacity + 1e-6) {
-      if (buyAmount1 > bestBuyAmount) {
-        bestBuyAmount = buyAmount1;
-        bestSellAmount = sellAmount1;
-        bestBuyModules = m;
-        bestSellModules = n;
-      }
-    }
-    
-    // 方案二：卖出模块装满，计算所得买入量
-    const sellAmount2 = n * moduleCapacity;
-    const buyAmount2 = sellAmount2 * buyPerSell;
-    if (buyAmount2 <= m * moduleCapacity + 1e-6) {
-      if (buyAmount2 > bestBuyAmount) {
-        bestBuyAmount = buyAmount2;
-        bestSellAmount = sellAmount2;
-        bestBuyModules = m;
-        bestSellModules = n;
-      }
-    }
-  }
-  
-  if (bestBuyAmount === 0) return null;
-  
-  // 计算装卸时间：取较慢的一方
-  let loadingTime = 0;
-  if (bestBuyModules > 0) loadingTime = Math.max(loadingTime, bestBuyAmount / (bestBuyModules * moduleCapacity));
-  if (bestSellModules > 0) loadingTime = Math.max(loadingTime, bestSellAmount / (bestSellModules * moduleCapacity));
-  
-  const totalDuration = travelTime + loadingTime;
-  
-  return {
-    buyAmount: bestBuyAmount,
-    sellAmount: bestSellAmount,
-    durationMinutes: totalDuration,
-    slotsUsed: slots,
-    buyModules: bestBuyModules,
-    sellModules: bestSellModules,
-  };
-}
+export const useStore = create<StoreState>((set, get) => ({
+  fullData: null,
+  recipes: [],
+  allItems: [],
+  translation: {},
+  mainSeriesList: [],
+  powerSeriesList: [],
+  labMeta: [],
+  dataLoaded: false,
 
-const MODULE_SPEEDS: Record<string, number> = { S: 125, M: 250, L: 500 };
+  mainEnabled: {},
+  mainSelectedLevel: {},
+  powerEnabled: {},
+  powerSelectedLevel: {},
+  recipeEnabled: {},
 
-function getModuleCapacity(slots: number): number {
-  return slots <= 4 ? 800 : 1200;
-}
+  mainBuildingEnabledMap: {},
+  powerBuildingEnabledMap: {},
 
-function getDockMaintenance(slots: number, moduleCount: number, moduleSize: 'S' | 'M' | 'L') {
-  let workers = slots * 2;
-  const moduleWorkerMap: Record<string, number> = { S: 2, M: 3, L: 4 };
-  workers += moduleCount * moduleWorkerMap[moduleSize];
-  let electricity = slots * 100 + moduleCount * 50;
-  let maintI = slots * 1 + moduleCount * 1;
-  let maintII = slots * 0.5 + moduleCount * 0.5;
-  let maintIII = 0;
-  return { workers, electricity, maintI, maintII, maintIII };
-}
+  demands: [],
 
-function getTravelInfo(gameData: GameData | null, slots: number, fuelRaw: string, mode: string) {
-  if (gameData?.ship_fuel_configs) {
-    const dockKey = `dock_${slots}`;
-    const dock = gameData.ship_fuel_configs[dockKey];
-    if (dock && dock[fuelRaw] && dock[fuelRaw][mode]) {
-      return {
-        travelTime: dock[fuelRaw][mode].fuel_per_trip,
-        fuelPerTrip: dock[fuelRaw][mode].travel_time_min,
-      };
-    }
-  }
-  return { travelTime: 3, fuelPerTrip: 200 };
-}
+  stationLevel: 0,
+  rocketType: 1,
+  statueCount: 0,
+  labLevel: '',
+  labCount: 0,
+  steamLowMode: 'internal',
 
-export function buildTradeRecipesFromParams(params: {
-  tradeContracts: TradeContract[];
-  selectedIds: string[];
-  baySlots: number;
-  moduleSize: 'S' | 'M' | 'L';
-  fuelTypeRaw: string;
-  travelMode: 'normal' | 'special';
-  profitBonus: number;
-  unityDiscount: number;
-  gameData: GameData | null;
-  translation: Record<string, string>;
-}): Recipe[] {
-  const {
-    tradeContracts,
-    selectedIds,
-    baySlots,
-    moduleSize,
-    fuelTypeRaw,
-    travelMode,
-    profitBonus,
-    unityDiscount,
-    gameData,
-    translation,
-  } = params;
+  ignoredItems: [],
+  allowExternal: false,
+  hideStage: true,
+  diagnosticMode: false,
+  excludedOutputs: [],
+  excludedInputs: [],
+  excludedItems: [],
+  constraintMode: 'noProd' as const,
+  showTinyErrors: true,
 
-  const moduleSpeed = MODULE_SPEEDS[moduleSize];
-  const moduleCapacity = getModuleCapacity(baySlots);
-  const { travelTime, fuelPerTrip } = getTravelInfo(gameData, baySlots, fuelTypeRaw, travelMode);
-  const profitFactor = 1 + profitBonus / 100;
-  const unityDiscountFactor = 1 - unityDiscount / 100;
+  result: null,
+  isSolving: false,
+  diagnostic: '',
 
-  const recipes: Recipe[] = [];
+  solverActive: [],
+  solverVarNames: [],
+  solverMissing: [],
+  solverFixedDemands: [],
+  unityProduction: 0,
+  unityConsumption: 0,
+  externalSupplies: [],
 
-  for (const contract of tradeContracts) {
-    if (!selectedIds.includes(contract.id)) continue;
+  gameData: null,
+  population: 1000,
+  housingIndex: 0,
+  selectedFoods: new Set<string>(),
+  selectedMedical: null,
+  selectedOthers: new Set<string>(),
+  edictLevels: {},
+  officeLevels: [],
+  researchLevels: [],
 
-    // 计算最佳贸易方案
-    const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
-    const { buyAmount, sellAmount, durationMinutes, buyModules, sellModules } = calculateTrade(
-      adjustedContract,
-      { level: 1, slots: baySlots, moduleCapacity, speedMultiplier: 1 },
-      { name: fuelTypeRaw, speedMultiplier: 1, consumptionPerTrip: fuelPerTrip, cohesionCost: 0 },
-      travelTime
-    ) || { buyAmount: 0, sellAmount: 0, durationMinutes: 1, buyModules: 0, sellModules: 0 };
+  tradeContracts: [],
+  tradeSetup: { contractId: '', dockLevel: 1, fuelName: 'Diesel' },
+  selectedTradeRecipes: [],
+  tradeParams: {
+    baySlots: 4,
+    moduleSize: 'M',
+    fuelTypeRaw: 'Diesel',
+    travelMode: 'normal',
+    profitBonus: 0,
+    unityDiscount: 0,
+  },
+  selectedTradeContractIds: [],
 
-    if (buyAmount === 0) continue;
+  solarEfficiency: 1,
 
-    const perMinBuy = buyAmount / durationMinutes;
-    const perMinSell = sellAmount / durationMinutes;
-    const perMinFuel = fuelPerTrip / durationMinutes;
-    const totalModules = buyModules + sellModules;
-    const { workers, electricity, maintI, maintII, maintIII } = getDockMaintenance(baySlots, totalModules, moduleSize);
-    const perMinWorkers = workers / durationMinutes;
-    const perMinElectricity = electricity / durationMinutes;
-    const perMinMaintI = maintI / durationMinutes;
-    const perMinMaintII = maintII / durationMinutes;
-    const perMinMaintIII = maintIII / durationMinutes;
+  optimizationMode: 'machines',
+  customWeights: { machines: 100, labor: 0, cohesion: 0, area: 0, raw: 0 },
 
-    const recipe: Recipe = {
-      id: `trade_${contract.id}`,
-      name: `贸易: ${translation[contract.name?.toLowerCase()] || contract.name || contract.id}`,
-      buildingId: 'trade',
-      buildingName: translation['trade dock'] || '贸易码头',
-      category: '贸易',
-      buildingLevel: 0,
-      duration: 1,
-      inputs: {
-        [contract.sellItem.toLowerCase()]: perMinSell,
-        [fuelTypeRaw.toLowerCase()]: perMinFuel,
-      },
-      outputs: {
-        [contract.buyItem.toLowerCase()]: perMinBuy,
-      },
-      upkeep: {
-        '人力': perMinWorkers,
-        'electricity': perMinElectricity,
-        ...(perMinMaintI > 0 && { 'maintenance i': perMinMaintI }),
-        ...(perMinMaintII > 0 && { 'maintenance ii': perMinMaintII }),
-        ...(perMinMaintIII > 0 && { 'maintenance iii': perMinMaintIII }),
-      },
-      powerMultiplier: 1,
-      workers: perMinWorkers,
-      isSolar: false,
-      isHidden: false,
-      module: 'trade',
+  // 新增字段默认值
+  integerMode: 'continuous',
+  redundancyFactor: 0.05,
+  milpTimeLimit: 30,
+
+  loadData: (json: DataJson) => {
+    const p = parseData(json);
+    const init = initializeFromParsed(p);
+    const recipeEnabled = init.recipeEnabled ?? {};
+    p.recipes.forEach(r => {
+      if (!recipeEnabled[r.id]) recipeEnabled[r.id] = true;
+    });
+    const allBuildingIds = json.machines_and_buildings.map(b => b.id);
+    const mainBuildingEnabledMap = Object.fromEntries(allBuildingIds.map(id => [id, true]));
+    const powerBuildingEnabledMap = Object.fromEntries(allBuildingIds.map(id => [id, true]));
+    set({
+      fullData: json,
+      recipes: p.recipes,
+      allItems: p.allItems,
+      mainSeriesList: p.mainSeriesList,
+      powerSeriesList: p.powerSeriesList,
+      labMeta: p.labMeta,
+      dataLoaded: true,
+      ...init,
+      recipeEnabled,
+      labLevel: p.labMeta.length ? p.labMeta[p.labMeta.length - 1].buildingId : '',
+      mainBuildingEnabledMap,
+      powerBuildingEnabledMap,
+    });
+  },
+
+  loadTranslation: (json: Record<string, string>) => {
+    const t: Record<string, string> = {};
+    for (const k in json) t[k.toLowerCase()] = json[k];
+    set({ translation: t });
+  },
+
+  setMainEnabled: (name, value) => set(s => ({ mainEnabled: { ...s.mainEnabled, [name]: value } })),
+  setMainLevel: (name, level) => set(s => ({ mainSelectedLevel: { ...s.mainSelectedLevel, [name]: level } })),
+  setPowerEnabled: (name, value) => set(s => ({ powerEnabled: { ...s.powerEnabled, [name]: value } })),
+  setPowerLevel: (name, level) => set(s => ({ powerSelectedLevel: { ...s.powerSelectedLevel, [name]: level } })),
+  setRecipeEnabled: (id, value) => set(s => ({ recipeEnabled: { ...s.recipeEnabled, [id]: value } })),
+  setMainBuildingEnabled: (id, value) => set(s => ({ mainBuildingEnabledMap: { ...s.mainBuildingEnabledMap, [id]: value } })),
+  setPowerBuildingEnabled: (id, value) => set(s => ({ powerBuildingEnabledMap: { ...s.powerBuildingEnabledMap, [id]: value } })),
+
+  addDemand: (item, rate) => set(s => ({ demands: [...s.demands, { item: item.toLowerCase(), rate }] })),
+  removeDemand: (index) => set(s => ({ demands: s.demands.filter((_, i) => i !== index) })),
+  setStationLevel: (v) => set({ stationLevel: v }),
+  setRocketType: (v) => set({ rocketType: v }),
+  setStatueCount: (v) => set({ statueCount: v }),
+  setLabLevel: (v) => set({ labLevel: v }),
+  setLabCount: (v) => set({ labCount: v }),
+  setSteamLowMode: (v) => set({ steamLowMode: v }),
+
+  toggleIgnored: (item) => set(s => ({
+    ignoredItems: s.ignoredItems.includes(item)
+      ? s.ignoredItems.filter(i => i !== item)
+      : [...s.ignoredItems, item]
+  })),
+  setAllowExternal: (v) => set({ allowExternal: v }),
+  setHideStage: (v) => set({ hideStage: v }),
+  setDiagnosticMode: (v) => set({ diagnosticMode: v }),
+  setExcludedOutputs: (items) => set({ excludedOutputs: items.map(i => i.toLowerCase()) }),
+  setExcludedInputs: (items) => set({ excludedInputs: items.map(i => i.toLowerCase()) }),
+  setExcludedItems: (items) => set({ excludedItems: items }),
+  setConstraintMode: (v) => set({ constraintMode: v }),
+  setShowTinyErrors: (v) => set({ showTinyErrors: v }),
+  setResult: (r) => set({ result: r }),
+  setIsSolving: (v) => set({ isSolving: v }),
+  setDiagnostic: (msg) => set({ diagnostic: msg }),
+  setSolverActive: (active: Recipe[]) => set({ solverActive: active }),
+  setSolverVarNames: (names: string[]) => set({ solverVarNames: names }),
+  setSolverMissing: (missing: string[]) => set({ solverMissing: missing }),
+  setSolverFixedDemands: (demands) => set({ solverFixedDemands: demands }),
+  setUnityProduction: (v: number) => set({ unityProduction: v }),
+  setUnityConsumption: (v: number) => set({ unityConsumption: v }),
+  setExternalSupplies: (supplies) => set({ externalSupplies: supplies }),
+
+  setGameData: (data: GameData) => set({ gameData: data }),
+  setPopulation: (v: number) => set({ population: v }),
+  setHousingIndex: (v: number) => set({ housingIndex: v }),
+  toggleFood: (name: string) => set(s => {
+    const foods = new Set(s.selectedFoods);
+    if (foods.has(name)) foods.delete(name);
+    else foods.add(name);
+    return { selectedFoods: foods };
+  }),
+  setMedical: (name: string | null) => set({ selectedMedical: name }),
+  toggleOther: (name: string) => set(s => {
+    const others = new Set(s.selectedOthers);
+    if (others.has(name)) others.delete(name);
+    else others.add(name);
+    return { selectedOthers: others };
+  }),
+  setEdictLevel: (idx: number, lvl: number) => set(s => ({
+    edictLevels: { ...s.edictLevels, [idx]: lvl }
+  })),
+  setOfficeLevel: (idx: number, lvl: number) => set(s => {
+    const levels = [...s.officeLevels];
+    levels[idx] = lvl;
+    return { officeLevels: levels };
+  }),
+  setResearchLevel: (idx: number, lvl: number) => set(s => {
+    const levels = [...s.researchLevels];
+    levels[idx] = lvl;
+    return { researchLevels: levels };
+  }),
+
+  setTradeContracts: (contracts) => set({ tradeContracts: contracts }),
+  setTradeContract: (contractId) => set(state => ({ tradeSetup: { ...state.tradeSetup, contractId } })),
+  setTradeDockLevel: (level) => set(state => ({ tradeSetup: { ...state.tradeSetup, dockLevel: level } })),
+  setTradeFuel: (fuelName) => set(state => ({ tradeSetup: { ...state.tradeSetup, fuelName: fuelName } })),
+  setSelectedTradeRecipes: (recipes) => set({ selectedTradeRecipes: recipes }),
+  setTradeParams: (params) => set(state => ({ tradeParams: { ...state.tradeParams, ...params } })),
+  setSelectedTradeContractIds: (ids) => set({ selectedTradeContractIds: ids }),
+
+  setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(1, Math.max(0, value)) }),
+
+  setOptimizationMode: (mode) => set({ optimizationMode: mode }),
+  setCustomWeights: (weights) => set({ customWeights: { ...get().customWeights, ...weights } }),
+
+  // 新增 actions
+  setIntegerMode: (mode: IntegerMode) => set({ integerMode: mode }),
+  setRedundancyFactor: (value: number) => set({ redundancyFactor: Math.min(0.2, Math.max(0, value)) }),
+  setMilpTimeLimit: (seconds: number) => set({ milpTimeLimit: Math.max(1, Math.min(300, seconds)) }),
+
+  importSettings: (s) => {
+    const state: Partial<StoreState> = {};
+    if (s.mainEnabled) state.mainEnabled = s.mainEnabled;
+    if (s.mainLevels) state.mainSelectedLevel = s.mainLevels;
+    if (s.powerEnabled) state.powerEnabled = s.powerEnabled;
+    if (s.powerLevels) state.powerSelectedLevel = s.powerLevels;
+    if (s.recipes) state.recipeEnabled = s.recipes;
+    if (s.excludedOutputs) state.excludedOutputs = s.excludedOutputs.map((x: string) => x.toLowerCase());
+    if (s.excludedInputs) state.excludedInputs = s.excludedInputs.map((x: string) => x.toLowerCase());
+    if (s.stationLevel !== undefined) state.stationLevel = s.stationLevel;
+    if (s.rocketType !== undefined) state.rocketType = s.rocketType;
+    if (s.statueCount !== undefined) state.statueCount = s.statueCount;
+    if (s.labLevel !== undefined) state.labLevel = s.labLevel;
+    if (s.labCount !== undefined) state.labCount = s.labCount;
+    if (s.steamLowMode !== undefined) state.steamLowMode = s.steamLowMode;
+    if (s.constraintMode !== undefined) state.constraintMode = s.constraintMode;
+    if (s.showTinyErrors !== undefined) state.showTinyErrors = s.showTinyErrors;
+    if (s.mainBuildingEnabledMap) state.mainBuildingEnabledMap = s.mainBuildingEnabledMap;
+    if (s.powerBuildingEnabledMap) state.powerBuildingEnabledMap = s.powerBuildingEnabledMap;
+    if (s.allowExternal !== undefined) state.allowExternal = s.allowExternal;
+    if (s.tradeContract !== undefined) state.tradeSetup = { ...state.tradeSetup, contractId: s.tradeContract };
+    if (s.tradeDockLevel !== undefined) state.tradeSetup = { ...state.tradeSetup, dockLevel: s.tradeDockLevel };
+    if (s.tradeFuel !== undefined) state.tradeSetup = { ...state.tradeSetup, fuelName: s.tradeFuel };
+    if (s.solarEfficiency !== undefined) state.solarEfficiency = s.solarEfficiency;
+    if (s.tradeParams) state.tradeParams = { ...state.tradeParams, ...s.tradeParams };
+    if (s.selectedTradeContractIds) state.selectedTradeContractIds = s.selectedTradeContractIds;
+    if (s.optimizationMode) state.optimizationMode = s.optimizationMode;
+    if (s.customWeights) state.customWeights = s.customWeights;
+    if (s.population !== undefined) state.population = s.population;
+    if (s.housingIndex !== undefined) state.housingIndex = s.housingIndex;
+    if (s.selectedFoods) state.selectedFoods = new Set(s.selectedFoods);
+    if (s.selectedMedical !== undefined) state.selectedMedical = s.selectedMedical;
+    if (s.selectedOthers) state.selectedOthers = new Set(s.selectedOthers);
+    if (s.edictLevels) state.edictLevels = s.edictLevels;
+    if (s.officeLevels) state.officeLevels = s.officeLevels;
+    if (s.researchLevels) state.researchLevels = s.researchLevels;
+    // 新增导入
+    if (s.integerMode !== undefined) state.integerMode = s.integerMode;
+    if (s.redundancyFactor !== undefined) state.redundancyFactor = s.redundancyFactor;
+    if (s.milpTimeLimit !== undefined) state.milpTimeLimit = s.milpTimeLimit;
+    set(state);
+  },
+
+  exportSettings: () => {
+    const s = get();
+    return {
+      mainEnabled: s.mainEnabled,
+      mainLevels: s.mainSelectedLevel,
+      powerEnabled: s.powerEnabled,
+      powerLevels: s.powerSelectedLevel,
+      recipes: s.recipeEnabled,
+      excludedOutputs: s.excludedOutputs,
+      excludedInputs: s.excludedInputs,
+      stationLevel: s.stationLevel,
+      rocketType: s.rocketType,
+      statueCount: s.statueCount,
+      labLevel: s.labLevel,
+      labCount: s.labCount,
+      steamLowMode: s.steamLowMode,
+      constraintMode: s.constraintMode,
+      showTinyErrors: s.showTinyErrors,
+      mainBuildingEnabledMap: s.mainBuildingEnabledMap,
+      powerBuildingEnabledMap: s.powerBuildingEnabledMap,
+      allowExternal: s.allowExternal,
+      tradeContract: s.tradeSetup.contractId,
+      tradeDockLevel: s.tradeSetup.dockLevel,
+      tradeFuel: s.tradeSetup.fuelName,
+      solarEfficiency: s.solarEfficiency,
+      tradeParams: s.tradeParams,
+      selectedTradeContractIds: s.selectedTradeContractIds,
+      optimizationMode: s.optimizationMode,
+      customWeights: s.customWeights,
+      population: s.population,
+      housingIndex: s.housingIndex,
+      selectedFoods: Array.from(s.selectedFoods),
+      selectedMedical: s.selectedMedical,
+      selectedOthers: Array.from(s.selectedOthers),
+      edictLevels: s.edictLevels,
+      officeLevels: s.officeLevels,
+      researchLevels: s.researchLevels,
+      // 新增导出
+      integerMode: s.integerMode,
+      redundancyFactor: s.redundancyFactor,
+      milpTimeLimit: s.milpTimeLimit,
     };
-    recipes.push(recipe);
-  }
+  },
 
-  return recipes;
-}
+  enableSeriesForItem: (item: string) => {
+    const s = get();
+    s.recipes.filter(r => r.outputs[item] && !r.isHidden).forEach(r => {
+      const sn = getSeriesName(r.buildingId, s.mainSeriesList, s.powerSeriesList);
+      if (r.module === 'power') {
+        s.powerEnabled[sn] = true;
+        s.powerSelectedLevel[sn] = r.buildingLevel;
+      } else {
+        s.mainEnabled[sn] = true;
+        s.mainSelectedLevel[sn] = r.buildingLevel;
+      }
+      s.recipeEnabled[r.id] = true;
+    });
+    set({
+      mainEnabled: { ...s.mainEnabled },
+      mainSelectedLevel: { ...s.mainSelectedLevel },
+      powerEnabled: { ...s.powerEnabled },
+      powerSelectedLevel: { ...s.powerSelectedLevel },
+      recipeEnabled: { ...s.recipeEnabled },
+    });
+  },
+}));

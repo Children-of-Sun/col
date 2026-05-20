@@ -1,7 +1,7 @@
 import { Recipe, Demand } from './types';
 import { isRaw } from './utils';
 
-// 全局调试标志（从 localStorage 读取）
+// 全局调试标志
 const DEBUG = typeof window !== 'undefined' && window.localStorage?.getItem('factoryDebug') === 'true';
 
 export interface LpInput {
@@ -24,6 +24,11 @@ export interface LpInput {
   customWeights?: { machines: number; labor: number; cohesion: number; area: number; raw: number };
   fixedUnityProduction?: number;
   fixedUnityConsumption?: number;
+  // 新增字段
+  integerMode?: 'continuous' | 'ceil' | 'heuristic' | 'milp';
+  redundancy?: number;
+  milpTimeLimit?: number;
+  fixedMachines?: Record<string, number>;
 }
 
 export interface LpOutput {
@@ -33,9 +38,15 @@ export interface LpOutput {
 }
 
 export function buildLp(input: LpInput): LpOutput {
-  const { mainActive, powerActive, residentActive, stationActive, specialActive = [], tradeActive = [], ignored, demands, externalSupplies,
-          reductionFactor, steamLowMode, excludedOutputs, excludedInputs, constraintMode, allowExternal,
-          optimizationMode, customWeights, fixedUnityProduction = 0, fixedUnityConsumption = 0 } = input;
+  const { 
+    mainActive, powerActive, residentActive, stationActive, specialActive = [], tradeActive = [], 
+    ignored, demands, externalSupplies, reductionFactor, steamLowMode, excludedOutputs, excludedInputs, 
+    constraintMode, allowExternal, optimizationMode, customWeights, 
+    fixedUnityProduction = 0, fixedUnityConsumption = 0,
+    integerMode = 'continuous', redundancy = 0, milpTimeLimit = 30,
+    fixedMachines = {}
+  } = input;
+  
   const isAllowExternal = allowExternal ?? false;
 
   const externalSupplyMap = new Map<string, number>();
@@ -53,7 +64,6 @@ export function buildLp(input: LpInput): LpOutput {
   const tradeVarNames = tradeActive.map((_, i) => `tr${i}`);
   const varNames = [...mainVarNames, ...powerVarNames, ...residentVarNames, ...stationVarNames, ...specialVarNames, ...tradeVarNames];
 
-  // 判断物品是否为持续类型（不缩放）
   const isContinuous = (item: string): boolean => {
     return item === 'electricity' || item === 'computing' || item === '人力' || item === 'mechanical power';
   };
@@ -70,14 +80,13 @@ export function buildLp(input: LpInput): LpOutput {
         coeff = recipe.upkeep['人力'] || 0;
       } else if (target === 'cohesion') {
         if (recipe.module === 'trade') {
-          // 直接从配方中读取凝聚力系数（每100买入量的消耗）
-          const unityPer100 = (recipe as any).tradeUnityPer100 || 0;
+          const unityPer100 = recipe.tradeUnityPer100 || 0;
           const buyItem = Object.keys(recipe.outputs)[0];
           const buyRate = recipe.outputs[buyItem];
-          coeff = (buyRate / 100) * unityPer100;   // 正数，表示凝聚力消耗
+          coeff = (buyRate / 100) * unityPer100;
         }
       } else if (target === 'area') {
-        coeff = 1;   // 简化，每个配方占1单位面积
+        coeff = 1;
       } else if (target === 'raw') {
         for (const [item, qty] of Object.entries(recipe.inputs)) {
           if (isRaw(item)) {
@@ -116,7 +125,6 @@ export function buildLp(input: LpInput): LpOutput {
     }
     objExpr = terms.join(' + ');
   } else if (optimizationMode === 'cohesion') {
-    // 凝聚力模式：目标 = Σ(贸易凝聚力消耗 * tr) + 微小机器数量惩罚（确保唯一解）
     const cohesionCoeffs = computeTargetCoeffs('cohesion');
     const machineCoeffs = computeTargetCoeffs('machines');
     const terms: string[] = [];
@@ -127,7 +135,6 @@ export function buildLp(input: LpInput): LpOutput {
       for (let j = 0; j < recipes.length; j++) {
         const cohesion = cohesionCoeffs[idx + j];
         const machines = machineCoeffs[idx + j];
-        // 主要目标：凝聚力消耗，加上极小的机器数量惩罚（确保唯一解）
         const total = cohesion + machines * 0.0001;
         if (Math.abs(total) > 1e-9) {
           terms.push(`${total.toFixed(6)} ${vars[j]}`);
@@ -139,15 +146,8 @@ export function buildLp(input: LpInput): LpOutput {
     if (DEBUG) {
       console.log('=== 凝聚力模式目标函数 ===');
       console.log(objExpr || '0');
-      console.log('贸易配方系数:');
-      tradeActive.forEach((recipe, i) => {
-        const varName = `tr${i}`;
-        const coeff = cohesionCoeffs[mainVarNames.length + powerVarNames.length + residentVarNames.length + stationVarNames.length + specialVarNames.length + i];
-        console.log(`  ${recipe.name} (${varName}) : ${coeff} 凝聚力/分钟`);
-      });
     }
   } else {
-    // 其他预设模式（机器数量、人力、占地面积、原矿消耗）
     const target = optimizationMode === 'labor' ? 'labor' : (optimizationMode === 'area' ? 'area' : (optimizationMode === 'raw' ? 'raw' : 'machines'));
     const coeffs = computeTargetCoeffs(target);
     const terms: string[] = [];
@@ -175,12 +175,11 @@ export function buildLp(input: LpInput): LpOutput {
   stationVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
   specialVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
 
-  // 构建约束表达式（缩放逻辑：只有维护 I/II/III 产出缩放，其他不缩放；贸易配方不缩放）
+  // 构建约束表达式
   const makeExpr = (recipes: Recipe[], vars: string[], it: string): string => {
     let expr = '';
     recipes.forEach((r, i) => {
       let c = 0;
-      // 贸易配方特殊处理：不缩放
       if (r.module === 'trade') {
         if (r.outputs[it]) c += r.outputs[it];
         if (r.inputs[it]) c -= r.inputs[it];
@@ -196,7 +195,6 @@ export function buildLp(input: LpInput): LpOutput {
         return;
       }
 
-      // 非贸易配方缩放规则
       let scale = 1;
       const isContinuousItem = isContinuous(it);
       const isMaintenanceOutput = (it === 'maintenance i' || it === 'maintenance ii' || it === 'maintenance iii') && r.outputs[it];
@@ -208,7 +206,6 @@ export function buildLp(input: LpInput): LpOutput {
       if (r.inputs[it]) {
         if (!isContinuousItem) scale = 60 / r.duration;
       }
-      // 注意：upkeep 永远不缩放
       
       if (r.outputs[it]) c += scale * r.outputs[it];
       if (r.inputs[it]) c -= scale * r.inputs[it];
@@ -265,19 +262,20 @@ export function buildLp(input: LpInput): LpOutput {
   const rows: Record<string, string> = {};
   [...items].forEach((it, idx) => rows[it] = `r${idx}`);
 
-  items.forEach(it => {
-    if (it === 'research') return;
+  // 核心约束生成（修复语法错误）
+  for (const it of items) {
+    if (it === 'research') continue;
     if (it === 'steam (high)' || it === 'steam (super)') {
       const expr = allExpr(it);
       if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
-      return;
+      continue;
     }
     if (it === 'steam (low)') {
       if (steamLowMode === 'internal') {
         const expr = makeExpr(powerActive, powerVarNames, it);
         if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
-        return;
       }
+      continue;
     }
 
     const expr = allExpr(it);
@@ -286,12 +284,20 @@ export function buildLp(input: LpInput): LpOutput {
 
     if (demandSet.has(it)) {
       const effectiveDr = Math.max(0, totalDr - supply);
-      if (expr) lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-      else lp += ` ${rows[it]}: 0 >= ${effectiveDr}\n`;
+      if (expr) {
+        lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
+        // 对于非连续模式（包括 milp），始终添加上限约束（即使 redundancy=0）
+        if (integerMode !== 'continuous') {
+          const upperBound = effectiveDr * (1 + redundancy);
+          lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
+        }
+      } else {
+        lp += ` ${rows[it]}: 0 >= ${effectiveDr}\n`;
+      }
     } else if (supply > 0) {
       if (!consumers.has(it)) {
         missing.push(it);
-        return;
+        continue;
       }
       if (expr) lp += ` ${rows[it]}: ${expr} = ${-supply}\n`;
     } else {
@@ -299,16 +305,32 @@ export function buildLp(input: LpInput): LpOutput {
       const isExcludedInput = excludedInputs.has(it);
       const hasProducer = producers.has(it);
       const hasConsumer = consumers.has(it);
-      if (isAllowExternal && !hasProducer && hasConsumer) return;
-      if ((isExcludedOutput && hasProducer) || (isExcludedInput && hasConsumer)) return;
+      if (isAllowExternal && !hasProducer && hasConsumer) continue;
+      if ((isExcludedOutput && hasProducer) || (isExcludedInput && hasConsumer)) continue;
       const shouldConstrain = (hasProd: boolean, hasCons: boolean): boolean => {
         if (constraintMode === 'noProdOrCons') return hasProd && hasCons;
         return hasProd;
       };
-      if (!shouldConstrain(hasProducer, hasConsumer)) return;
+      if (!shouldConstrain(hasProducer, hasConsumer)) continue;
       if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
     }
-  });
+  }
+
+  // 添加固定变量等式约束（在 INTEGER 声明之前）
+  if (Object.keys(fixedMachines).length > 0) {
+    for (const [varName, value] of Object.entries(fixedMachines)) {
+      lp += ` ${varName} = ${value}\n`;
+    }
+  }
+
+  // 添加整数声明（仅在 milp 模式下）
+  if (integerMode === 'milp') {
+    const integerVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t'));
+    if (integerVars.length) {
+      lp += '\nINTEGER\n ' + integerVars.join(' ') + '\n';
+    }
+  }
+  console.log('DEBUG after INTEGER addition, lp ends with:', lp.slice(-1000));
 
   return { lpString: lp + 'END\n', varNames, missing };
 }

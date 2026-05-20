@@ -9,8 +9,10 @@ self.onmessage = async function(e) {
   try {
     init();
     const solver = await self.Module();
-    const { lpString, requestId } = e.data;
-    const result = solver.solve(lpString);
+    const { lpString, requestId, options } = e.data;
+    // 启用 MIP 选项
+    const solveOptions = options || { presolve: 'on', mip_max_nodes: 10000 };
+    const result = solver.solve(lpString, solveOptions);
     self.postMessage({ requestId, result });
   } catch (err) {
     self.postMessage({

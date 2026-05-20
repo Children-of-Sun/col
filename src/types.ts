@@ -54,6 +54,8 @@ export interface GameData {
   baseRecycleRate?: number;
   docks?: DockLevel[];
   fuels?: TradeFuel[];
+  ship_fuel_configs?: any;
+  populationWaste?: { item: string; ratePerPop: number };
 }
 
 // ==================== 原始数据类型 ====================
@@ -121,7 +123,6 @@ export interface Recipe {
   isHidden: boolean;
   module: 'main' | 'power' | 'resident' | 'station' | 'special' | 'trade';
   isLab?: boolean;
-  // 贸易配方专用：每100买入量产生的凝聚力消耗（正数）
   tradeUnityPer100?: number;
 }
 
@@ -158,6 +159,8 @@ export interface ParsedData {
 }
 
 // ==================== Store 状态类型 ====================
+export type IntegerMode = 'continuous' | 'ceil' | 'heuristic' | 'milp';
+
 export interface StoreState {
   fullData: DataJson | null;
   recipes: Recipe[];
@@ -200,8 +203,8 @@ export interface StoreState {
   diagnostic: string;
   solverMissing: string[];
   solverFixedDemands: Demand[];
-  unityProduced: number;
-  unityConsumed: number;
+  unityProduction: number;
+  unityConsumption: number;
   externalSupplies: { item: string; rate: number }[];
 
   solverActive: Recipe[];
@@ -222,22 +225,18 @@ export interface StoreState {
   tradeParams: TradeParams;
   selectedTradeContractIds: string[];
   selectedTradeRecipes: Recipe[];
-  setTradeContracts: (contracts: TradeContract[]) => void;
-  setTradeContract: (contractId: string) => void;
-  setTradeDockLevel: (level: number) => void;
-  setTradeFuel: (fuelName: string) => void;
-  setTradeParams: (params: Partial<TradeParams>) => void;
-  setSelectedTradeContractIds: (ids: string[]) => void;
-  setSelectedTradeRecipes: (recipes: Recipe[]) => void;
 
   solarEfficiency: number;
-  setSolarEfficiency: (value: number) => void;
 
-  setExcludedOutputs: (items: string[]) => void;
-  setExcludedInputs: (items: string[]) => void;
-  setExcludedItems: (items: string[]) => void;
+  optimizationMode: 'machines' | 'labor' | 'cohesion' | 'area' | 'raw' | 'custom';
+  customWeights: { machines: number; labor: number; cohesion: number; area: number; raw: number };
 
-  // 原有 actions
+  // 新增字段
+  integerMode: IntegerMode;
+  redundancyFactor: number;
+  milpTimeLimit: number;
+
+  // Actions
   loadData: (json: DataJson) => void;
   loadTranslation: (json: Record<string, string>) => void;
   setMainEnabled: (name: string, value: boolean) => void;
@@ -283,11 +282,31 @@ export interface StoreState {
   setEdictLevel: (idx: number, lvl: number) => void;
   setOfficeLevel: (idx: number, lvl: number) => void;
   setResearchLevel: (idx: number, lvl: number) => void;
+  setTradeContracts: (contracts: TradeContract[]) => void;
+  setTradeContract: (contractId: string) => void;
+  setTradeDockLevel: (level: number) => void;
+  setTradeFuel: (fuelName: string) => void;
+  setTradeParams: (params: Partial<TradeParams>) => void;
+  setSelectedTradeContractIds: (ids: string[]) => void;
+  setSelectedTradeRecipes: (recipes: Recipe[]) => void;
+  setSolarEfficiency: (value: number) => void;
+  setOptimizationMode: (mode: StoreState['optimizationMode']) => void;
+  setCustomWeights: (weights: Partial<StoreState['customWeights']>) => void;
+  setExcludedOutputs: (items: string[]) => void;
+  setExcludedInputs: (items: string[]) => void;
+  setExcludedItems: (items: string[]) => void;
+
+  // 新增 actions
+  setIntegerMode: (mode: IntegerMode) => void;
+  setRedundancyFactor: (value: number) => void;
+  setMilpTimeLimit: (seconds: number) => void;
 }
 
 export interface SolverResult {
-  status: string;
-  columns: Record<string, { Primal: number }>;
+  Status?: string;
+  status?: string;
+  Columns?: Record<string, { Primal: number }>;
+  columns?: Record<string, { primal: number }>;
 }
 
 // ==================== 贸易模块类型 ====================

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useStore } from '../stores';
 import { TradeContract, Recipe } from '../types';
-import { t } from '../utils';
+import { t, isOreContract } from '../utils';
 import { Btn, ModalShell, SearchInput } from './UI';
 
 const MODULE_SPEEDS = { S: 125, M: 250, L: 500 };
@@ -160,6 +160,7 @@ export const TradePanel: React.FC = () => {
       isSolar: false,
       isHidden: false,
       module: 'trade',
+      tradeUnityPer100: unityPer100,
     };
     return recipe;
   };

@@ -12,6 +12,504 @@ import { getMaintenanceReduction, t, isRaw, isPowerItem, getSeriesName, isMainte
 import { Demand, Recipe, DockLevel, TradeFuel } from './types';
 import { calculateTrade } from './tradeCalculator';
 import './App.css';
+console.log('OptionsPanel imported:', OptionsPanel);
+
+// 提取 buildActiveRecipes 函数，复用 buildLp 前的配方构建逻辑
+const buildActiveRecipes = (
+  state: ReturnType<typeof useStore.getState>,
+  solarEfficiency: number,
+  getFixedDemands: () => Demand[],
+  getMaintenanceReduction: (statueCount: number) => number,
+  getRecycleRate: (...args: any[]) => number,
+  calcResidentDemands: (...args: any[]) => any,
+  calcResidentWaste: (...args: any[]) => any,
+  getMaintenanceWasteMap: (...args: any[]) => any,
+  ROCKET_BASE: any,
+  STATION_PARTS_RATE: number,
+  CREW_SUPPLIES_RATE: number,
+  SPACE_CARGO_ITEMS: Set<string>,
+  t: (s: string, trans: any) => string
+) => {
+  const { tradeParams, selectedTradeContractIds, tradeContracts, gameData, translation } = state;
+  let tradeActive: Recipe[] = [];
+  let tradeUnityConsumptionTotal = 0;
+
+  if (selectedTradeContractIds.length > 0 && tradeContracts.length > 0) {
+    const moduleSpeed = { S: 125, M: 250, L: 500 }[tradeParams.moduleSize] || 250;
+    const moduleCapacity = tradeParams.baySlots <= 4 ? 800 : 1200;
+    const getTravelInfo = (slots: number, fuelRaw: string, mode: string) => {
+      if (gameData?.ship_fuel_configs) {
+        const dockKey = `dock_${slots}`;
+        const dock = gameData.ship_fuel_configs[dockKey];
+        if (dock && dock[fuelRaw] && dock[fuelRaw][mode]) {
+          return {
+            travelTime: dock[fuelRaw][mode].fuel_per_trip,
+            fuelPerTrip: dock[fuelRaw][mode].travel_time_min,
+          };
+        }
+      }
+      return { travelTime: 3, fuelPerTrip: 200 };
+    };
+    const computeBestTrade = (contract: any, slots: number, moduleSpeed: number, moduleCapacity: number) => {
+      const { buyRate, sellRate } = contract;
+      let bestBuy = 0, bestSell = 0, bestM = 0, bestN = 0, bestLoadTime = 0;
+      for (let m = 1; m < slots; m++) {
+        const n = slots - m;
+        const buy1 = Math.floor(m * moduleCapacity);
+        const sell1 = Math.floor(buy1 * (sellRate / buyRate));
+        const loadBuy1 = m > 0 ? buy1 / (m * moduleSpeed) : 0;
+        const loadSell1 = n > 0 ? sell1 / (n * moduleSpeed) : 0;
+        const load1 = Math.max(loadBuy1, loadSell1);
+        if (sell1 <= n * moduleCapacity && buy1 > bestBuy) {
+          bestBuy = buy1; bestSell = sell1; bestM = m; bestN = n; bestLoadTime = load1;
+        }
+        const sell2 = Math.floor(n * moduleCapacity);
+        const buy2 = Math.floor(sell2 * (buyRate / sellRate));
+        const loadBuy2 = m > 0 ? buy2 / (m * moduleSpeed) : 0;
+        const loadSell2 = n > 0 ? sell2 / (n * moduleSpeed) : 0;
+        const load2 = Math.max(loadBuy2, loadSell2);
+        if (buy2 <= m * moduleCapacity && buy2 > bestBuy) {
+          bestBuy = buy2; bestSell = sell2; bestM = m; bestN = n; bestLoadTime = load2;
+        }
+      }
+      return { buy: bestBuy, sell: bestSell, m: bestM, n: bestN, loadTime: bestLoadTime };
+    };
+    const getDockMaintenance = (slots: number, moduleCount: number, moduleSize: string) => {
+      let workers = slots * 2;
+      const moduleWorkerMap = { S: 2, M: 3, L: 4 };
+      workers += moduleCount * moduleWorkerMap[moduleSize as keyof typeof moduleWorkerMap];
+      let electricity = slots * 100 + moduleCount * 50;
+      let maintI = slots * 1 + moduleCount * 1;
+      let maintII = slots * 0.5 + moduleCount * 0.5;
+      let maintIII = 0;
+      return { workers, electricity, maintI, maintII, maintIII };
+    };
+
+    const { travelTime, fuelPerTrip } = getTravelInfo(tradeParams.baySlots, tradeParams.fuelTypeRaw, tradeParams.travelMode);
+    const profitFactor = 1 + tradeParams.profitBonus / 100;
+    const newTradeRecipes: Recipe[] = [];
+    for (const contract of tradeContracts) {
+      if (!selectedTradeContractIds.includes(contract.id)) continue;
+      const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
+      const { buy, sell, m, n, loadTime } = computeBestTrade(adjustedContract, tradeParams.baySlots, moduleSpeed, moduleCapacity);
+      if (buy === 0) continue;
+      const totalTime = travelTime + loadTime;
+      const perMinBuy = buy / totalTime;
+      const perMinSell = sell / totalTime;
+      const perMinFuel = fuelPerTrip / totalTime;
+      const totalModules = m + n;
+      const { workers, electricity, maintI, maintII, maintIII } = getDockMaintenance(tradeParams.baySlots, totalModules, tradeParams.moduleSize);
+      const perMinWorkers = workers / totalTime;
+      const perMinElectricity = electricity / totalTime;
+      const perMinMaintI = maintI / totalTime;
+      const perMinMaintII = maintII / totalTime;
+      const perMinMaintIII = maintIII / totalTime;
+      const unityPer100 = contract.unity_per_100_bought || 0;
+      const perMinUnity = (perMinBuy / 100) * unityPer100;
+      tradeUnityConsumptionTotal += perMinUnity;
+
+      const recipe: Recipe = {
+        id: `trade_${contract.id}`,
+        name: `贸易: ${t(contract.name || contract.id, translation)}`,
+        buildingId: 'trade',
+        buildingName: t('贸易码头', translation),
+        category: '贸易',
+        buildingLevel: 0,
+        duration: 1,
+        inputs: {
+          [contract.sellItem.toLowerCase()]: perMinSell,
+          [tradeParams.fuelTypeRaw.toLowerCase()]: perMinFuel,
+        },
+        outputs: {
+          [contract.buyItem.toLowerCase()]: perMinBuy,
+        },
+        upkeep: {
+          '人力': perMinWorkers,
+          'electricity': perMinElectricity,
+          'maintenance i': perMinMaintI,
+          'maintenance ii': perMinMaintII,
+          'maintenance iii': perMinMaintIII,
+          '凝聚力': perMinUnity,
+        },
+        powerMultiplier: 1,
+        workers: perMinWorkers,
+        isSolar: false,
+        isHidden: false,
+        module: 'trade',
+      };
+      newTradeRecipes.push(recipe);
+    }
+    if (newTradeRecipes.length) {
+      state.setSelectedTradeRecipes(newTradeRecipes);
+      tradeActive = newTradeRecipes;
+    } else {
+      tradeActive = [];
+    }
+  } else {
+    tradeActive = [];
+  }
+
+  const active = state.recipes.filter(r => {
+    if (!state.recipeEnabled[r.id]) return false;
+    const sn = (r.module === 'power') ?
+      state.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name :
+      state.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+    if (sn) {
+      if (r.module === 'power') {
+        if (!state.powerEnabled[sn]) return false;
+        return state.powerSelectedLevel[sn] === r.buildingLevel;
+      } else {
+        if (!state.mainEnabled[sn]) return false;
+        return state.mainSelectedLevel[sn] === r.buildingLevel;
+      }
+    } else {
+      return r.module === 'main';
+    }
+  });
+
+  if (!active.length) {
+    return null; // 没有启用的配方
+  }
+
+  const ignored = new Set(state.ignoredItems);
+  const excludedOutputs = new Set(state.excludedOutputs);
+  const excludedInputs = new Set(state.excludedInputs);
+  const reductionFactorBase = getMaintenanceReduction(state.statueCount);
+  let fixedDemands = getFixedDemands();
+
+  const modifiedActive = active.map(r => ({ ...r, inputs: { ...r.inputs }, outputs: { ...r.outputs }, upkeep: { ...r.upkeep } }));
+
+  // 应用太阳能效率
+  modifiedActive.forEach(recipe => {
+    if (recipe.isSolar && recipe.outputs['electricity']) {
+      recipe.outputs['electricity'] *= solarEfficiency;
+    }
+  });
+
+  const recycleRate = getRecycleRate(
+    gameData?.baseRecycleRate ?? 0.2,
+    gameData?.edicts,
+    state.edictLevels,
+    gameData?.office,
+    state.officeLevels
+  );
+
+  const currentGameData = gameData;
+  let specialActive: Recipe[] = [];
+
+  if (currentGameData) {
+    const maintWasteMap = getMaintenanceWasteMap(currentGameData);
+    const allWasteNames = currentGameData.wasteNames;
+    const recyclableIndices = [0, 1, 2, 3, 4];
+    const recyclableWasteNames = allWasteNames.slice(2);
+    const recyclableWasteNamesLower = recyclableWasteNames.map(w => w.toLowerCase());
+
+    modifiedActive.forEach(r => {
+      recyclableWasteNames.forEach(wn => {
+        delete r.outputs[wn];
+      });
+    });
+
+    modifiedActive.forEach(r => {
+      const hasRecyclables = ((r.outputs['recyclables'] || r.outputs['Recyclables']) || 0) > 0;
+      if (!hasRecyclables) return;
+      for (const [inputItem, inputQty] of Object.entries(r.inputs)) {
+        const inputItemLower = inputItem.toLowerCase();
+        let coeffs = maintWasteMap[inputItemLower];
+        if (!coeffs) {
+          const normalized = inputItemLower.replace(/\s/g, '');
+          for (const key of Object.keys(maintWasteMap)) {
+            if (key.replace(/\s/g, '') === normalized) {
+              coeffs = maintWasteMap[key];
+              break;
+            }
+          }
+        }
+        if (coeffs && coeffs.length >= 5) {
+          const perCycleInput = inputQty;
+          recyclableIndices.forEach((idx, i) => {
+            const coeff = coeffs[idx];
+            if (coeff !== 0) {
+              const wasteItem = recyclableWasteNamesLower[i];
+              const added = perCycleInput * coeff * recycleRate;
+              r.outputs[wasteItem] = (r.outputs[wasteItem] || 0) + added;
+            }
+          });
+        }
+      }
+    });
+
+    modifiedActive.forEach(r => {
+      const researchLvls = [...state.researchLevels];
+      if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
+        const cropRes = currentGameData.research.find(res => res.name === '作物产量');
+        const cropLvl = cropRes ? (researchLvls[currentGameData.research.indexOf(cropRes)] || 0) : 0;
+        if (cropLvl > 0 && cropRes) {
+          const bonus = (cropRes.effectPerLevel[0] || 0) * cropLvl;
+          for (const k in r.outputs) {
+            if (k !== 'water') r.outputs[k] *= (1 + bonus);
+          }
+        }
+        const waterRes = currentGameData.research.find(res => res.name === '定居点用水');
+        const waterLvl = waterRes ? (researchLvls[currentGameData.research.indexOf(waterRes)] || 0) : 0;
+        if (waterLvl > 0 && waterRes) {
+          const waterBonus = (waterRes.effectPerLevel[0] || 0) * waterLvl;
+          if (r.inputs['water']) {
+            r.inputs['water'] *= (1 + waterBonus);
+          }
+        }
+      }
+    });
+
+    // 雕像
+    if (state.statueCount > 0) {
+      const statueRecipe: Recipe = {
+        id: 'statue_module',
+        name: '雕像 (The Statue of Maintenance)',
+        buildingId: 'statue',
+        buildingName: 'The Statue of Maintenance',
+        category: '雕像',
+        buildingLevel: 0,
+        duration: 60,
+        inputs: { 'fuel gas': state.statueCount * 2 },
+        outputs: {},
+        upkeep: {},
+        powerMultiplier: 1,
+        workers: 0,
+        isSolar: false,
+        isHidden: true,
+        module: 'special',
+      };
+      const statueBuilding = state.fullData?.machines_and_buildings?.find(
+        (b: any) => b.name === 'The Statue of Maintenance'
+      );
+      if (statueBuilding) {
+        if (statueBuilding.maintenance_cost_units && statueBuilding.maintenance_cost_quantity) {
+          statueRecipe.upkeep[statueBuilding.maintenance_cost_units.toLowerCase()] = statueBuilding.maintenance_cost_quantity * state.statueCount;
+        }
+        statueRecipe.workers = (statueBuilding.workers || 0) * state.statueCount;
+        if (statueBuilding.electricity_consumed) {
+          statueRecipe.inputs['electricity'] = (statueRecipe.inputs['electricity'] || 0) + statueBuilding.electricity_consumed * state.statueCount;
+        }
+        if (statueBuilding.computing_consumed) {
+          statueRecipe.inputs['computing'] = (statueRecipe.inputs['computing'] || 0) + statueBuilding.computing_consumed * state.statueCount;
+        }
+      }
+      specialActive.push(statueRecipe);
+    }
+
+    // 研究所
+    if (state.labCount > 0 && state.labLevel) {
+      const meta = state.labMeta.find(l => l.buildingId === state.labLevel);
+      if (meta) {
+        const labRecipe: Recipe = {
+          id: `lab_module_${state.labLevel}`,
+          name: `研究所 (${meta.name}) ×${state.labCount}`,
+          buildingId: state.labLevel,
+          buildingName: meta.name,
+          category: '研究所',
+          buildingLevel: meta.level,
+          duration: 60,
+          inputs: {},
+          outputs: { 'research': 48 * (1 + state.stationLevel * 0.05) * state.labCount },
+          upkeep: {},
+          powerMultiplier: 1,
+          workers: 0,
+          isSolar: false,
+          isHidden: true,
+          module: 'special',
+          isLab: true,
+        };
+        meta.recipes.forEach((r: any) => {
+          if (!state.recipeEnabled[r.id]) return;
+          for (const [item, qty] of Object.entries(r.inputs)) {
+            const rate = (60 / r.duration) * (qty as number) * state.labCount;
+            labRecipe.inputs[item] = (labRecipe.inputs[item] || 0) + rate;
+            if (r.outputs && (r.outputs.recyclables || r.outputs.Recyclables)) {
+              const recycleRateOut = (60 / r.duration) * ((r.outputs.recyclables || r.outputs.Recyclables) as number) * state.labCount;
+              labRecipe.outputs['recyclables'] = (labRecipe.outputs['recyclables'] || 0) + recycleRateOut;
+            }
+          }
+        });
+        for (const [item, qty] of Object.entries(meta.upkeep || {})) {
+          labRecipe.upkeep[item.toLowerCase()] = (qty as number) * state.labCount;
+        }
+        specialActive.push(labRecipe);
+      }
+    }
+  }
+
+  let reductionFactor = reductionFactorBase;
+  if (currentGameData) {
+    const edictReduce = currentGameData.edicts.find(e => e.name === '减少维护');
+    if (edictReduce) {
+      const lvl = state.edictLevels[currentGameData.edicts.indexOf(edictReduce)] ?? -1;
+      if (lvl >= 0) {
+        reductionFactor += edictReduce.effectPerLevel[lvl];
+      }
+    }
+    reductionFactor = Math.min(reductionFactor, 1);
+  }
+
+  let mainActive = modifiedActive.filter(r => {
+    if (!state.recipeEnabled[r.id] || r.module !== 'main') return false;
+    const sn = state.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+    if (sn) {
+      if (!state.mainEnabled[sn]) return false;
+      if (state.mainSelectedLevel[sn] !== r.buildingLevel) return false;
+      return state.mainBuildingEnabledMap[r.buildingId] !== false;
+    }
+    return state.mainBuildingEnabledMap[r.buildingId] !== false;
+  });
+
+  let powerActive = modifiedActive.filter(r => {
+    if (!state.recipeEnabled[r.id] || r.module !== 'power') return false;
+    const sn = state.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+    if (!sn) return false;
+    if (!state.powerEnabled[sn]) return false;
+    if (state.powerSelectedLevel[sn] !== r.buildingLevel) return false;
+    return state.powerBuildingEnabledMap[r.buildingId] !== false;
+  });
+
+  // 居民模块
+  let allExternalSupplies: { item: string; rate: number }[] = [];
+  let unityProduction = 0;
+  let unityConsumption = 0;
+
+  const residentRecipe: Recipe = {
+    id: 'resident_module',
+    name: '居民模块',
+    buildingId: 'resident',
+    buildingName: '居民',
+    category: '居民',
+    buildingLevel: 0,
+    duration: 60,
+    inputs: {},
+    outputs: {},
+    upkeep: {},
+    powerMultiplier: 1,
+    workers: 0,
+    isSolar: false,
+    isHidden: true,
+    module: 'resident',
+  };
+
+  if (currentGameData) {
+    const result = calcResidentDemands(
+      currentGameData,
+      state.population,
+      state.housingIndex,
+      state.selectedFoods,
+      state.selectedMedical,
+      state.selectedOthers,
+      state.edictLevels,
+      state.officeLevels,
+      state.researchLevels,
+      recycleRate,
+      state.stationLevel
+    );
+    const residentDemands = result.demands;
+    unityProduction = result.unityProduction;
+    unityConsumption = result.unityConsumption;
+
+    const residentWasteSupplies = calcResidentWaste(
+      currentGameData,
+      residentDemands,
+      recycleRate
+    ).map(w => ({ item: w.item, rate: w.rate }));
+
+    allExternalSupplies = [...allExternalSupplies, ...residentWasteSupplies];
+
+    residentDemands.forEach(d => {
+      residentRecipe.inputs[d.item] = d.rate;
+    });
+
+    residentWasteSupplies.forEach(w => {
+      residentRecipe.outputs[w.item] = w.rate;
+    });
+
+    const popWaste = currentGameData.populationWaste;
+    if (popWaste) {
+      const wasteAmount = popWaste.ratePerPop * state.population;
+      residentRecipe.outputs[popWaste.item.toLowerCase()] = (residentRecipe.outputs[popWaste.item.toLowerCase()] || 0) + wasteAmount;
+    }
+  }
+
+  const residentActive = [residentRecipe];
+
+  // 空间站模块
+  const stationRecipe: Recipe = {
+    id: 'station_module',
+    name: '空间站模块',
+    buildingId: 'station',
+    buildingName: '空间站',
+    category: '空间站',
+    buildingLevel: 0,
+    duration: 60,
+    inputs: {},
+    outputs: {},
+    upkeep: {},
+    powerMultiplier: 1,
+    workers: 0,
+    isSolar: false,
+    isHidden: true,
+    module: 'station',
+  };
+
+  if (state.stationLevel > 0) {
+    const rocket = ROCKET_BASE[state.rocketType];
+    const rocketCargoResearch = currentGameData?.research.find(r => r.name === '火箭载荷量');
+    const rocketCargoLevel = rocketCargoResearch ? (state.researchLevels[currentGameData.research.indexOf(rocketCargoResearch)] || 0) : 0;
+    const cargoBonus = 1 + rocketCargoLevel * 0.05;
+    const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (cargoBonus - 1);
+    const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (cargoBonus - 1);
+
+    const stationPartsRate = state.stationLevel * STATION_PARTS_RATE;
+    const crewSuppliesRate = Math.max(0, (state.stationLevel - 1) * CREW_SUPPLIES_RATE);
+    let labCargoRate = 0;
+    const meta = state.labMeta.find(l => l.buildingId === state.labLevel);
+    if (meta && state.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * state.labCount;
+    const userSpaceCargoRate = state.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).reduce((acc, d) => acc + d.rate, 0);
+
+    const totalCargoRate = stationPartsRate + crewSuppliesRate + labCargoRate + userSpaceCargoRate;
+    const cargoRocketRate = cargoCap > 0 ? totalCargoRate / cargoCap : 0;
+
+    const crew = Math.max(0, (state.stationLevel - 1) * 2);
+    const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
+    const crewRocketRate = rocketsPerLaunch / 20;
+
+    if (stationPartsRate > 0) stationRecipe.inputs['station parts'] = stationPartsRate;
+    if (crewSuppliesRate > 0) stationRecipe.inputs['crew supplies'] = crewSuppliesRate;
+    if (labCargoRate > 0) stationRecipe.inputs['electronics iv'] = labCargoRate;
+    state.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).forEach(d => {
+      stationRecipe.inputs[d.item] = (stationRecipe.inputs[d.item] || 0) + d.rate;
+    });
+    if (crewRocketRate > 0) stationRecipe.inputs[rocket.crewKey] = crewRocketRate;
+    if (cargoRocketRate > 0) stationRecipe.inputs[rocket.cargoKey] = cargoRocketRate;
+  }
+
+  const stationActive = [stationRecipe];
+
+  // 将贸易凝聚力消耗加到居民凝聚力消耗上
+  const totalUnityConsumption = unityConsumption + tradeUnityConsumptionTotal;
+
+  return {
+    mainActive,
+    powerActive,
+    residentActive,
+    stationActive,
+    specialActive,
+    tradeActive,
+    ignored,
+    excludedOutputs,
+    excludedInputs,
+    reductionFactor,
+    allExternalSupplies,
+    fixedUnityProduction: unityProduction,
+    fixedUnityConsumption: totalUnityConsumption,
+    positiveDemands: [...state.demands, ...fixedDemands.filter(d => !ignored.has(d.item) && !excludedOutputs.has(d.item) && !excludedInputs.has(d.item) && d.rate >= 0)],
+  };
+};
 
 const DEBUG = (() => {
   if (typeof window !== 'undefined') {
@@ -24,6 +522,7 @@ declare global {
   interface Window {
     __hasAutoLoadedSettings?: boolean;
     __store: any;
+    solveLp?: (lpString: string, varNames: string[]) => Promise<any>;
   }
 }
 
@@ -52,6 +551,7 @@ export default function App() {
 
   useEffect(() => {
     window.__store = useStore;
+    window.solveLp = solveLp;
     
     (async () => {
       try {
@@ -113,547 +613,326 @@ export default function App() {
     return [];
   }, []);
 
+  // 基础 LP 求解函数
+  const runLpSolver = (lpString: string, varNames: string[], integerMode?: string): Promise<any> => {
+    return new Promise((resolve, reject) => {
+      const worker = new Worker('solver.worker.js');
+      const timeoutId = setTimeout(() => {
+        worker.terminate();
+        reject(new Error('求解超时'));
+      }, 60000);
+
+      worker.onmessage = (e) => {
+        clearTimeout(timeoutId);
+        worker.terminate();
+        resolve(e.data.result);
+      };
+      worker.onerror = (err) => {
+        clearTimeout(timeoutId);
+        worker.terminate();
+        reject(new Error(err.message));
+      };
+      // 在 milp 模式下传入 MIP 选项
+      const options = integerMode === 'milp' ? { presolve: 'on', mip_max_nodes: 10000 } : undefined;
+      worker.postMessage({ lpString, requestId: Date.now(), options });
+    });
+  };
+
+  // solveLp：基础 LP 求解
+  const solveLp = async (lpString: string, varNames: string[], integerMode?: string) => {
+    const result = await runLpSolver(lpString, varNames, integerMode);
+    console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
+    setResult(result);
+    setIsSolving(false);
+    if (result?.Status === 'Optimal') {
+      setDiagnostic('');
+    } else if (result?.Status === 'Infeasible') {
+      const prev = useStore.getState().diagnostic;
+      setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
+    }
+  };
+
+  // solveCeilMode：向上取整模式（通过重新构建 LP 并传入 fixedMachines）
+  const solveCeilMode = async (lpString: string, varNames: string[]) => {
+    try {
+      setDiagnostic('🔄 求解中 (取整模式)...');
+      // 第一次 LP 求解
+      const lpResult = await runLpSolver(lpString, varNames);
+      if (lpResult?.Status !== 'Optimal') {
+        setDiagnostic(`连续求解失败: ${lpResult?.Status || '未知'}`);
+        setIsSolving(false);
+        return;
+      }
+
+      // 提取机器变量并向上取整
+      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t'));
+      const fixed: Record<string, number> = {};
+      for (const v of machineVars) {
+        const val = lpResult.Columns?.[v]?.Primal || lpResult.columns?.[v]?.Primal || 0;
+        fixed[v] = Math.ceil(val);
+      }
+
+      if (DEBUG) {
+        console.log('=== 取整模式 ===');
+        console.log('取整后的机器变量:', fixed);
+      }
+
+      // 重新构建 LP 并传入 fixedMachines
+      const state = useStore.getState();
+      const result = buildActiveRecipes(
+        state,
+        solarEfficiency,
+        getFixedDemands,
+        getMaintenanceReduction,
+        getRecycleRate,
+        calcResidentDemands,
+        calcResidentWaste,
+        getMaintenanceWasteMap,
+        ROCKET_BASE,
+        STATION_PARTS_RATE,
+        CREW_SUPPLIES_RATE,
+        SPACE_CARGO_ITEMS,
+        t
+      );
+
+      if (!result) {
+        setDiagnostic('没有启用的配方。');
+        setIsSolving(false);
+        return;
+      }
+
+      const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+        ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
+        fixedUnityProduction, fixedUnityConsumption, positiveDemands } = result;
+
+      const { lpString: newLp, varNames: newVarNames } = buildLp({
+        mainActive,
+        powerActive,
+        residentActive,
+        stationActive,
+        specialActive,
+        tradeActive,
+        ignored,
+        demands: positiveDemands,
+        externalSupplies: allExternalSupplies,
+        reductionFactor,
+        steamLowMode: state.steamLowMode as 'internal' | 'shared',
+        excludedOutputs,
+        excludedInputs,
+        constraintMode: state.constraintMode,
+        allowExternal: state.allowExternal,
+        optimizationMode: state.optimizationMode,
+        customWeights: state.customWeights,
+        fixedUnityProduction,
+        fixedUnityConsumption,
+        integerMode: 'continuous', // 取整模式不需要 milp
+        redundancy: 0,
+        fixedMachines: fixed, // 传入固定值
+      });
+
+      const fixedResult = await runLpSolver(newLp, newVarNames);
+      setResult(fixedResult);
+      setIsSolving(false);
+      if (fixedResult?.Status === 'Optimal') {
+        setDiagnostic('✅ 取整模式求解完成');
+      } else if (fixedResult?.Status === 'Infeasible') {
+        setDiagnostic('⚠️ 取整后无解，尝试增加冗余...');
+      }
+    } catch (err: any) {
+      setDiagnostic(`取整模式错误: ${err.message}`);
+      setIsSolving(false);
+    }
+  };
+
+  // solveHeuristicMode：启发式取整模式（通过重新构建 LP 并传入 fixedMachines）
+  const solveHeuristicMode = async (lpString: string, varNames: string[]) => {
+    try {
+      setDiagnostic('🔄 求解中 (启发式模式)...');
+      const fixed: Record<string, number> = {};
+      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t'));
+
+      // 逐步固定变量，每次重新构建 LP
+      for (let iter = 0; iter < Math.min(machineVars.length, 20); iter++) {
+        const state = useStore.getState();
+
+        // 重新构建 LP
+        const result = buildActiveRecipes(
+          state,
+          solarEfficiency,
+          getFixedDemands,
+          getMaintenanceReduction,
+          getRecycleRate,
+          calcResidentDemands,
+          calcResidentWaste,
+          getMaintenanceWasteMap,
+          ROCKET_BASE,
+          STATION_PARTS_RATE,
+          CREW_SUPPLIES_RATE,
+          SPACE_CARGO_ITEMS,
+          t
+        );
+
+        if (!result) break;
+
+        const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+          ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
+          fixedUnityProduction, fixedUnityConsumption, positiveDemands } = result;
+
+        const { lpString: newLp, varNames: newVarNames } = buildLp({
+          mainActive,
+          powerActive,
+          residentActive,
+          stationActive,
+          specialActive,
+          tradeActive,
+          ignored,
+          demands: positiveDemands,
+          externalSupplies: allExternalSupplies,
+          reductionFactor,
+          steamLowMode: state.steamLowMode as 'internal' | 'shared',
+          excludedOutputs,
+          excludedInputs,
+          constraintMode: state.constraintMode,
+          allowExternal: state.allowExternal,
+          optimizationMode: state.optimizationMode,
+          customWeights: state.customWeights,
+          fixedUnityProduction,
+          fixedUnityConsumption,
+          integerMode: 'continuous',
+          redundancy: 0,
+          fixedMachines: fixed,
+        });
+
+        const lpResult = await runLpSolver(newLp, newVarNames);
+        if (lpResult?.Status !== 'Optimal') break;
+
+        // 找到最接近整数的变量（小数部分最大）
+        let bestVar = '';
+        let bestFraction = 0;
+        for (const v of machineVars) {
+          if (fixed[v] !== undefined) continue;
+          const val = lpResult.Columns?.[v]?.Primal || lpResult.columns?.[v]?.Primal || 0;
+          const frac = val - Math.floor(val);
+          if (frac > bestFraction && frac < 0.999) {
+            bestFraction = frac;
+            bestVar = v;
+          }
+        }
+
+        if (bestVar === '') break;
+
+        // 固定该变量为向上取整的值
+        const ceiled = Math.ceil(lpResult.Columns?.[bestVar]?.Primal || lpResult.columns?.[bestVar]?.Primal || 0);
+        fixed[bestVar] = ceiled;
+
+        if (DEBUG) {
+          console.log(`启发式迭代 ${iter + 1}: 固定 ${bestVar} = ${ceiled}`);
+        }
+      }
+
+      // 最终结果
+      const state = useStore.getState();
+      const finalResultData = buildActiveRecipes(
+        state,
+        solarEfficiency,
+        getFixedDemands,
+        getMaintenanceReduction,
+        getRecycleRate,
+        calcResidentDemands,
+        calcResidentWaste,
+        getMaintenanceWasteMap,
+        ROCKET_BASE,
+        STATION_PARTS_RATE,
+        CREW_SUPPLIES_RATE,
+        SPACE_CARGO_ITEMS,
+        t
+      );
+
+      if (finalResultData) {
+        const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+          ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
+          fixedUnityProduction, fixedUnityConsumption, positiveDemands } = finalResultData;
+
+        const { lpString: finalLp, varNames: finalVarNames } = buildLp({
+          mainActive,
+          powerActive,
+          residentActive,
+          stationActive,
+          specialActive,
+          tradeActive,
+          ignored,
+          demands: positiveDemands,
+          externalSupplies: allExternalSupplies,
+          reductionFactor,
+          steamLowMode: state.steamLowMode as 'internal' | 'shared',
+          excludedOutputs,
+          excludedInputs,
+          constraintMode: state.constraintMode,
+          allowExternal: state.allowExternal,
+          optimizationMode: state.optimizationMode,
+          customWeights: state.customWeights,
+          fixedUnityProduction,
+          fixedUnityConsumption,
+          integerMode: 'continuous',
+          redundancy: 0,
+          fixedMachines: fixed,
+        });
+
+        const finalResult = await runLpSolver(finalLp, finalVarNames);
+        setResult(finalResult);
+        setIsSolving(false);
+        if (finalResult?.Status === 'Optimal') {
+          setDiagnostic(`✅ 启发式模式求解完成 (固定 ${Object.keys(fixed).length} 个变量)`);
+        } else {
+          setDiagnostic(`⚠️ 启发式求解状态: ${finalResult?.Status || '未知'}`);
+        }
+      } else {
+        setIsSolving(false);
+      }
+    } catch (err: any) {
+      setDiagnostic(`启发式模式错误: ${err.message}`);
+      setIsSolving(false);
+    }
+  };
+
   const handleSolve = useCallback(async () => {
     const s = useStore.getState();
 
-    // 强制刷新贸易配方（基于最新参数和选中的合同）
-    const { tradeParams, selectedTradeContractIds, tradeContracts, gameData, translation } = useStore.getState();
-    let tradeActive: Recipe[] = [];
-    let tradeUnityConsumptionTotal = 0;  // 累计贸易凝聚力消耗
+    // 使用 buildActiveRecipes 构建所有配方
+    const result = buildActiveRecipes(
+      s,
+      solarEfficiency,
+      getFixedDemands,
+      getMaintenanceReduction,
+      getRecycleRate,
+      calcResidentDemands,
+      calcResidentWaste,
+      getMaintenanceWasteMap,
+      ROCKET_BASE,
+      STATION_PARTS_RATE,
+      CREW_SUPPLIES_RATE,
+      SPACE_CARGO_ITEMS,
+      t
+    );
 
-    if (selectedTradeContractIds.length > 0 && tradeContracts.length > 0) {
-      const moduleSpeed = { S: 125, M: 250, L: 500 }[tradeParams.moduleSize];
-      const moduleCapacity = tradeParams.baySlots <= 4 ? 800 : 1200;
-      const getTravelInfo = (slots: number, fuelRaw: string, mode: string) => {
-        if (gameData?.ship_fuel_configs) {
-          const dockKey = `dock_${slots}`;
-          const dock = gameData.ship_fuel_configs[dockKey];
-          if (dock && dock[fuelRaw] && dock[fuelRaw][mode]) {
-            return {
-              travelTime: dock[fuelRaw][mode].fuel_per_trip,
-              fuelPerTrip: dock[fuelRaw][mode].travel_time_min,
-            };
-          }
-        }
-        return { travelTime: 3, fuelPerTrip: 200 };
-      };
-      const computeBestTrade = (contract: any, slots: number, moduleSpeed: number, moduleCapacity: number) => {
-        const { buyRate, sellRate } = contract;
-        let bestBuy = 0, bestSell = 0, bestM = 0, bestN = 0, bestLoadTime = 0;
-        for (let m = 1; m < slots; m++) {
-          const n = slots - m;
-          const buy1 = Math.floor(m * moduleCapacity);
-          const sell1 = Math.floor(buy1 * (sellRate / buyRate));
-          const loadBuy1 = m > 0 ? buy1 / (m * moduleSpeed) : 0;
-          const loadSell1 = n > 0 ? sell1 / (n * moduleSpeed) : 0;
-          const load1 = Math.max(loadBuy1, loadSell1);
-          if (sell1 <= n * moduleCapacity && buy1 > bestBuy) {
-            bestBuy = buy1; bestSell = sell1; bestM = m; bestN = n; bestLoadTime = load1;
-          }
-          const sell2 = Math.floor(n * moduleCapacity);
-          const buy2 = Math.floor(sell2 * (buyRate / sellRate));
-          const loadBuy2 = m > 0 ? buy2 / (m * moduleSpeed) : 0;
-          const loadSell2 = n > 0 ? sell2 / (n * moduleSpeed) : 0;
-          const load2 = Math.max(loadBuy2, loadSell2);
-          if (buy2 <= m * moduleCapacity && buy2 > bestBuy) {
-            bestBuy = buy2; bestSell = sell2; bestM = m; bestN = n; bestLoadTime = load2;
-          }
-        }
-        return { buy: bestBuy, sell: bestSell, m: bestM, n: bestN, loadTime: bestLoadTime };
-      };
-      const getDockMaintenance = (slots: number, moduleCount: number, moduleSize: string) => {
-        let workers = slots * 2;
-        const moduleWorkerMap = { S: 2, M: 3, L: 4 };
-        workers += moduleCount * moduleWorkerMap[moduleSize as keyof typeof moduleWorkerMap];
-        let electricity = slots * 100 + moduleCount * 50;
-        let maintI = slots * 1 + moduleCount * 1;
-        let maintII = slots * 0.5 + moduleCount * 0.5;
-        let maintIII = 0;
-        return { workers, electricity, maintI, maintII, maintIII };
-      };
-
-      const { travelTime, fuelPerTrip } = getTravelInfo(tradeParams.baySlots, tradeParams.fuelTypeRaw, tradeParams.travelMode);
-      const profitFactor = 1 + tradeParams.profitBonus / 100;
-      const newTradeRecipes: Recipe[] = [];
-      for (const contract of tradeContracts) {
-        if (!selectedTradeContractIds.includes(contract.id)) continue;
-        const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
-        const { buy, sell, m, n, loadTime } = computeBestTrade(adjustedContract, tradeParams.baySlots, moduleSpeed, moduleCapacity);
-        if (buy === 0) continue;
-        const totalTime = travelTime + loadTime;
-        const perMinBuy = buy / totalTime;
-        const perMinSell = sell / totalTime;
-        const perMinFuel = fuelPerTrip / totalTime;
-        const totalModules = m + n;
-        const { workers, electricity, maintI, maintII, maintIII } = getDockMaintenance(tradeParams.baySlots, totalModules, tradeParams.moduleSize);
-        const perMinWorkers = workers / totalTime;
-        const perMinElectricity = electricity / totalTime;
-        const perMinMaintI = maintI / totalTime;
-        const perMinMaintII = maintII / totalTime;
-        const perMinMaintIII = maintIII / totalTime;
-        
-        // 计算该合同的凝聚力消耗（每分钟）
-        const unityPer100 = contract.unity_per_100_bought || 0;
-        const perMinUnity = (perMinBuy / 100) * unityPer100;
-        tradeUnityConsumptionTotal += perMinUnity;
-
-        const recipe: Recipe = {
-          id: `trade_${contract.id}`,
-          name: `贸易: ${t(contract.name || contract.id, translation)}`,
-          buildingId: 'trade',
-          buildingName: t('贸易码头', translation),
-          category: '贸易',
-          buildingLevel: 0,
-          duration: 1,
-          inputs: {
-            [contract.sellItem.toLowerCase()]: perMinSell,
-            [tradeParams.fuelTypeRaw.toLowerCase()]: perMinFuel,
-          },
-          outputs: {
-            [contract.buyItem.toLowerCase()]: perMinBuy,
-          },
-          upkeep: {
-            '人力': perMinWorkers,
-            'electricity': perMinElectricity,
-            'maintenance i': perMinMaintI,
-            'maintenance ii': perMinMaintII,
-            'maintenance iii': perMinMaintIII,
-            '凝聚力': perMinUnity,   // 记录凝聚力消耗
-          },
-          powerMultiplier: 1,
-          workers: perMinWorkers,
-          isSolar: false,
-          isHidden: false,
-          module: 'trade',
-          tradeUnityPer100: unityPer100,   // 保存凝聚力系数用于优化计算
-        };
-        newTradeRecipes.push(recipe);
-      }
-      if (newTradeRecipes.length) {
-        useStore.getState().setSelectedTradeRecipes(newTradeRecipes);
-        tradeActive = newTradeRecipes;
-      } else {
-        tradeActive = [];
-      }
-    } else {
-      tradeActive = [];
-    }
-
-    const active = s.recipes.filter(r => {
-      if (!s.recipeEnabled[r.id]) return false;
-      const sn = (r.module === 'power') ?
-        s.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name :
-        s.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
-      if (sn) {
-        if (r.module === 'power') {
-          if (!s.powerEnabled[sn]) return false;
-          return s.powerSelectedLevel[sn] === r.buildingLevel;
-        } else {
-          if (!s.mainEnabled[sn]) return false;
-          return s.mainSelectedLevel[sn] === r.buildingLevel;
-        }
-      } else {
-        return r.module === 'main';
-      }
-    });
-
-    if (!active.length) {
+    if (!result) {
       setDiagnostic('没有启用的配方。');
       return;
     }
 
-    const ignored = new Set(s.ignoredItems);
-    const excludedOutputs = new Set(s.excludedOutputs);
-    const excludedInputs = new Set(s.excludedInputs);
-    const reductionFactorBase = getMaintenanceReduction(s.statueCount);
-    let fixedDemands = getFixedDemands();
+    const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+      ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
+      fixedUnityProduction, fixedUnityConsumption, positiveDemands } = result;
 
-    const modifiedActive = active.map(r => ({ ...r, inputs: { ...r.inputs }, outputs: { ...r.outputs }, upkeep: { ...r.upkeep } }));
-
-    // 应用太阳能效率
-    modifiedActive.forEach(recipe => {
-      if (recipe.isSolar && recipe.outputs['electricity']) {
-        recipe.outputs['electricity'] *= solarEfficiency;
-      }
-    });
-
-    const recycleRate = (() => {
-      const gd = useStore.getState().gameData;
-      if (!gd) return 0.2;
-      return getRecycleRate(
-        gd.baseRecycleRate ?? 0.2,
-        gd.edicts,
-        useStore.getState().edictLevels,
-        gd.office,
-        useStore.getState().officeLevels
-      );
-    })();
-
-    const currentGameData = useStore.getState().gameData;
-    let specialActive: Recipe[] = [];
-
-    if (currentGameData) {
-      const maintWasteMap = getMaintenanceWasteMap(currentGameData);
-      const allWasteNames = currentGameData.wasteNames;
-      const recyclableIndices = [0, 1, 2, 3, 4];
-      const recyclableWasteNames = allWasteNames.slice(2);
-      const recyclableWasteNamesLower = recyclableWasteNames.map(w => w.toLowerCase());
-
-      if (DEBUG) {
-        console.log('[废料调试] ========== 废料系统启动 ==========');
-        console.log('[废料调试] 回收率:', recycleRate);
-        console.log('[废料调试] 所有废料名称:', allWasteNames);
-        console.log('[废料调试] 可回收废料:', recyclableWasteNames);
-        console.log('[废料调试] 维护废物系数表 keys:', Object.keys(maintWasteMap));
-      }
-
-      modifiedActive.forEach(r => {
-        recyclableWasteNames.forEach(wn => {
-          delete r.outputs[wn];
-        });
-      });
-
-      if (DEBUG) console.log('[废料调试] 开始对 modifiedActive 添加废料，配方数量:', modifiedActive.length);
-      modifiedActive.forEach(r => {
-        const hasRecyclables = ((r.outputs['recyclables'] || r.outputs['Recyclables']) || 0) > 0;
-        if (!hasRecyclables) return;
-        if (DEBUG) console.log(`[废料调试] 处理配方: ${r.name}, 输出 recyclables: ${r.outputs['recyclables'] || r.outputs['Recyclables']}`);
-        for (const [inputItem, inputQty] of Object.entries(r.inputs)) {
-          const inputItemLower = inputItem.toLowerCase();
-          let coeffs = maintWasteMap[inputItemLower];
-          if (!coeffs) {
-            const normalized = inputItemLower.replace(/\s/g, '');
-            for (const key of Object.keys(maintWasteMap)) {
-              if (key.replace(/\s/g, '') === normalized) {
-                coeffs = maintWasteMap[key];
-                break;
-              }
-            }
-          }
-          if (coeffs && coeffs.length >= 5) {
-            const perCycleInput = inputQty;
-            if (DEBUG) console.log(`  输入 ${inputItem}: 每周期 ${perCycleInput}, 系数:`, coeffs);
-            recyclableIndices.forEach((idx, i) => {
-              const coeff = coeffs[idx];
-              if (coeff !== 0) {
-                const wasteItem = recyclableWasteNamesLower[i];
-                const added = perCycleInput * coeff * recycleRate;
-                r.outputs[wasteItem] = (r.outputs[wasteItem] || 0) + added;
-                if (DEBUG) console.log(`    添加 ${wasteItem} (每周期): ${added.toFixed(4)}`);
-              }
-            });
-          } else if (DEBUG) {
-            console.log(`  输入 ${inputItem}: 未找到废物系数`);
-          }
-        }
-      });
-
-      modifiedActive.forEach(r => {
-        const researchLvls = [...s.researchLevels];
-        if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
-          const cropRes = currentGameData.research.find(res => res.name === '作物产量');
-          const cropLvl = cropRes ? (researchLvls[currentGameData.research.indexOf(cropRes)] || 0) : 0;
-          if (cropLvl > 0 && cropRes) {
-            const bonus = (cropRes.effectPerLevel[0] || 0) * cropLvl;
-            for (const k in r.outputs) {
-              if (k !== 'water') r.outputs[k] *= (1 + bonus);
-            }
-            if (DEBUG) console.log(`[调试] 农场 ${r.name} 作物产量加成 ${bonus*100}%`);
-          }
-          const waterRes = currentGameData.research.find(res => res.name === '定居点用水');
-          const waterLvl = waterRes ? (researchLvls[currentGameData.research.indexOf(waterRes)] || 0) : 0;
-          if (waterLvl > 0 && waterRes) {
-            const waterBonus = (waterRes.effectPerLevel[0] || 0) * waterLvl;
-            if (r.inputs['water']) {
-              r.inputs['water'] *= (1 + waterBonus);
-              if (DEBUG) console.log(`[调试] 农场 ${r.name} 定居点用水加成 ${waterBonus*100}%，水输入增加`);
-            }
-          }
-        }
-      });
-
-      // 雕像
-      if (s.statueCount > 0) {
-        const statueRecipe: Recipe = {
-          id: 'statue_module',
-          name: '雕像 (The Statue of Maintenance)',
-          buildingId: 'statue',
-          buildingName: 'The Statue of Maintenance',
-          category: '雕像',
-          buildingLevel: 0,
-          duration: 60,
-          inputs: { 'fuel gas': s.statueCount * 2 },
-          outputs: {},
-          upkeep: {},
-          powerMultiplier: 1,
-          workers: 0,
-          isSolar: false,
-          isHidden: true,
-          module: 'special',
-        };
-        const statueBuilding = s.fullData?.machines_and_buildings?.find(
-          (b: any) => b.name === 'The Statue of Maintenance'
-        );
-        if (statueBuilding) {
-          if (statueBuilding.maintenance_cost_units && statueBuilding.maintenance_cost_quantity) {
-            statueRecipe.upkeep[statueBuilding.maintenance_cost_units.toLowerCase()] = statueBuilding.maintenance_cost_quantity * s.statueCount;
-          }
-          statueRecipe.workers = (statueBuilding.workers || 0) * s.statueCount;
-          if (statueBuilding.electricity_consumed) {
-            statueRecipe.inputs['electricity'] = (statueRecipe.inputs['electricity'] || 0) + statueBuilding.electricity_consumed * s.statueCount;
-          }
-          if (statueBuilding.computing_consumed) {
-            statueRecipe.inputs['computing'] = (statueRecipe.inputs['computing'] || 0) + statueBuilding.computing_consumed * s.statueCount;
-          }
-        }
-        specialActive.push(statueRecipe);
-      }
-
-      // 研究所
-      if (s.labCount > 0 && s.labLevel) {
-        const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
-        if (meta) {
-          const labRecipe: Recipe = {
-            id: `lab_module_${s.labLevel}`,
-            name: `研究所 (${meta.name}) ×${s.labCount}`,
-            buildingId: s.labLevel,
-            buildingName: meta.name,
-            category: '研究所',
-            buildingLevel: meta.level,
-            duration: 60,
-            inputs: {},
-            outputs: { 'research': 48 * (1 + s.stationLevel * 0.05) * s.labCount },
-            upkeep: {},
-            powerMultiplier: 1,
-            workers: 0,
-            isSolar: false,
-            isHidden: true,
-            module: 'special',
-            isLab: true,
-          };
-          meta.recipes.forEach((r: any) => {
-            if (!s.recipeEnabled[r.id]) return;
-            for (const [item, qty] of Object.entries(r.inputs)) {
-              const rate = (60 / r.duration) * (qty as number) * s.labCount;
-              labRecipe.inputs[item] = (labRecipe.inputs[item] || 0) + rate;
-              if (r.outputs && (r.outputs.recyclables || r.outputs.Recyclables)) {
-                const recycleRateOut = (60 / r.duration) * ((r.outputs.recyclables || r.outputs.Recyclables) as number) * s.labCount;
-                labRecipe.outputs['recyclables'] = (labRecipe.outputs['recyclables'] || 0) + recycleRateOut;
-              }
-            }
-          });
-          for (const [item, qty] of Object.entries(meta.upkeep || {})) {
-            labRecipe.upkeep[item.toLowerCase()] = (qty as number) * s.labCount;
-          }
-
-          const labHasRecyclables = (labRecipe.outputs['recyclables'] || 0) > 0;
-          if (labHasRecyclables) {
-            if (DEBUG) console.log(`[废料调试] 处理实验室配方: ${labRecipe.name}, 输出 recyclables: ${labRecipe.outputs['recyclables']}`);
-            for (const [inputItem, inputQty] of Object.entries(labRecipe.inputs)) {
-              const inputItemLower = inputItem.toLowerCase();
-              let coeffs = maintWasteMap[inputItemLower];
-              if (!coeffs) {
-                const normalized = inputItemLower.replace(/\s/g, '');
-                for (const key of Object.keys(maintWasteMap)) {
-                  if (key.replace(/\s/g, '') === normalized) {
-                    coeffs = maintWasteMap[key];
-                    break;
-                  }
-                }
-              }
-              if (coeffs && coeffs.length >= 5) {
-                const perCycleInput = inputQty;
-                if (DEBUG) console.log(`  输入 ${inputItem}: 每周期 ${perCycleInput}, 系数:`, coeffs);
-                recyclableIndices.forEach((idx, i) => {
-                  const coeff = coeffs[idx];
-                  if (coeff !== 0) {
-                    const wasteItem = recyclableWasteNamesLower[i];
-                    const added = perCycleInput * coeff * recycleRate;
-                    labRecipe.outputs[wasteItem] = (labRecipe.outputs[wasteItem] || 0) + added;
-                    if (DEBUG) console.log(`    添加 ${wasteItem} (每周期): ${added.toFixed(4)}`);
-                  }
-                });
-              } else if (DEBUG) {
-                console.log(`  输入 ${inputItem}: 未找到废物系数`);
-              }
-            }
-          }
-
-          specialActive.push(labRecipe);
-        }
-      }
-    }
-
-    let reductionFactor = reductionFactorBase;
-    if (currentGameData) {
-      const edictReduce = currentGameData.edicts.find(e => e.name === '减少维护');
-      if (edictReduce) {
-        const lvl = s.edictLevels[currentGameData.edicts.indexOf(edictReduce)] ?? -1;
-        if (lvl >= 0) {
-          reductionFactor += edictReduce.effectPerLevel[lvl];
-        }
-      }
-      reductionFactor = Math.min(reductionFactor, 1);
-    }
-
-    let mainActive = modifiedActive.filter(r => {
-      if (!s.recipeEnabled[r.id] || r.module !== 'main') return false;
-      const sn = s.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
-      if (sn) {
-        if (!s.mainEnabled[sn]) return false;
-        if (s.mainSelectedLevel[sn] !== r.buildingLevel) return false;
-        return s.mainBuildingEnabledMap[r.buildingId] !== false;
-      }
-      return s.mainBuildingEnabledMap[r.buildingId] !== false;
-    });
-
-    let powerActive = modifiedActive.filter(r => {
-      if (!s.recipeEnabled[r.id] || r.module !== 'power') return false;
-      const sn = s.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
-      if (!sn) return false;
-      if (!s.powerEnabled[sn]) return false;
-      if (s.powerSelectedLevel[sn] !== r.buildingLevel) return false;
-      return s.powerBuildingEnabledMap[r.buildingId] !== false;
-    });
-
-    // 居民模块
-    let allExternalSupplies: { item: string; rate: number }[] = [];
-    let unityProduction = 0;
-    let unityConsumption = 0;
-
-    const residentRecipe: Recipe = {
-      id: 'resident_module',
-      name: '居民模块',
-      buildingId: 'resident',
-      buildingName: '居民',
-      category: '居民',
-      buildingLevel: 0,
-      duration: 60,
-      inputs: {},
-      outputs: {},
-      upkeep: {},
-      powerMultiplier: 1,
-      workers: 0,
-      isSolar: false,
-      isHidden: true,
-      module: 'resident',
-    };
-
-    if (currentGameData) {
-      const state = useStore.getState();
-
-      const result = calcResidentDemands(
-        currentGameData,
-        state.population,
-        state.housingIndex,
-        state.selectedFoods,
-        state.selectedMedical,
-        state.selectedOthers,
-        state.edictLevels,
-        state.officeLevels,
-        state.researchLevels,
-        recycleRate,
-        state.stationLevel
-      );
-      const residentDemands = result.demands;
-      unityProduction = result.unityProduction;
-      unityConsumption = result.unityConsumption;
-      setUnityProduction(unityProduction);
-
-      const residentWasteSupplies = calcResidentWaste(
-        currentGameData,
-        residentDemands,
-        recycleRate
-      ).map(w => ({ item: w.item, rate: w.rate }));
-
-      allExternalSupplies = [...allExternalSupplies, ...residentWasteSupplies];
-
-      residentDemands.forEach(d => {
-        residentRecipe.inputs[d.item] = d.rate;
-      });
-
-      residentWasteSupplies.forEach(w => {
-        residentRecipe.outputs[w.item] = w.rate;
-      });
-
-      const popWaste = currentGameData.populationWaste;
-      if (popWaste) {
-        const wasteAmount = popWaste.ratePerPop * state.population;
-        residentRecipe.outputs[popWaste.item.toLowerCase()] = (residentRecipe.outputs[popWaste.item.toLowerCase()] || 0) + wasteAmount;
-        if (DEBUG) console.log(`[调试] 人口垃圾 ${popWaste.item}: ${wasteAmount}/分`);
-      }
-
-      setExternalSupplies(allExternalSupplies);
-      useStore.getState().setSolverFixedDemands(fixedDemands.filter(d => d.rate > 0));
-    }
-
-    const residentActive = [residentRecipe];
-
-    // 空间站模块
-    const stationRecipe: Recipe = {
-      id: 'station_module',
-      name: '空间站模块',
-      buildingId: 'station',
-      buildingName: '空间站',
-      category: '空间站',
-      buildingLevel: 0,
-      duration: 60,
-      inputs: {},
-      outputs: {},
-      upkeep: {},
-      powerMultiplier: 1,
-      workers: 0,
-      isSolar: false,
-      isHidden: true,
-      module: 'station',
-    };
-
-    if (s.stationLevel > 0) {
-      const rocket = ROCKET_BASE[s.rocketType];
-      const rocketCargoResearch = currentGameData?.research.find(r => r.name === '火箭载荷量');
-      const rocketCargoLevel = rocketCargoResearch ? (s.researchLevels[currentGameData.research.indexOf(rocketCargoResearch)] || 0) : 0;
-      const cargoBonus = 1 + rocketCargoLevel * 0.05;
-      const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (cargoBonus - 1);
-      const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (cargoBonus - 1);
-
-      const stationPartsRate = s.stationLevel * STATION_PARTS_RATE;
-      const crewSuppliesRate = Math.max(0, (s.stationLevel - 1) * CREW_SUPPLIES_RATE);
-      let labCargoRate = 0;
-      const meta = s.labMeta.find(l => l.buildingId === s.labLevel);
-      if (meta && s.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * s.labCount;
-      const userSpaceCargoRate = s.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).reduce((acc, d) => acc + d.rate, 0);
-
-      const totalCargoRate = stationPartsRate + crewSuppliesRate + labCargoRate + userSpaceCargoRate;
-      const cargoRocketRate = cargoCap > 0 ? totalCargoRate / cargoCap : 0;
-
-      const crew = Math.max(0, (s.stationLevel - 1) * 2);
-      const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
-      const crewRocketRate = rocketsPerLaunch / 20;
-
-      if (stationPartsRate > 0) stationRecipe.inputs['station parts'] = stationPartsRate;
-      if (crewSuppliesRate > 0) stationRecipe.inputs['crew supplies'] = crewSuppliesRate;
-      if (labCargoRate > 0) stationRecipe.inputs['electronics iv'] = labCargoRate;
-      s.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).forEach(d => {
-        stationRecipe.inputs[d.item] = (stationRecipe.inputs[d.item] || 0) + d.rate;
-      });
-      if (crewRocketRate > 0) stationRecipe.inputs[rocket.crewKey] = crewRocketRate;
-      if (cargoRocketRate > 0) stationRecipe.inputs[rocket.cargoKey] = cargoRocketRate;
-    }
-
-    const stationActive = [stationRecipe];
-
-    // 将贸易凝聚力消耗加到居民凝聚力消耗上
-    const totalUnityConsumption = unityConsumption + tradeUnityConsumptionTotal;
-    setUnityConsumption(totalUnityConsumption);
-
-    const allFixedDemands = getFixedDemands();
-    const positiveDemands = [...s.demands, ...allFixedDemands.filter(d => !ignored.has(d.item) && !excludedOutputs.has(d.item) && !excludedInputs.has(d.item) && d.rate >= 0)];
+    setUnityProduction(fixedUnityProduction);
+    setUnityConsumption(fixedUnityConsumption);
+    setExternalSupplies(allExternalSupplies);
+    useStore.getState().setSolverFixedDemands(getFixedDemands().filter(d => d.rate > 0));
 
     const effectiveAllowExternal = s.allowExternal;
-    const optimizationMode = useStore.getState().optimizationMode;
-    const customWeights = useStore.getState().customWeights;
-    const fixedUnityProduction = unityProduction;
-    const fixedUnityConsumption = totalUnityConsumption;  // 传递给 lpBuilder（用于凝聚力模式，但已通过贸易变量体现）
+    const optimizationMode = s.optimizationMode;
+    const customWeights = s.customWeights;
+    const integerMode = s.integerMode;
 
     const { lpString, varNames, missing } = buildLp({
       mainActive,
@@ -675,7 +954,14 @@ export default function App() {
       customWeights,
       fixedUnityProduction,
       fixedUnityConsumption,
+      integerMode,
+      redundancy: s.redundancyFactor,
     });
+
+    if (integerMode === 'milp') {
+      console.log('=== MILP 模式 LP 结尾 ===');
+      console.log(lpString.slice(-800));
+    }
 
     useStore.getState().setSolverActive([...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive]);
     useStore.getState().setSolverVarNames(varNames);
@@ -685,6 +971,7 @@ export default function App() {
       console.log('[调试] LP 字符串长度:', lpString.length);
       console.log('[调试] 变量数量:', varNames.length);
       console.log('[调试] 缺失物品:', missing);
+      console.log('[调试] integerMode:', integerMode);
     }
 
     if (missing.length) {
@@ -705,65 +992,35 @@ export default function App() {
       }, 0);
     }
 
+    // 根据整数模式选择求解方式
     setIsSolving(true);
     try {
-      const worker = new Worker('solver.worker.js');
-      const requestId = Date.now();
-      const timeoutId = setTimeout(() => {
-        worker.terminate();
-        setIsSolving(false);
-        setDiagnostic('求解超时，请简化配方选择或允许外部供给。');
-      }, 30000);
-
-      worker.onmessage = (e) => {
-        clearTimeout(timeoutId);
-        const data = e.data;
-        if (DEBUG) console.log('[调试] 求解器返回:', data);
-        if (data.error) {
-          setDiagnostic(`求解器错误: ${data.error}`);
-          setIsSolving(false);
-          worker.terminate();
-          return;
+      if (integerMode === 'continuous' || integerMode === 'milp') {
+        // 直接 LP 求解（milp 模式由 HiGHS 自动处理整数）
+        await solveLp(lpString, varNames, integerMode);
+        if (DEBUG) {
+          const result = useStore.getState().result;
+          if (result?.Status === 'Optimal') {
+            console.log('=== 求解结果 - 贸易变量值 ===');
+            tradeActive.forEach((recipe, idx) => {
+              const varName = `tr${idx}`;
+              const val = result.Columns?.[varName]?.Primal || result.columns?.[varName]?.Primal || 0;
+              console.log(`${recipe.name}: ${val}`);
+            });
+          }
         }
-        const result = data.result;
-        if (!result || !result.Status) {
-          setDiagnostic('求解器返回了无效结果');
-          setIsSolving(false);
-          worker.terminate();
-          return;
-        }
-        setResult(result);
-        setIsSolving(false);
-        if (DEBUG && result.Status === 'Optimal') {
-          console.log('=== 求解结果 - 贸易变量值 ===');
-          tradeActive.forEach((recipe, idx) => {
-            const varName = `tr${idx}`;
-            const val = result.Columns[varName]?.Primal || 0;
-            console.log(`${recipe.name}: ${val}`);
-          });
-        }
-        if (result.Status === 'Optimal') {
-          setDiagnostic('');
-        } else if (result.Status === 'Infeasible') {
-          const prev = useStore.getState().diagnostic;
-          setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
-        }
-        worker.terminate();
-      };
-
-      worker.onerror = (err) => {
-        clearTimeout(timeoutId);
-        setIsSolving(false);
-        setDiagnostic(`Worker 错误: ${err.message} | 文件名: ${err.filename} | 行号: ${err.lineno}`);
-        worker.terminate();
-      };
-
-      worker.postMessage({ lpString, requestId });
+      } else if (integerMode === 'ceil') {
+        // 向上取整模式
+        await solveCeilMode(lpString, varNames);
+      } else if (integerMode === 'heuristic') {
+        // 启发式取整模式
+        await solveHeuristicMode(lpString, varNames);
+      }
     } catch (err: any) {
       setIsSolving(false);
       setDiagnostic(`求解器错误: ${err.message}`);
     }
-  }, [getFixedDemands, solarEfficiency]);
+  }, [getFixedDemands, solarEfficiency, solveLp, solveCeilMode, solveHeuristicMode]);
 
   return (
     <>

@@ -100,6 +100,11 @@ export const useStore = create<StoreState>((set, get) => ({
   optimizationMode: 'machines',
   customWeights: { machines: 100, labor: 0, cohesion: 0, area: 0, raw: 0 },
 
+  // 整数模式相关
+  integerMode: 'continuous' as 'continuous' | 'ceil' | 'heuristic' | 'milp',
+  redundancyFactor: 0,
+  milpTimeLimit: 30,
+
   loadData: (json: DataJson) => {
     const p = parseData(json);
     const init = initializeFromParsed(p);
@@ -210,10 +215,14 @@ export const useStore = create<StoreState>((set, get) => ({
   setTradeParams: (params) => set(state => ({ tradeParams: { ...state.tradeParams, ...params } })),
   setSelectedTradeContractIds: (ids) => set({ selectedTradeContractIds: ids }),
 
-  setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(1, Math.max(0, value)) }),
+  setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(0, Math.max(0, value)) }),
 
   setOptimizationMode: (mode) => set({ optimizationMode: mode }),
   setCustomWeights: (weights) => set({ customWeights: { ...get().customWeights, ...weights } }),
+
+  setIntegerMode: (mode) => set({ integerMode: mode }),
+  setRedundancyFactor: (v) => set({ redundancyFactor: v }),
+  setMilpTimeLimit: (v) => set({ milpTimeLimit: v }),
 
   importSettings: (s) => {
     const state: Partial<StoreState> = {};

@@ -91,7 +91,7 @@ export const POWER_OUTPUT_ITEMS = new Set([
   'blanket fuel (enriched)'
 ]);
 
-import { GameData, Edict, Office, Research, Recipe } from './types';
+import { GameData, Edict, Office, Research, Recipe, TradeContract } from './types';
 
 export function getRecycleRate(
   base: number,
@@ -132,7 +132,6 @@ export function calcResidentDemands(
   const factor = pop / data.populationScale;
   const housing = data.housingTiers[housingIdx] || { multipliers: {}, unityMultiplierConditions: [] };
 
-  // 需求乘数（仅用于物品需求，不影响凝聚力）
   let catMods: Record<string, number> = {};
   let itemMods: Record<string, number> = {};
 
@@ -178,7 +177,6 @@ export function calcResidentDemands(
     }
   });
 
-  // 食物分组（仅用于需求计算，不影响凝聚力）
   const foodGroups: Record<string, string[]> = {};
   for (const [name, svc] of Object.entries(data.services)) {
     if (svc.category === 'food' && svc['Food Category']) {
@@ -200,7 +198,6 @@ export function calcResidentDemands(
   let foodUnity = 0;
   let nonFoodUnity = 0;
 
-  // 食物需求与凝聚力
   if (numActiveGroups > 0) {
     for (const [grp, enabledList] of Object.entries(activeGroups)) {
       const intraFactor = foodGroups[grp].length / enabledList.length;
@@ -212,12 +209,11 @@ export function calcResidentDemands(
         if (itemMods[name]) mod *= itemMods[name];
         demand *= mod;
         demands.push({ item: name.toLowerCase(), rate: demand });
-        foodUnity += svc.unity;      // 食物Unity直接累加
+        foodUnity += svc.unity;
       }
     }
   }
 
-  // 医疗
   if (selectedMedical) {
     const svc = data.services[selectedMedical];
     let demand = svc.demand * factor;
@@ -229,7 +225,6 @@ export function calcResidentDemands(
     nonFoodUnity += svc.unity;
   }
 
-  // 其他服务（非食物、非医疗）
   for (const [name, svc] of Object.entries(data.services)) {
     if (svc.category === 'food' || svc.category === 'medical') continue;
     if (!selectedOthers.has(name)) continue;
@@ -242,7 +237,6 @@ export function calcResidentDemands(
     nonFoodUnity += svc.unity;
   }
 
-  // 住房最高乘数
   let housingMult = 1;
   for (const cond of housing.unityMultiplierConditions) {
     const satisfied = cond.requires.every(r => data.services[r] !== undefined);
@@ -251,7 +245,6 @@ export function calcResidentDemands(
     }
   }
 
-  // 办公/研究凝聚力百分比加成
   let unityPct = 0;
   data.office.forEach((o, i) => {
     const lvl = officeLevels[i] || 0;
@@ -272,7 +265,6 @@ export function calcResidentDemands(
     }
   });
 
-  // 法令固定值
   let edictUnity = 0;
   data.edicts.forEach((e, i) => {
     const lvl = edictLevels[i] ?? -1;
@@ -281,10 +273,8 @@ export function calcResidentDemands(
     }
   });
 
-  // 空间站加成
   const stationBonus = stationLevel * 0.05;
 
-  // 凝聚力公式
   const cohesion = ((nonFoodUnity + 1) * housingMult + foodUnity) * (1 + unityPct) + stationBonus + edictUnity;
 
   return { demands, unityProduction: cohesion, unityConsumption: 0, recycleRate };
@@ -346,4 +336,9 @@ export function isConsumptionWasteItem(item: string): boolean {
     'lab equipment iv'
   ];
   return items.includes(item.toLowerCase());
+}
+
+// 新增：判断贸易合同是否用于获取原矿
+export function isOreContract(contract: TradeContract): boolean {
+  return isRaw(contract.buyItem);
 }
