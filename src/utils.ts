@@ -342,3 +342,75 @@ export function isConsumptionWasteItem(item: string): boolean {
 export function isOreContract(contract: TradeContract): boolean {
   return isRaw(contract.buyItem);
 }
+
+// ========== 贸易隐含成本计算（仅用于凝聚力模式） ==========
+
+/**
+ * 物品隐含凝聚力成本计算（从原矿到该物品的最小贸易凝聚力消耗）
+ * 原理：只有贸易消耗凝聚力，生产不消耗。通过迭代计算每个物品的"隐含成本"，
+ * 代表获得 1 单位该物品所需的最小贸易凝聚力（通过最优贸易链）。
+ *
+ * 原矿成本 = 0（可无限开采，不消耗凝聚力）
+ * 对于每个贸易配方（卖出 A，买入 B）：cost_B = min(cost_B, (cost_A * 用量_A + 直接凝聚力) / 获得量_B)
+ */
+export function computeImplicitCosts(
+  tradeRecipes: Recipe[],
+  maxIter: number = 20
+): Map<string, number> {
+  const cost = new Map<string, number>();
+
+  // 原矿集合（可无限开采，成本为0）
+  const oreItems = new Set([
+    'iron ore', 'copper ore', 'limestone', 'coal', 'sand', 'rock', 'quartz',
+    'sulfur', 'salt', 'stone', 'bauxite', 'titanium ore', 'gold ore',
+    'water', 'seawater', 'air', 'crude oil', 'wood', 'imported goods'
+  ]);
+  for (const item of oreItems) cost.set(item, 0);
+
+  // 迭代更新成本（从原矿向上游传递）
+  let changed = true;
+  for (let iter = 0; iter < maxIter && changed; iter++) {
+    changed = false;
+    for (const recipe of tradeRecipes) {
+      if (recipe.module !== 'trade') continue;
+      // 卖出品（input）是支付的高阶产品，买入品（output）是获得的原矿或中间产品
+      const sellItem = Object.keys(recipe.inputs)[0];
+      const sellRate = recipe.inputs[sellItem];
+      const buyItem = Object.keys(recipe.outputs)[0];
+      const buyRate = recipe.outputs[buyItem];
+      const direct = recipe.upkeep['凝聚力'] || 0;
+
+      const buyCost = cost.get(buyItem);
+      if (buyCost === undefined) continue;
+
+      // 计算卖出品的成本：获得买入品所需的凝聚力 = 卖出品成本 * 卖出量 + 直接凝聚力
+      // 因此卖出品成本 = (买入品成本 * 买入量 - 直接凝聚力) / 卖出量
+      // 注意：如果直接凝聚力过大可能导致负数，但取最大值0
+      const newSellCost = Math.max(0, (buyCost * buyRate - direct) / sellRate);
+      const oldSellCost = cost.get(sellItem);
+      if (oldSellCost === undefined || newSellCost < oldSellCost - 1e-6) {
+        cost.set(sellItem, newSellCost);
+        changed = true;
+      }
+    }
+  }
+  return cost;
+}
+
+/**
+ * 计算贸易配方的净凝聚力消耗（每分钟）
+ * 净成本 = 卖出品成本 * 卖出速率 - 买入品成本 * 买入速率 + 直接凝聚力
+ */
+export function getAdjustedCohesion(recipe: Recipe, costs: Map<string, number>): number {
+  const sellItem = Object.keys(recipe.inputs)[0];
+  const sellRate = recipe.inputs[sellItem];
+  const buyItem = Object.keys(recipe.outputs)[0];
+  const buyRate = recipe.outputs[buyItem];
+  const direct = recipe.upkeep['凝聚力'] || 0;
+  const sellCost = costs.get(sellItem);
+  const buyCost = costs.get(buyItem);
+  if (sellCost === undefined || buyCost === undefined) {
+    return direct; // 回退到直接凝聚力
+  }
+  return (sellCost * sellRate) - (buyCost * buyRate) + direct;
+}

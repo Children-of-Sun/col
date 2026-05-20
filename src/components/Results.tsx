@@ -282,7 +282,9 @@ export const Results: React.FC = () => {
   const showTinyErrors = useStore(s => s.showTinyErrors);
   const setShowTinyErrors = useStore(s => s.setShowTinyErrors);
   const unityProduction = useStore(s => s.unityProduction);
-  const unityConsumption = useStore(s => s.unityConsumption);
+  const cohesionTradeDirect = useStore(s => s.cohesionTradeDirect);
+  const cohesionTradeMaintenance = useStore(s => s.cohesionTradeMaintenance);
+  const cohesionEdict = useStore(s => s.cohesionEdict);
   const [selectedTab, setSelectedTab] = useState<string>('全厂总览');
 
   const varValues = useMemo(() => {
@@ -514,7 +516,9 @@ export const Results: React.FC = () => {
           </div>
           <div className="stat">
             ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0)).toFixed(2)}</b><br/>
-            🎯 凝聚力产量: <b>{unityProduction.toFixed(2)}</b> | 凝聚力消耗: <b>{unityConsumption.toFixed(2)}</b> | 净凝聚力: <b>{(unityProduction - unityConsumption).toFixed(2)}</b>
+            🎯 凝聚力产量: <b>{unityProduction.toFixed(2)}</b><br/>
+            📉 凝聚力消耗: 贸易直接: <b>{cohesionTradeDirect.toFixed(2)}</b> | 贸易维持: <b>{cohesionTradeMaintenance.toFixed(2)}</b> | 法令: <b>{cohesionEdict.toFixed(2)}</b> | 总计: <b>{(cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict).toFixed(2)}</b><br/>
+            净凝聚力: <b>{(unityProduction - (cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict)).toFixed(2)}</b>
           </div>
 
           <div className="tab-bar">

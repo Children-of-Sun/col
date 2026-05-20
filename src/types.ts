@@ -124,6 +124,8 @@ export interface Recipe {
   module: 'main' | 'power' | 'resident' | 'station' | 'special' | 'trade';
   isLab?: boolean;
   tradeUnityPer100?: number;
+  tradeUnityDirect?: number;          // 贸易直接消耗（每分钟）
+  tradeUnityMaintenance?: number;     // 贸易维持消耗（每分钟）
 }
 
 export interface LabMeta {
@@ -236,6 +238,11 @@ export interface StoreState {
   redundancyFactor: number;
   milpTimeLimit: number;
 
+  // 凝聚力消耗细分
+  cohesionTradeDirect: number;
+  cohesionTradeMaintenance: number;
+  cohesionEdict: number;
+
   // Actions
   loadData: (json: DataJson) => void;
   loadTranslation: (json: Record<string, string>) => void;
@@ -300,6 +307,9 @@ export interface StoreState {
   setIntegerMode: (mode: IntegerMode) => void;
   setRedundancyFactor: (value: number) => void;
   setMilpTimeLimit: (seconds: number) => void;
+  setCohesionTradeDirect: (value: number) => void;
+  setCohesionTradeMaintenance: (value: number) => void;
+  setCohesionEdict: (value: number) => void;
 }
 
 export interface SolverResult {

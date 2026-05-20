@@ -8,7 +8,7 @@ import PopTechPanel from './components/PopTechPanel';
 import { TradePanel } from './components/TradePanel';
 import { buildLp } from './lpBuilder';
 import { ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getRecycleRate, calcResidentDemands, calcResidentWaste, getMaintenanceWasteMap } from './utils';
-import { getMaintenanceReduction, t, isRaw, isPowerItem, getSeriesName, isMaintenanceRecyclingRecipe } from './utils';
+import { getMaintenanceReduction, t, isRaw, isPowerItem, getSeriesName, isMaintenanceRecyclingRecipe, computeImplicitCosts, getAdjustedCohesion } from './utils';
 import { Demand, Recipe, DockLevel, TradeFuel } from './types';
 import { calculateTrade } from './tradeCalculator';
 import './App.css';
@@ -33,6 +33,8 @@ const buildActiveRecipes = (
   const { tradeParams, selectedTradeContractIds, tradeContracts, gameData, translation } = state;
   let tradeActive: Recipe[] = [];
   let tradeUnityConsumptionTotal = 0;
+  let tradeUnityDirectTotal = 0;
+  let tradeUnityMaintenanceTotal = 0;
 
   if (selectedTradeContractIds.length > 0 && tradeContracts.length > 0) {
     const moduleSpeed = { S: 125, M: 250, L: 500 }[tradeParams.moduleSize] || 250;
@@ -104,9 +106,13 @@ const buildActiveRecipes = (
       const perMinMaintI = maintI / totalTime;
       const perMinMaintII = maintII / totalTime;
       const perMinMaintIII = maintIII / totalTime;
-      const unityPer100 = contract.unity_per_100_bought || 0;
-      const perMinUnity = (perMinBuy / 100) * unityPer100;
-      tradeUnityConsumptionTotal += perMinUnity;
+      const perMinUnityDirect = (perMinBuy / 100) * (contract.unity_per_100_bought || 0);
+      const perMinUnityMaintenance = contract.unity_per_month || 0; // 已是每分钟，仅用于显示
+
+      // 累加消耗（直接用于显示，维持不参与求解）
+      tradeUnityDirectTotal += perMinUnityDirect;
+      tradeUnityMaintenanceTotal += perMinUnityMaintenance;
+      tradeUnityConsumptionTotal += perMinUnityDirect; // 注意：只加直接消耗
 
       const recipe: Recipe = {
         id: `trade_${contract.id}`,
@@ -129,13 +135,15 @@ const buildActiveRecipes = (
           'maintenance i': perMinMaintI,
           'maintenance ii': perMinMaintII,
           'maintenance iii': perMinMaintIII,
-          '凝聚力': perMinUnity,
+          '凝聚力': perMinUnityDirect,   // 只包含直接消耗
         },
         powerMultiplier: 1,
         workers: perMinWorkers,
         isSolar: false,
         isHidden: false,
         module: 'trade',
+        tradeUnityDirect: perMinUnityDirect,
+        tradeUnityMaintenance: perMinUnityMaintenance,
       };
       newTradeRecipes.push(recipe);
     }
@@ -148,6 +156,19 @@ const buildActiveRecipes = (
   } else {
     tradeActive = [];
   }
+
+      // 仅在凝聚力模式下，根据隐含成本调整贸易配方的凝聚力消耗
+    /*if (state.optimizationMode === 'cohesion' && tradeActive.length > 0) {
+      console.log('=== 调整贸易凝聚力（隐含成本） ===');
+      const costs = computeImplicitCosts(tradeActive);
+      console.log('物品隐含成本:', [...costs.entries()].slice(0, 20));
+      for (const recipe of tradeActive) {
+        const original = recipe.upkeep['凝聚力'] || 0;
+        const adjusted = getAdjustedCohesion(recipe, costs);
+        console.log(`${recipe.name}: 原始=${original.toFixed(4)}, 调整后=${adjusted.toFixed(4)}`);
+        recipe.upkeep['凝聚力'] = adjusted;
+      }
+    }*/
 
   const active = state.recipes.filter(r => {
     if (!state.recipeEnabled[r.id]) return false;
@@ -507,6 +528,9 @@ const buildActiveRecipes = (
     allExternalSupplies,
     fixedUnityProduction: unityProduction,
     fixedUnityConsumption: totalUnityConsumption,
+    tradeUnityConsumptionTotal,
+    tradeUnityDirectTotal,
+    tradeUnityMaintenanceTotal,
     positiveDemands: [...state.demands, ...fixedDemands.filter(d => !ignored.has(d.item) && !excludedOutputs.has(d.item) && !excludedInputs.has(d.item) && d.rate >= 0)],
   };
 };
@@ -538,6 +562,9 @@ export default function App() {
   const setSolverMissing = useStore(s => s.setSolverMissing);
   const setUnityProduction = useStore(s => s.setUnityProduction);
   const setUnityConsumption = useStore(s => s.setUnityConsumption);
+  const setCohesionTradeDirect = useStore(s => s.setCohesionTradeDirect);
+  const setCohesionTradeMaintenance = useStore(s => s.setCohesionTradeMaintenance);
+  const setCohesionEdict = useStore(s => s.setCohesionEdict);
   const setTradeContracts = useStore(s => s.setTradeContracts);
   const solarEfficiency = useStore(s => s.solarEfficiency);
   const gameData = useStore(s => s.gameData);
@@ -639,13 +666,27 @@ export default function App() {
   };
 
   // solveLp：基础 LP 求解
-  const solveLp = async (lpString: string, varNames: string[], integerMode?: string) => {
+  const solveLp = async (lpString: string, varNames: string[], integerMode?: string, tradeActive?: Recipe[], edictUnityConsumption?: number) => {
     const result = await runLpSolver(lpString, varNames, integerMode);
     console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
     setResult(result);
     setIsSolving(false);
     if (result?.Status === 'Optimal') {
       setDiagnostic('');
+      // 计算实际贸易消耗
+      if (tradeActive && tradeActive.length) {
+        let actualDirect = 0;
+        let actualMaintenance = 0;
+        tradeActive.forEach((recipe, idx) => {
+          const varName = `tr${idx}`;
+          const count = result.Columns?.[varName]?.Primal || result.columns?.[varName]?.Primal || 0;
+          actualDirect += (recipe.tradeUnityDirect || 0) * count;
+          actualMaintenance += (recipe.tradeUnityMaintenance || 0) * count;
+        });
+        setCohesionTradeDirect(actualDirect);
+        setCohesionTradeMaintenance(actualMaintenance);
+        setUnityConsumption(actualDirect + actualMaintenance + (edictUnityConsumption || 0));
+      }
     } else if (result?.Status === 'Infeasible') {
       const prev = useStore.getState().diagnostic;
       setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
@@ -922,10 +963,28 @@ export default function App() {
 
     const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
       ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
-      fixedUnityProduction, fixedUnityConsumption, positiveDemands } = result;
+      fixedUnityProduction, fixedUnityConsumption, tradeUnityConsumptionTotal,
+      tradeUnityDirectTotal, tradeUnityMaintenanceTotal, positiveDemands } = result;
 
+    // 计算法令消耗
+    let edictUnityConsumption = 0;
+    const currentGameData = s.gameData;
+    if (currentGameData) {
+      for (let i = 0; i < currentGameData.edicts.length; i++) {
+        const lvl = s.edictLevels[i] ?? -1;
+        if (lvl >= 0) {
+          const unity = currentGameData.edicts[i].unityPerLevel[lvl] || 0;
+          if (unity < 0) edictUnityConsumption += -unity; // 消耗取正值
+        }
+      }
+    }
+
+    // 存储三项消耗到 store
+    setCohesionTradeDirect(tradeUnityDirectTotal);
+    setCohesionTradeMaintenance(tradeUnityMaintenanceTotal);
+    setCohesionEdict(edictUnityConsumption);
     setUnityProduction(fixedUnityProduction);
-    setUnityConsumption(fixedUnityConsumption);
+    setUnityConsumption(tradeUnityDirectTotal + tradeUnityMaintenanceTotal + edictUnityConsumption);
     setExternalSupplies(allExternalSupplies);
     useStore.getState().setSolverFixedDemands(getFixedDemands().filter(d => d.rate > 0));
 
@@ -997,7 +1056,7 @@ export default function App() {
     try {
       if (integerMode === 'continuous' || integerMode === 'milp') {
         // 直接 LP 求解（milp 模式由 HiGHS 自动处理整数）
-        await solveLp(lpString, varNames, integerMode);
+        await solveLp(lpString, varNames, integerMode, tradeActive, edictUnityConsumption);
         if (DEBUG) {
           const result = useStore.getState().result;
           if (result?.Status === 'Optimal') {

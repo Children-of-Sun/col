@@ -105,6 +105,11 @@ export const useStore = create<StoreState>((set, get) => ({
   redundancyFactor: 0,
   milpTimeLimit: 30,
 
+  // 凝聚力消耗细分
+  cohesionTradeDirect: 0,
+  cohesionTradeMaintenance: 0,
+  cohesionEdict: 0,
+
   loadData: (json: DataJson) => {
     const p = parseData(json);
     const init = initializeFromParsed(p);
@@ -223,6 +228,9 @@ export const useStore = create<StoreState>((set, get) => ({
   setIntegerMode: (mode) => set({ integerMode: mode }),
   setRedundancyFactor: (v) => set({ redundancyFactor: v }),
   setMilpTimeLimit: (v) => set({ milpTimeLimit: v }),
+  setCohesionTradeDirect: (value: number) => set({ cohesionTradeDirect: value }),
+  setCohesionTradeMaintenance: (value: number) => set({ cohesionTradeMaintenance: value }),
+  setCohesionEdict: (value: number) => set({ cohesionEdict: value }),
 
   importSettings: (s) => {
     const state: Partial<StoreState> = {};
