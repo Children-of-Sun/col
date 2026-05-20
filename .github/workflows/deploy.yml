@@ -4,7 +4,6 @@ on:
   push:
     branches: [ "main" ]
 
-# 关键：配置工作流的写入权限
 permissions:
   contents: write
 
@@ -12,31 +11,31 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     steps:
-      # 1. 检出代码，并禁用子模块更新，避免潜在问题
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      # 2. 设置 Node.js 环境
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'npm'   # 缓存 node_modules 加速构建
 
-      # 3. 使用 npm ci 进行快速、可靠的依赖安装
       - name: Install dependencies
         run: npm ci
 
-      # 4. 构建项目
       - name: Build project
         run: npm run build
 
-      # 5. 部署到 gh-pages 分支
+      # 为 SPA 添加 404 重定向（复制 index.html 为 404.html）
+      - name: Create 404 redirect
+        run: cp dist/index.html dist/404.html
+
       - name: Deploy to gh-pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: ./dist
           publish_branch: gh-pages
-          force_orphan: true
+          force_orphan: true   # 强制清空旧历史，保持分支干净
