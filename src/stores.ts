@@ -243,6 +243,15 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.selectedTradeContractIds) state.selectedTradeContractIds = s.selectedTradeContractIds;
     if (s.optimizationMode) state.optimizationMode = s.optimizationMode;
     if (s.customWeights) state.customWeights = s.customWeights;
+    // 居民与科技
+    if (s.population !== undefined) state.population = s.population;
+    if (s.housingIndex !== undefined) state.housingIndex = s.housingIndex;
+    if (s.selectedFoods) state.selectedFoods = new Set(s.selectedFoods);
+    if (s.selectedMedical !== undefined) state.selectedMedical = s.selectedMedical;
+    if (s.selectedOthers) state.selectedOthers = new Set(s.selectedOthers);
+    if (s.edictLevels) state.edictLevels = s.edictLevels;
+    if (s.officeLevels) state.officeLevels = s.officeLevels;
+    if (s.researchLevels) state.researchLevels = s.researchLevels;
     set(state);
   },
 
@@ -275,6 +284,15 @@ export const useStore = create<StoreState>((set, get) => ({
       selectedTradeContractIds: s.selectedTradeContractIds,
       optimizationMode: s.optimizationMode,
       customWeights: s.customWeights,
+      // 居民与科技
+      population: s.population,
+      housingIndex: s.housingIndex,
+      selectedFoods: Array.from(s.selectedFoods),
+      selectedMedical: s.selectedMedical,
+      selectedOthers: Array.from(s.selectedOthers),
+      edictLevels: s.edictLevels,
+      officeLevels: s.officeLevels,
+      researchLevels: s.researchLevels,
     };
   },
 

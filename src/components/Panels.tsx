@@ -74,10 +74,18 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
         ))}
       </div>
       <div style={{ marginTop: 12, borderTop: '1px solid #ddd', paddingTop: 8 }}>
-        <label>☀️ {t('太阳能有效功率', translation)}: </label>
-        <input type="range" min={0} max={1} step={0.01} value={solarEfficiency} onChange={e => setSolarEfficiency(parseFloat(e.target.value))} style={{ width: 200, verticalAlign: 'middle' }} />
-        <span style={{ marginLeft: 8 }}>{Math.round(solarEfficiency * 100)}%</span>
-        <span className="hint" style={{ marginLeft: 8 }}>{t('（仅影响太阳能面板输出）', translation)}</span>
+        <label>☀️ {t('太阳能有效功率', translation)} (%): </label>
+          <input
+             type="number"
+              min={0}
+              max={100}
+              step={1}
+              value={solarEfficiency * 100}
+              onChange={e => setSolarEfficiency(parseFloat(e.target.value) / 100)}
+              style={{ width: 70 }}
+           />
+           <span style={{ marginLeft: 8 }}>{Math.round(solarEfficiency * 100)}%</span>
+            <span className="hint" style={{ marginLeft: 8 }}>{t('（仅影响太阳能面板输出）', translation)}</span>
       </div>
     </div>
   );
