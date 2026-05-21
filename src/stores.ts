@@ -110,6 +110,12 @@ export const useStore = create<StoreState>((set, get) => ({
   cohesionTradeMaintenance: 0,
   cohesionEdict: 0,
 
+  // 图标显示
+  buildingIcons: {},
+  productIcons: {},
+  productCategories: {},
+  showIcons: true,
+
   loadData: (json: DataJson) => {
     const p = parseData(json);
     const init = initializeFromParsed(p);
@@ -231,6 +237,10 @@ export const useStore = create<StoreState>((set, get) => ({
   setCohesionTradeDirect: (value: number) => set({ cohesionTradeDirect: value }),
   setCohesionTradeMaintenance: (value: number) => set({ cohesionTradeMaintenance: value }),
   setCohesionEdict: (value: number) => set({ cohesionEdict: value }),
+  setBuildingIcons: (icons) => set({ buildingIcons: icons }),
+  setProductIcons: (icons) => set({ productIcons: icons }),
+  setProductCategories: (categories) => set({ productCategories: categories }),
+  setShowIcons: (show) => set({ showIcons: show }),
 
   importSettings: (s) => {
     const state: Partial<StoreState> = {};

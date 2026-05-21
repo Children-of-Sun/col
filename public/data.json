@@ -17854,7 +17854,7 @@
                 }
             ],
             "recipes": [ 
-                {   "id": "FP_to_RNW_conversion",
+                {   "id": "FPtoRNWconversion",
                     "name": "FP_to_RNW_conversion",
                     "duration": 72000,
                     "inputs": [

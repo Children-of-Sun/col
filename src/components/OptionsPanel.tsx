@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useStore } from '../stores';
-import { Btn, Checkbox, ModalShell, SearchInput } from './UI';
+import { Btn, Checkbox, ModalShell } from './UI';
 import { t, isRaw } from '../utils';
 
 export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onOpenExcludeModal }) => {
@@ -36,6 +36,11 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
   const milpTimeLimit = useStore(s => s.milpTimeLimit);
   const setMilpTimeLimit = useStore(s => s.setMilpTimeLimit);
 
+  // 图标显示
+  const showIcons = useStore(s => s.showIcons);
+  const setShowIcons = useStore(s => s.setShowIcons);
+  const productIcons = useStore(s => s.productIcons);
+
   const [outputModalOpen, setOutputModalOpen] = useState(false);
   const [inputModalOpen, setInputModalOpen] = useState(false);
   const [tempOutputs, setTempOutputs] = useState<Set<string>>(new Set(excludedOutputs));
@@ -50,11 +55,11 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
   const openInputModal = () => { setTempInputs(new Set(excludedInputs)); setInputModalOpen(true); };
   const saveInputs = () => { setExcludedInputs([...tempInputs]); setInputModalOpen(false); };
 
-  const filteredOutputs = allItems.filter(i => !isRaw(i) && (i.toLowerCase().includes(searchOutput.toLowerCase()) || t(i, translation).toLowerCase().includes(searchOutput.toLowerCase()))).sort();
-  const filteredInputs = allItems.filter(i => !isRaw(i) && (i.toLowerCase().includes(searchInput.toLowerCase()) || t(i, translation).toLowerCase().includes(searchInput.toLowerCase()))).sort();
-console.log('✅ OptionsPanel 已重新加载，max=50');
+  const nonRawItems = allItems.filter(i => !isRaw(i)).sort();
+  console.log('nonRawItems 数量:', nonRawItems.length);
+  console.log('nonRawItems 前5个:', nonRawItems.slice(0,5));
+
   return (
-    
     <div className="section">
       <h3>⚙️ 选项</h3>
 
@@ -121,6 +126,7 @@ console.log('✅ OptionsPanel 已重新加载，max=50');
         <Checkbox label="允许外部供给" checked={allowExternal} onChange={setAllowExternal} />
         <Checkbox label="隐藏中间产物（含 stage）" checked={hideStage} onChange={setHideStage} />
         <Checkbox label="诊断模式" checked={diagnosticMode} onChange={setDiagnosticMode} />
+        <Checkbox label="显示图标" checked={showIcons} onChange={setShowIcons} />
       </div>
 
       <div style={{ marginBottom: 8 }}>
@@ -134,7 +140,7 @@ console.log('✅ OptionsPanel 已重新加载，max=50');
 
       <div style={{ marginBottom: 8 }}>
         <label>🎯 优化模式: </label>
-        <select value={optimizationMode} onChange={e => setOptimizationMode(e.target.value as any)}>
+        <select value={optimizationMode} onChange={e => setOptimizationMode(e.target.value as any)} className="optimization-select">
           <option value="machines">最小化机器数量</option>
           <option value="labor">最小化人力</option>
           <option value="cohesion">最大化凝聚力</option>
@@ -155,43 +161,131 @@ console.log('✅ OptionsPanel 已重新加载，max=50');
         </div>
       )}
 
-      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-        <Btn onClick={openOutputModal} disabled={!dataLoaded}>🚮 排除产出（无限排放）</Btn>
-        <Btn onClick={openInputModal} disabled={!dataLoaded}>📥 排除输入（无限获取）</Btn>
+      <div className="exclude-buttons">
+        <Btn onClick={openOutputModal} disabled={!dataLoaded}>🚮 排除产出</Btn>
+        <Btn onClick={openInputModal} disabled={!dataLoaded}>📥 排除输入</Btn>
       </div>
 
+      {/* 排除产出模态框 */}
       <ModalShell open={outputModalOpen} onClose={() => setOutputModalOpen(false)} title={t('排除产出（可无限排放）', translation)} maxWidth="700px">
-        <SearchInput placeholder={t('搜索物品...', translation)} value={searchOutput} onChange={setSearchOutput} />
-        <div className="exclude-list">
-          {filteredOutputs.map(item => (
-            <div className="exclude-item" key={item}>
-              <input type="checkbox" checked={tempOutputs.has(item.toLowerCase())} onChange={e => {
-                const next = new Set(tempOutputs);
-                e.target.checked ? next.add(item.toLowerCase()) : next.delete(item.toLowerCase());
-                setTempOutputs(next);
-              }} />
-              <span className="exclude-item-name">{t(item, translation)} ({item})</span>
-            </div>
-          ))}
+        <div className="search-box" style={{ marginBottom: 12 }}>
+          <input
+            type="text"
+            placeholder={t('搜索物品...', translation)}
+            value={searchOutput}
+            onChange={e => setSearchOutput(e.target.value)}
+            style={{ width: '100%', padding: 6 }}
+          />
         </div>
-        <div className="modal-footer"><Btn onClick={saveOutputs}>{t('确定', translation)}</Btn><Btn onClick={() => setOutputModalOpen(false)}>{t('取消', translation)}</Btn></div>
+        {nonRawItems.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: '#999' }}>
+            ⚠️ 没有可排除的物品，请检查数据加载（allItems 为空？）
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12 }}>
+            {nonRawItems.filter(item => !searchOutput || t(item, translation).toLowerCase().includes(searchOutput.toLowerCase())).map(item => {
+              const checked = tempOutputs.has(item.toLowerCase());
+              return (
+                <label
+                  key={item}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 8,
+                    background: checked ? '#c7e5ff' : '#f5f5f5',
+                    border: checked ? '1px solid #1e88e5' : '1px solid #ddd',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={e => {
+                      const next = new Set(tempOutputs);
+                      if (e.target.checked) next.add(item.toLowerCase());
+                      else next.delete(item.toLowerCase());
+                      setTempOutputs(next);
+                    }}
+                    style={{ marginBottom: 4 }}
+                  />
+                  {showIcons && productIcons[item.toLowerCase()] && (
+                    <img src={productIcons[item.toLowerCase()]} style={{ width: 32, height: 32, marginBottom: 4 }} loading="lazy" decoding="async" alt="" />
+                  )}
+                  <span>{t(item, translation)}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div className="modal-footer">
+          <Btn onClick={saveOutputs}>{t('确定', translation)}</Btn>
+          <Btn onClick={() => setOutputModalOpen(false)}>{t('取消', translation)}</Btn>
+        </div>
       </ModalShell>
 
+      {/* 排除输入模态框 */}
       <ModalShell open={inputModalOpen} onClose={() => setInputModalOpen(false)} title={t('排除输入（可无限获取）', translation)} maxWidth="700px">
-        <SearchInput placeholder={t('搜索物品...', translation)} value={searchInput} onChange={setSearchInput} />
-        <div className="exclude-list">
-          {filteredInputs.map(item => (
-            <div className="exclude-item" key={item}>
-              <input type="checkbox" checked={tempInputs.has(item.toLowerCase())} onChange={e => {
-                const next = new Set(tempInputs);
-                e.target.checked ? next.add(item.toLowerCase()) : next.delete(item.toLowerCase());
-                setTempInputs(next);
-              }} />
-              <span className="exclude-item-name">{t(item, translation)} ({item})</span>
-            </div>
-          ))}
+        <div className="search-box" style={{ marginBottom: 12 }}>
+          <input
+            type="text"
+            placeholder={t('搜索物品...', translation)}
+            value={searchInput}
+            onChange={e => setSearchInput(e.target.value)}
+            style={{ width: '100%', padding: 6 }}
+          />
         </div>
-        <div className="modal-footer"><Btn onClick={saveInputs}>{t('确定', translation)}</Btn><Btn onClick={() => setInputModalOpen(false)}>{t('取消', translation)}</Btn></div>
+        {nonRawItems.length === 0 ? (
+          <div style={{ padding: 20, textAlign: 'center', color: '#999' }}>
+            ⚠️ 没有可排除的物品，请检查数据加载（allItems 为空？）
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12 }}>
+            {nonRawItems.filter(item => !searchInput || t(item, translation).toLowerCase().includes(searchInput.toLowerCase())).map(item => {
+              const checked = tempInputs.has(item.toLowerCase());
+              return (
+                <label
+                  key={item}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: 8,
+                    background: checked ? '#c7e5ff' : '#f5f5f5',
+                    border: checked ? '1px solid #1e88e5' : '1px solid #ddd',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={e => {
+                      const next = new Set(tempInputs);
+                      if (e.target.checked) next.add(item.toLowerCase());
+                      else next.delete(item.toLowerCase());
+                      setTempInputs(next);
+                    }}
+                    style={{ marginBottom: 4 }}
+                  />
+                  {showIcons && productIcons[item.toLowerCase()] && (
+                    <img src={productIcons[item.toLowerCase()]} style={{ width: 32, height: 32, marginBottom: 4 }} loading="lazy" decoding="async" alt="" />
+                  )}
+                  <span>{t(item, translation)}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div className="modal-footer">
+          <Btn onClick={saveInputs}>{t('确定', translation)}</Btn>
+          <Btn onClick={() => setInputModalOpen(false)}>{t('取消', translation)}</Btn>
+        </div>
       </ModalShell>
     </div>
   );

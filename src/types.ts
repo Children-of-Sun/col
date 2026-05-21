@@ -243,6 +243,12 @@ export interface StoreState {
   cohesionTradeMaintenance: number;
   cohesionEdict: number;
 
+  // 图标显示
+  buildingIcons: Record<string, string>;
+  productIcons: Record<string, string>;
+  productCategories: Record<string, string>;  // 物品名(lowercase) -> type
+  showIcons: boolean;
+
   // Actions
   loadData: (json: DataJson) => void;
   loadTranslation: (json: Record<string, string>) => void;
@@ -310,6 +316,10 @@ export interface StoreState {
   setCohesionTradeDirect: (value: number) => void;
   setCohesionTradeMaintenance: (value: number) => void;
   setCohesionEdict: (value: number) => void;
+  setBuildingIcons: (icons: Record<string, string>) => void;
+  setProductIcons: (icons: Record<string, string>) => void;
+  setProductCategories: (categories: Record<string, string>) => void;
+  setShowIcons: (show: boolean) => void;
 }
 
 export interface SolverResult {

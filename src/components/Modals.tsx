@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useStore } from '../stores';
 import { Btn, ModalShell, SearchInput, Select } from './UI';
+import { ProductGrid } from './ProductGrid';
 import { t, isPowerBuilding, HIDDEN_SERIES, isRaw, isPowerItem, getSeriesName } from '../utils';
 import { Recipe, Series } from '../types';
 
@@ -171,11 +172,14 @@ const BuildingBlock: React.FC<{
   onToggleRecipe: (rid: string, checked: boolean) => void;
 }> = ({ entry, openByDefault, translation, recipeEnabled, onToggleBuilding, onToggleRecipe }) => {
   const [expanded, setExpanded] = useState(openByDefault);
+  const buildingIcon = useStore(s => s.buildingIcons[entry.buildingId]);
+  const showIcons = useStore(s => s.showIcons);
   return (
     <div className="building-block">
       <div className="building-header">
         <input type="checkbox" checked={entry.buildingEnabled}
           onChange={e => onToggleBuilding(e.target.checked)} />
+        {showIcons && buildingIcon && <img src={buildingIcon} alt="" style={{ width: 24, height: 24, marginRight: 8 }} loading="lazy" decoding="async" />}
         <span className="building-name" onClick={() => setExpanded(!expanded)}>
           🏭 {t(entry.buildingName, translation)} (Lv.{entry.level})
         </span>
@@ -298,7 +302,6 @@ export const PowerRecipeModal: React.FC<{ open: boolean; onClose: () => void }> 
 // ==================== 需求添加弹窗 ====================
 export const DemandModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
   const allItems = useStore(s => s.allItems);
-  const translation = useStore(s => s.translation);
   const addDemand = useStore(s => s.addDemand);
 
   const [search, setSearch] = useState('');
@@ -306,7 +309,6 @@ export const DemandModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   const [rate, setRate] = useState(100);
 
   const items = allItems.sort();
-  const filtered = items.filter(i => !search || i.includes(search.toLowerCase()) || t(i, translation).toLowerCase().includes(search.toLowerCase()));
 
   return (
     <ModalShell open={open} onClose={onClose} title="🎯 选择生产目标" maxWidth="700px"
@@ -319,16 +321,14 @@ export const DemandModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
           }}>➕ 添加</Btn>
         </>
       }>
-      <SearchInput placeholder="搜索物品..." value={search} onChange={v => { setSearch(v); setSelected(null); }} />
-      <div className="exclude-list">
-        {filtered.map(i => (
-          <div key={i} className="exclude-item" data-item={i}
-            style={{ background: selected === i ? '#e0e0ff' : undefined }}
-            onClick={() => setSelected(i)}>
-            <span>{t(i, translation)} ({i})</span>
-          </div>
-        ))}
-      </div>
+      <ProductGrid
+        items={items}
+        selectedItem={selected}
+        onSelect={setSelected}
+        search={search}
+        setSearch={setSearch}
+        placeholder="搜索物品..."
+      />
     </ModalShell>
   );
 };

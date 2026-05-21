@@ -3,8 +3,11 @@ import { useStore } from './stores';
 import { MainLevelPanel, PowerPanel, SpaceStationPanel, StatuePanel, LabPanel, DemandPanel, OptionsPanel } from './components/Panels';
 import { LevelModal, RecipeModal, PowerRecipeModal, DemandModal, ExcludeModal } from './components/Modals';
 import { Results } from './components/Results';
-import { Btn, ModalShell } from './components/UI';
-import PopTechPanel from './components/PopTechPanel';
+import { Btn, Checkbox } from './components/UI';
+import ResidentPanel from './components/ResidentPanel';
+import TechPanel from './components/TechPanel';
+import EdictPanel from './components/EdictPanel';
+import OfficePanel from './components/OfficePanel';
 import { TradePanel } from './components/TradePanel';
 import { buildLp } from './lpBuilder';
 import { ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getRecycleRate, calcResidentDemands, calcResidentWaste, getMaintenanceWasteMap } from './utils';
@@ -568,13 +571,15 @@ export default function App() {
   const setTradeContracts = useStore(s => s.setTradeContracts);
   const solarEfficiency = useStore(s => s.solarEfficiency);
   const gameData = useStore(s => s.gameData);
+  const showIcons = useStore(s => s.showIcons);
+  const setShowIcons = useStore(s => s.setShowIcons);
 
   const [levelModalOpen, setLevelModalOpen] = useState(false);
   const [recipeModalOpen, setRecipeModalOpen] = useState(false);
   const [powerRecipeModalOpen, setPowerRecipeModalOpen] = useState(false);
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [excludeModalOpen, setExcludeModalOpen] = useState(false);
-  const [popTechModalOpen, setPopTechModalOpen] = useState(false);
+  const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'resident' | 'tech' | 'edict' | 'office' | 'trade'>('main');
 
   useEffect(() => {
     window.__store = useStore;
@@ -583,7 +588,19 @@ export default function App() {
     (async () => {
       try {
         const resp = await fetch('./data.json');
-        if (resp.ok) { loadData(await resp.json()); }
+        if (resp.ok) {
+          const json = await resp.json();
+          loadData(json);
+          // 构建建筑图标映射
+          const buildingIcons: Record<string, string> = {};
+          for (const b of json.machines_and_buildings) {
+            if (b.icon_path) {
+              const fileName = b.icon_path.split('/').pop() || '';
+              buildingIcons[b.id] = `/icons/buildings/${fileName}`;
+            }
+          }
+          useStore.getState().setBuildingIcons(buildingIcons);
+        }
       } catch (e) { /* ignore */ }
       try {
         const resp = await fetch('./zh_en.json');
@@ -613,6 +630,23 @@ export default function App() {
             min_reputation_required: c.min_reputation_required,
           }));
           setTradeContracts(contracts);
+        }
+      } catch (e) { /* ignore */ }
+      try {
+        const resp = await fetch('./products.json');
+        if (resp.ok) {
+          const productsData = await resp.json();
+          const productIcons: Record<string, string> = {};
+          const productCategories: Record<string, string> = {};
+          for (const p of productsData.products) {
+            if (p.icon_path) {
+              const fileName = p.icon_path.split('/').pop() || '';
+              productIcons[p.name.toLowerCase()] = `/icons/products/${fileName}`;
+            }
+            productCategories[p.name.toLowerCase()] = p.type || 'Other';
+          }
+          useStore.getState().setProductIcons(productIcons);
+          useStore.getState().setProductCategories(productCategories);
         }
       } catch (e) { /* ignore */ }
       if (!window.__hasAutoLoadedSettings && localStorage.getItem('factorySettings')) {
@@ -1084,72 +1118,94 @@ export default function App() {
   return (
     <>
       <h1>🏭 工厂计算器</h1>
-      <div style={{ marginBottom: 10 }}>
-        <Btn onClick={() => {
-          const data = useStore.getState().exportSettings();
-          const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = 'factory_settings.json';
-          a.click();
-        }}>📤 导出全部设置</Btn>
-        <Btn onClick={() => {
-          const input = document.createElement('input');
-          input.type = 'file';
-          input.accept = '.json';
-          input.onchange = async (e: any) => {
-            if (e.target.files[0]) {
-              const j = JSON.parse(await e.target.files[0].text());
-              useStore.getState().importSettings(j);
-            }
-          };
-          input.click();
-        }}>📥 导入全部设置</Btn>
+      <div className="app-layout">
+        <div className="left-column">
+          <div className="section">
+            <h3>💾 配置管理</h3>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <Btn onClick={() => {
+                const data = useStore.getState().exportSettings();
+                const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'factory_settings.json';
+                a.click();
+              }}>📤 导出全部设置</Btn>
+              <Btn onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.accept = '.json';
+                input.onchange = async (e: any) => {
+                  if (e.target.files[0]) {
+                    const j = JSON.parse(await e.target.files[0].text());
+                    useStore.getState().importSettings(j);
+                  }
+                };
+                input.click();
+              }}>📥 导入全部设置</Btn>
+              <Btn onClick={() => {
+                const s = useStore.getState().exportSettings();
+                localStorage.setItem('factorySettings', JSON.stringify(s));
+                alert('配置已保存到浏览器');
+              }}>💾 保存当前配置</Btn>
+              <Btn onClick={() => {
+                if (confirm('恢复默认会丢弃当前设置，确定吗？')) {
+                  fetch('./data.json')
+                    .then(res => res.json())
+                    .then(d => {
+                      loadData(d);
+                      localStorage.removeItem('factorySettings');
+                    });
+                }
+              }}>🔄 恢复默认</Btn>
+            </div>
+            <div style={{ marginTop: 8 }}>
+              <Checkbox label="显示图标" checked={showIcons} onChange={setShowIcons} />
+            </div>
+            <span className="hint">下次打开自动加载上次保存的配置</span>
+          </div>
+          <OptionsPanel onOpenExcludeModal={() => setExcludeModalOpen(true)} />
+          <div className="demand-solve-row">
+            <DemandPanel onOpenDemandModal={() => setDemandModalOpen(true)} />
+            <Btn onClick={handleSolve} disabled={!dataLoaded} className="btn-solve">🔧 开始求解</Btn>
+          </div>
+        </div>
+        <div className="right-column">
+          <div className="tab-bar">
+            <button className={`tab-button ${rightTab === 'main' ? 'active' : ''}`} onClick={() => setRightTab('main')}>🏗️ 主模块</button>
+            <button className={`tab-button ${rightTab === 'power' ? 'active' : ''}`} onClick={() => setRightTab('power')}>⚡ 电力模块</button>
+            <button className={`tab-button ${rightTab === 'stationStatueLab' ? 'active' : ''}`} onClick={() => setRightTab('stationStatueLab')}>🚀 空间站·雕像·研究所</button>
+            <button className={`tab-button ${rightTab === 'resident' ? 'active' : ''}`} onClick={() => setRightTab('resident')}>🏠 居民</button>
+            <button className={`tab-button ${rightTab === 'tech' ? 'active' : ''}`} onClick={() => setRightTab('tech')}>🔬 科技</button>
+            <button className={`tab-button ${rightTab === 'edict' ? 'active' : ''}`} onClick={() => setRightTab('edict')}>📜 法令</button>
+            <button className={`tab-button ${rightTab === 'office' ? 'active' : ''}`} onClick={() => setRightTab('office')}>🏢 办公</button>
+            <button className={`tab-button ${rightTab === 'trade' ? 'active' : ''}`} onClick={() => setRightTab('trade')}>🚢 贸易模块</button>
+          </div>
+          <div className="tab-content">
+            {rightTab === 'main' && <MainLevelPanel onOpenLevelModal={() => setLevelModalOpen(true)} onOpenRecipeModal={() => setRecipeModalOpen(true)} />}
+            {rightTab === 'power' && <PowerPanel onOpenPowerRecipeModal={() => setPowerRecipeModalOpen(true)} />}
+            {rightTab === 'stationStatueLab' && (
+              <div>
+                <SpaceStationPanel />
+                <StatuePanel />
+                <LabPanel />
+              </div>
+            )}
+            {rightTab === 'resident' && <ResidentPanel />}
+            {rightTab === 'tech' && <TechPanel />}
+            {rightTab === 'edict' && <EdictPanel />}
+            {rightTab === 'office' && <OfficePanel />}
+            {rightTab === 'trade' && <TradePanel />}
+          </div>
+        </div>
       </div>
-      <div className="section">
-        <h3>💾 配置管理</h3>
-        <Btn onClick={() => {
-          const s = useStore.getState().exportSettings();
-          localStorage.setItem('factorySettings', JSON.stringify(s));
-          alert('配置已保存到浏览器');
-        }}>💾 保存当前配置</Btn>
-        <Btn onClick={() => {
-          if (confirm('恢复默认会丢弃当前设置，确定吗？')) {
-            fetch('./data.json')
-              .then(res => res.json())
-              .then(d => {
-                loadData(d);
-                localStorage.removeItem('factorySettings');
-              });
-          }
-        }}>🔄 恢复默认</Btn>
-        <span> 下次打开自动加载上次保存的配置</span>
-      </div>
-      <MainLevelPanel onOpenLevelModal={() => setLevelModalOpen(true)} onOpenRecipeModal={() => setRecipeModalOpen(true)} />
-      <PowerPanel onOpenPowerRecipeModal={() => setPowerRecipeModalOpen(true)} />
-      <SpaceStationPanel />
-      <StatuePanel />
-      <LabPanel />
-      <DemandPanel onOpenDemandModal={() => setDemandModalOpen(true)} />
-      <TradePanel />
-      <OptionsPanel onOpenExcludeModal={() => setExcludeModalOpen(true)} />
-      <Btn onClick={() => setPopTechModalOpen(true)} disabled={!dataLoaded}>
-        🏙️ 居民与科技
-      </Btn>
-      <Btn onClick={handleSolve} disabled={!dataLoaded}>🔧 开始求解</Btn>
+
       <LevelModal open={levelModalOpen} onClose={() => setLevelModalOpen(false)} />
       <RecipeModal open={recipeModalOpen} onClose={() => setRecipeModalOpen(false)} />
       <PowerRecipeModal open={powerRecipeModalOpen} onClose={() => setPowerRecipeModalOpen(false)} />
       <DemandModal open={demandModalOpen} onClose={() => setDemandModalOpen(false)} />
       <ExcludeModal open={excludeModalOpen} onClose={() => setExcludeModalOpen(false)} />
-      <ModalShell
-        open={popTechModalOpen}
-        onClose={() => setPopTechModalOpen(false)}
-        title="🏙️ 居民与科技"
-        maxWidth="800px"
-      >
-        <PopTechPanel />
-      </ModalShell>
+
       <Results />
     </>
   );

@@ -4,7 +4,7 @@
   "Acid mixing": "酸混合",
   "Air pollution": "空气污染",
   "Air separation": "空气分离",
-  "Air separator令": "空气分离器",
+  "Air separator": "空气分离器",
   "Alloy mixer": "合金混合器",
   "Alumina": "氧化铝",
   "Alumina calcification": "氧化铝煅烧",
@@ -1443,5 +1443,10 @@
   "Contract_Product_Limestone_For_Product_IronOre": "合同_买_石灰石_卖_铁矿石",
   "Contract_Product_Bauxite_For_Product_IronOre": "合同_买_铝土矿_卖_铁矿石",
   "Contract_Product_CopperOre_For_Product_IronOre": "合同_买_铜矿石_卖_铁矿石",
-  "Contract_Product_IronOre_For_Product_CopperOre": "合同_买_铁矿石_卖_铜矿石"
+  "Contract_Product_IronOre_For_Product_CopperOre": "合同_买_铁矿石_卖_铜矿石",
+  "VirtualProductProto": "虚拟产品",
+  "CountableProductProto": "固体产品",
+  "LooseProductProto": "松散产品",
+  "FluidProductProto": "流体产品",
+  "MoltenProductProto": "熔融产品"
 }

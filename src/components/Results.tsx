@@ -79,6 +79,8 @@ const SummaryTable: React.FC<{
   translation: Record<string, string>;
   splitMode?: boolean;
 }> = ({ data, showTinyErrors, translation, splitMode = false }) => {
+  const productIcons = useStore(s => s.productIcons);
+  const showIcons = useStore(s => s.showIcons);
   const forcedOrder = ['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research'];
   const alwaysShow = new Set(forcedOrder);
   const allItems = new Set([...Object.keys(data.prod), ...Object.keys(data.cons)]);
@@ -116,14 +118,23 @@ const SummaryTable: React.FC<{
         <table className="data-table">
           <thead><tr><th>{t('物品', translation)}</th><th>{t('产出/分', translation)}</th><th>{t('消耗/分', translation)}</th><th>{t('净产出', translation)}</th></tr></thead>
           <tbody>
-            {finalItems.map(({ item, prod, cons, net }) => (
+            {finalItems.map(({ item, prod, cons, net }) => {
+              const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
+              return (
               <tr key={item}>
-                <td>{t(item, translation)}</td>
+                <td style={{ textAlign: 'center' }}>
+                  {showIcons && icon ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <img src={icon} alt="" style={{ width: 24, height: 24 }} loading="lazy" decoding="async" />
+                      <span>{t(item, translation)}</span>
+                    </div>
+                  ) : t(item, translation)}
+                </td>
                 <td>{prod.toFixed(2)}</td>
                 <td>{cons.toFixed(2)}</td>
                 <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>{(net >= 0 ? '+' : '') + net.toFixed(4)}</td>
               </tr>
-            ))}
+            )})}
           </tbody>
         </table>
       </div>
@@ -139,9 +150,21 @@ const SummaryTable: React.FC<{
         <table className="data-table">
           <thead><tr><th>{t('净产出 (正)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
           <tbody>
-            {positiveItems.map(({ item, net }) => (
-              <tr key={item}><td>{t(item, translation)}</td><td className="positive-value">+{net.toFixed(4)}</td></tr>
-            ))}
+            {positiveItems.map(({ item, net }) => {
+              const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
+              return (
+              <tr key={item}>
+                <td style={{ textAlign: 'center' }}>
+                  {showIcons && icon ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <img src={icon} alt="" style={{ width: 24, height: 24 }} loading="lazy" decoding="async" />
+                      <span>{t(item, translation)}</span>
+                    </div>
+                  ) : t(item, translation)}
+                </td>
+                <td className="positive-value">+{net.toFixed(4)}</td>
+              </tr>
+            )})}
             {Array.from({ length: maxRows - positiveItems.length }).map((_, i) => <tr key={`empty-pos-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
           </tbody>
         </table>
@@ -150,9 +173,21 @@ const SummaryTable: React.FC<{
         <table className="data-table">
           <thead><tr><th>{t('净消耗 (负)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
           <tbody>
-            {negativeItems.map(({ item, net }) => (
-              <tr key={item}><td>{t(item, translation)}</td><td className="negative-value">{net.toFixed(4)}</td></tr>
-            ))}
+            {negativeItems.map(({ item, net }) => {
+              const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
+              return (
+              <tr key={item}>
+                <td style={{ textAlign: 'center' }}>
+                  {showIcons && icon ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                      <img src={icon} alt="" style={{ width: 24, height: 24 }} loading="lazy" decoding="async" />
+                      <span>{t(item, translation)}</span>
+                    </div>
+                  ) : t(item, translation)}
+                </td>
+                <td className="negative-value">{net.toFixed(4)}</td>
+              </tr>
+            )})}
             {Array.from({ length: maxRows - negativeItems.length }).map((_, i) => <tr key={`empty-neg-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
           </tbody>
         </table>
