@@ -53,10 +53,19 @@ export function parseData(d: DataJson): ParsedData {
   const addRecipesForBuilding = (b: typeof blds[0], lv: number, isPower: boolean) => {
     if (!b.recipes || b.recipes.length === 0) {
       if ((b.id === 'SolarPanel' || b.id === 'SolarPanelMono') && b.electricity_generated > 0) {
+        const up: Record<string, number> = {};
+        // 添加维护消耗
+        if (b.maintenance_cost_units && b.maintenance_cost_quantity) {
+          up[b.maintenance_cost_units.toLowerCase()] = b.maintenance_cost_quantity;
+        }
+        up['人力'] = (up['人力'] || 0) + b.workers;
+        up['electricity'] = (up['electricity'] || 0) + (b.electricity_consumed || 0);
+        if (b.computing_consumed) up['computing'] = (up['computing'] || 0) + b.computing_consumed;
+
         allRecipes.push({
           id: b.id + '_solar', name: b.name + ' (太阳能)', buildingId: b.id, buildingName: b.name,
           category: b.category, buildingLevel: lv, duration: 60,
-          inputs: {}, outputs: { 'electricity': b.electricity_generated }, upkeep: {},
+          inputs: {}, outputs: { 'electricity': b.electricity_generated }, upkeep: up,
           powerMultiplier: 1, workers: b.workers, isSolar: true, isHidden: false,
           module: isPower ? 'power' : 'main'
         });

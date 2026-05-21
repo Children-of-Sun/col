@@ -13,7 +13,8 @@ export const POWER_KEYWORDS = [
   'diesel generator',
   'nuclear reactor',
   'power generator',
-  'solar panel'
+  'solar panel',
+  'fast breeder reactor'
 ];
 
 export const NON_SCALABLE_ITEMS = new Set([
