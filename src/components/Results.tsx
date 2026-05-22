@@ -9,6 +9,26 @@ const isContinuous = (item: string): boolean => {
   return item === 'electricity' || item === 'computing' || item === '人力' || item === 'mechanical power';
 };
 
+// 辅助组件：自动尝试 SVG -> PNG 降级
+const IconWithFallback: React.FC<{ src: string; alt: string; style?: React.CSSProperties }> = ({ src, alt, style }) => {
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [hasError, setHasError] = useState(false);
+
+  const handleError = () => {
+    if (!hasError) {
+      const pngSrc = src.replace(/\.svg$/i, '.png');
+      if (pngSrc !== src) {
+        setCurrentSrc(pngSrc);
+        setHasError(true);
+      } else {
+        console.warn(`无法加载图标: ${src}`);
+      }
+    }
+  };
+
+  return <img src={currentSrc} alt={alt} style={style} onError={handleError} loading="lazy" decoding="async" />;
+};
+
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number) {
   // 贸易配方特殊处理（已为每分钟速率）
   if (recipe.module === 'trade') {
@@ -125,7 +145,7 @@ const SummaryTable: React.FC<{
                 <td style={{ textAlign: 'center' }}>
                   {showIcons && icon ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <img src={icon} alt="" style={{ width: 24, height: 24 }} loading="lazy" decoding="async" />
+                      <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
                       <span>{t(item, translation)}</span>
                     </div>
                   ) : t(item, translation)}
@@ -157,7 +177,7 @@ const SummaryTable: React.FC<{
                 <td style={{ textAlign: 'center' }}>
                   {showIcons && icon ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <img src={icon} alt="" style={{ width: 24, height: 24 }} loading="lazy" decoding="async" />
+                      <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
                       <span>{t(item, translation)}</span>
                     </div>
                   ) : t(item, translation)}
@@ -180,7 +200,7 @@ const SummaryTable: React.FC<{
                 <td style={{ textAlign: 'center' }}>
                   {showIcons && icon ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <img src={icon} alt="" style={{ width: 24, height: 24 }} loading="lazy" decoding="async" />
+                      <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
                       <span>{t(item, translation)}</span>
                     </div>
                   ) : t(item, translation)}
@@ -222,7 +242,9 @@ const RecipeList: React.FC<{
             const r = item.recipe;
             const cnt = item.count;
             const pm = item.perMin;
-            const inputs = Object.entries(pm.inputs).map(([k, v]) => `${t(k, translation)}×${v.toFixed(2)}`).join(', ') || '无';
+            const skipItems = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii']);
+            const filteredInputs = Object.entries(pm.inputs).filter(([k]) => !skipItems.has(k));
+            const inputs = filteredInputs.map(([k, v]) => `${t(k, translation)}×${v.toFixed(2)}`).join(', ') || '无';
             const outputs = Object.entries(pm.outputs).map(([k, v]) => `${t(k, translation)}×${v.toFixed(2)}`).join(', ') || '无';
             const maintParts = [];
             if (pm.maintI > 0) maintParts.push(`M I:${pm.maintI.toFixed(2)}`);
@@ -346,6 +368,13 @@ export const Results: React.FC = () => {
       return { recipe, machineCount, perMin, idx, varName };
     }).filter(Boolean) as { recipe: Recipe; machineCount: number; perMin: any; idx: number; varName: string }[];
   }, [solverActive, varValues, reductionFactor]);
+
+  const labCohesionTotal = useMemo(() => {
+    if (!recipeData.length) return 0;
+    return recipeData
+      .filter(item => item.recipe.isLab)
+      .reduce((sum, item) => sum + (item.recipe.researchCohesion || 0) * item.machineCount, 0);
+  }, [recipeData]);
 
   const categoryData = useMemo(() => {
     const mainCategories: Record<string, { recipes: typeof recipeData; prod: Record<string, number>; cons: Record<string, number>; workers: number; electricity: number; computing: number; maintI: number; maintII: number; maintIII: number; machineCount: number }> = {};
@@ -552,8 +581,8 @@ export const Results: React.FC = () => {
           <div className="stat">
             ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0)).toFixed(2)}</b><br/>
             🎯 凝聚力产量: <b>{unityProduction.toFixed(2)}</b><br/>
-            📉 凝聚力消耗: 贸易直接: <b>{cohesionTradeDirect.toFixed(2)}</b> | 贸易维持: <b>{cohesionTradeMaintenance.toFixed(2)}</b> | 法令: <b>{cohesionEdict.toFixed(2)}</b> | 总计: <b>{(cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict).toFixed(2)}</b><br/>
-            净凝聚力: <b>{(unityProduction - (cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict)).toFixed(2)}</b>
+            📉 凝聚力消耗: 贸易直接: <b>{cohesionTradeDirect.toFixed(2)}</b> | 贸易维持: <b>{cohesionTradeMaintenance.toFixed(2)}</b> | 法令: <b>{cohesionEdict.toFixed(2)}</b> | 研究: <b>{labCohesionTotal.toFixed(2)}</b> | 总计: <b>{(cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal).toFixed(2)}</b><br/>
+            净凝聚力: <b>{(unityProduction - (cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal)).toFixed(2)}</b>
           </div>
 
           <div className="tab-bar">

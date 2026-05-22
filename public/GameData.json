@@ -45,7 +45,7 @@
     { "name": "Lab Equipment",   "waste":       [0, 0, 0.66666666, 0.3333333, 0, 0, 0] },
     { "name": "Lab Equipment II",  "waste":     [0, 0, 0.66666666, 0.33333333, 0.33333333, 0, 0] },
     { "name": "Lab Equipment III", "waste":     [0, 0, 0.66666666, 0.70833333, 0.375, 0, 0] },
-    { "name": "Lab Equipment IV", "waste":      [0, 0, 0.66666666, 1.35416666, 0.4375, 0.625, 0] },
+    { "name": "Lab Equipment IV", "waste":      [0, 0, 0.66666666, 1.35416666, 0.4375, 0.0625, 0] },
     { "name": "Retired Waste", "waste":         [0, 0, 1, 0, 0, 0, 0] }
   ],
 

@@ -211,87 +211,11 @@ const buildActiveRecipes = (
     }
   });
 
-  const recycleRate = getRecycleRate(
-    gameData?.baseRecycleRate ?? 0.2,
-    gameData?.edicts,
-    state.edictLevels,
-    gameData?.office,
-    state.officeLevels
-  );
-
-  console.log('[回收率] recycleRate =', recycleRate);
-
+  // ========== 提前构建 specialActive（雕像、研究所） ==========
   const currentGameData = gameData;
   let specialActive: Recipe[] = [];
 
   if (currentGameData) {
-    const maintWasteMap = getMaintenanceWasteMap(currentGameData);
-    console.log('[维护系数表]', maintWasteMap);
-    const allWasteNames = currentGameData.wasteNames;
-    const recyclableIndices = [0, 1, 2, 3, 4];
-    const recyclableWasteNames = allWasteNames.slice(2);
-    const recyclableWasteNamesLower = recyclableWasteNames.map(w => w.toLowerCase());
-
-    modifiedActive.forEach(r => {
-      recyclableWasteNames.forEach(wn => {
-        delete r.outputs[wn];
-      });
-    });
-
-    modifiedActive.forEach(r => {
-      const hasRecyclables = ((r.outputs['recyclables'] || r.outputs['Recyclables']) || 0) > 0;
-      if (!hasRecyclables) return;
-      for (const [inputItem, inputQty] of Object.entries(r.inputs)) {
-        const inputItemLower = inputItem.toLowerCase();
-        let coeffs = maintWasteMap[inputItemLower];
-        if (!coeffs) {
-          const normalized = inputItemLower.replace(/\s/g, '');
-          for (const key of Object.keys(maintWasteMap)) {
-            if (key.replace(/\s/g, '') === normalized) {
-              coeffs = maintWasteMap[key];
-              break;
-            }
-          }
-        }
-        if (coeffs && coeffs.length >= 5) {
-          const perCycleInput = inputQty;
-          recyclableIndices.forEach((idx, i) => {
-            const coeff = coeffs[idx];
-            if (coeff !== 0) {
-              const wasteItem = recyclableWasteNamesLower[i];
-              const added = perCycleInput * coeff * recycleRate;
-              r.outputs[wasteItem] = (r.outputs[wasteItem] || 0) + added;
-            }
-          });
-        }
-      }
-    });
-
-    console.log('[维护废料] 示例配方:', modifiedActive.find(r => r.outputs['recyclables']));
-    console.log('[废料生成示例]', modifiedActive.slice(0, 3).map(r => ({ name: r.name, outputs: r.outputs })));
-
-    modifiedActive.forEach(r => {
-      const researchLvls = [...state.researchLevels];
-      if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
-        const cropRes = currentGameData.research.find(res => res.name === '作物产量');
-        const cropLvl = cropRes ? (researchLvls[currentGameData.research.indexOf(cropRes)] || 0) : 0;
-        if (cropLvl > 0 && cropRes) {
-          const bonus = (cropRes.effectPerLevel[0] || 0) * cropLvl;
-          for (const k in r.outputs) {
-            if (k !== 'water') r.outputs[k] *= (1 + bonus);
-          }
-        }
-        const waterRes = currentGameData.research.find(res => res.name === '定居点用水');
-        const waterLvl = waterRes ? (researchLvls[currentGameData.research.indexOf(waterRes)] || 0) : 0;
-        if (waterLvl > 0 && waterRes) {
-          const waterBonus = (waterRes.effectPerLevel[0] || 0) * waterLvl;
-          if (r.inputs['water']) {
-            r.inputs['water'] *= (1 + waterBonus);
-          }
-        }
-      }
-    });
-
     // 雕像
     if (state.statueCount > 0) {
       const statueRecipe: Recipe = {
@@ -335,6 +259,12 @@ const buildActiveRecipes = (
       console.log('[研究所] labCount:', state.labCount, 'labLevel:', state.labLevel, 'meta:', meta);
       if (meta) {
         console.log('[研究所] 启用的配方:', meta.recipes.filter(r => state.recipeEnabled[r.id]).map(r => r.id));
+        
+        // 获取建筑数据中的 unity_cost（每分钟凝聚力消耗）
+        const labBuilding = state.fullData?.machines_and_buildings?.find((b: any) => b.id === state.labLevel);
+        const unityCostPerBuilding = labBuilding?.unity_cost || 0;
+        const researchCohesionTotal = unityCostPerBuilding * state.labCount;
+        
         const labRecipe: Recipe = {
           id: `lab_module_${state.labLevel}`,
           name: `研究所 (${meta.name}) ×${state.labCount}`,
@@ -352,7 +282,9 @@ const buildActiveRecipes = (
           isHidden: true,
           module: 'special',
           isLab: true,
+          researchCohesion: researchCohesionTotal,  // 直接赋值
         };
+        
         meta.recipes.forEach((r: any) => {
           if (!state.recipeEnabled[r.id]) return;
           for (const [item, qty] of Object.entries(r.inputs)) {
@@ -367,12 +299,102 @@ const buildActiveRecipes = (
         for (const [item, qty] of Object.entries(meta.upkeep || {})) {
           labRecipe.upkeep[item.toLowerCase()] = (qty as number) * state.labCount;
         }
+        // 不再处理 upkeeping['凝聚力']
+        
+        console.log('[研究所] 凝聚力消耗:', researchCohesionTotal, '/分');
         console.log('[研究所] 输入物品:', labRecipe.inputs);
         console.log('[研究所] 输出物品:', labRecipe.outputs);
         specialActive.push(labRecipe);
         console.log('[实验室废物] 产出:', Object.entries(labRecipe.outputs).slice(0, 10));
       }
     }
+  }
+
+  // ========== 维护废料回收（同时处理 main/power 和 special） ==========
+  const recycleRate = getRecycleRate(
+    gameData?.baseRecycleRate ?? 0.2,
+    gameData?.edicts,
+    state.edictLevels,
+    gameData?.office,
+    state.officeLevels
+  );
+
+  console.log('[回收率] recycleRate =', recycleRate);
+
+  if (currentGameData) {
+    const maintWasteMap = getMaintenanceWasteMap(currentGameData);
+    console.log('[维护系数表]', maintWasteMap);
+    const allWasteNames = currentGameData.wasteNames;
+    const recyclableIndices = [0, 1, 2, 3, 4];
+    const recyclableWasteNames = allWasteNames.slice(2);
+    const recyclableWasteNamesLower = recyclableWasteNames.map(w => w.toLowerCase());
+
+    // 清理所有配方（main+power+special）中已有的可回收废料输出
+    const allRecipesForRecycling = [...modifiedActive, ...specialActive];
+    allRecipesForRecycling.forEach(r => {
+      recyclableWasteNames.forEach(wn => {
+        delete r.outputs[wn];
+      });
+    });
+
+    // 为每个有 recyclables 输出的配方生成具体废料
+    allRecipesForRecycling.forEach(r => {
+      const hasRecyclables = ((r.outputs['recyclables'] || r.outputs['Recyclables']) || 0) > 0;
+      if (!hasRecyclables) return;
+      for (const [inputItem, inputQty] of Object.entries(r.inputs)) {
+        const inputItemLower = inputItem.toLowerCase();
+        let coeffs = maintWasteMap[inputItemLower];
+        if (!coeffs) {
+          const normalized = inputItemLower.replace(/\s/g, '');
+          for (const key of Object.keys(maintWasteMap)) {
+            if (key.replace(/\s/g, '') === normalized) {
+              coeffs = maintWasteMap[key];
+              break;
+            }
+          }
+        }
+        if (coeffs && coeffs.length >= 5) {
+          const perCycleInput = inputQty;
+          recyclableIndices.forEach((idx, i) => {
+            const coeff = coeffs[idx];
+            if (coeff !== 0) {
+              const wasteItem = recyclableWasteNamesLower[i];
+              const added = perCycleInput * coeff * recycleRate;
+              r.outputs[wasteItem] = (r.outputs[wasteItem] || 0) + added;
+            }
+          });
+        }
+      }
+      // 删除原始的 recyclables 输出
+      delete r.outputs['recyclables'];
+      delete r.outputs['Recyclables'];
+    });
+
+    console.log('[维护废料] 示例配方:', modifiedActive.find(r => r.outputs['recyclables']));
+    console.log('[废料生成示例]', modifiedActive.slice(0, 3).map(r => ({ name: r.name, outputs: r.outputs })));
+
+    // ========== 科技加成（仅影响 main/power 中的农场配方） ==========
+    modifiedActive.forEach(r => {
+      const researchLvls = [...state.researchLevels];
+      if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
+        const cropRes = currentGameData.research.find(res => res.name === '作物产量');
+        const cropLvl = cropRes ? (researchLvls[currentGameData.research.indexOf(cropRes)] || 0) : 0;
+        if (cropLvl > 0 && cropRes) {
+          const bonus = (cropRes.effectPerLevel[0] || 0) * cropLvl;
+          for (const k in r.outputs) {
+            if (k !== 'water') r.outputs[k] *= (1 + bonus);
+          }
+        }
+        const waterRes = currentGameData.research.find(res => res.name === '定居点用水');
+        const waterLvl = waterRes ? (researchLvls[currentGameData.research.indexOf(waterRes)] || 0) : 0;
+        if (waterLvl > 0 && waterRes) {
+          const waterBonus = (waterRes.effectPerLevel[0] || 0) * waterLvl;
+          if (r.inputs['water']) {
+            r.inputs['water'] *= (1 + waterBonus);
+          }
+        }
+      }
+    });
   }
 
   let reductionFactor = reductionFactorBase;
@@ -455,7 +477,7 @@ const buildActiveRecipes = (
     ).map(w => ({ item: w.item, rate: w.rate }));
 
     console.log('[居民废料明细]', residentWasteSupplies);
-    allExternalSupplies = [...allExternalSupplies, ...residentWasteSupplies];
+    allExternalSupplies = [...residentWasteSupplies];
 
     residentDemands.forEach(d => {
       residentRecipe.inputs[d.item] = d.rate;

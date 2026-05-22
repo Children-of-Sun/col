@@ -186,14 +186,12 @@ export function calcResidentDemands(
       foodGroups[grp].push(name);
     }
   }
-  const totalCategories = Object.keys(foodGroups).length;
   const activeGroups: Record<string, string[]> = {};
   for (const [grp, items] of Object.entries(foodGroups)) {
     const enabled = items.filter(f => selectedFoods.has(f));
     if (enabled.length > 0) activeGroups[grp] = enabled;
   }
   const numActiveGroups = Object.keys(activeGroups).length;
-  const crossGroupFactor = numActiveGroups > 0 ? totalCategories / numActiveGroups : 0;
 
   const demands: { item: string; rate: number }[] = [];
   let foodUnity = 0;
@@ -201,13 +199,16 @@ export function calcResidentDemands(
 
   if (numActiveGroups > 0) {
     for (const [grp, enabledList] of Object.entries(activeGroups)) {
-      const intraFactor = foodGroups[grp].length / enabledList.length;
+      const numFoodsInThisGroup = enabledList.length;
       for (const name of enabledList) {
         const svc = data.services[name];
-        let demand = svc.demand * factor * crossGroupFactor * intraFactor;
+        // 基础需求（已按人口缩放）
+        let demand = svc.demand * factor;
         if (housing.multipliers[name]) demand *= housing.multipliers[name];
         let mod = catMods['food'] || 1;
         if (itemMods[name]) mod *= itemMods[name];
+        // 应用分摊：除以（激活的类别数 × 本类别内激活的食物数）
+        demand = demand / (numActiveGroups * numFoodsInThisGroup);
         demand *= mod;
         demands.push({ item: name.toLowerCase(), rate: demand });
         foodUnity += svc.unity;
@@ -286,11 +287,20 @@ export function calcResidentWaste(
   demands: { item: string; rate: number }[],
   recycleRate: number
 ): { item: string; rate: number }[] {
+  // 创建一个服务的小写 key 映射，避免大小写不匹配
+  const serviceMap: Record<string, any> = {};
+  for (const [key, svc] of Object.entries(data.services)) {
+    serviceMap[key.toLowerCase()] = svc;
+  }
+
   const wasteArr = new Array(data.wasteNames.length).fill(0);
   const extraWasteMap: Record<string, number> = {};
+
   for (const d of demands) {
-    const svc = data.services[d.item];
-    if (!svc) continue;
+    // 通过小写 key 获取服务
+    const svc = serviceMap[d.item.toLowerCase()];
+    if (!svc) continue;  // 找不到服务则跳过（可能是科技物品如 research 等）
+
     if (svc.waste) {
       svc.waste.forEach((coeff, idx) => {
         wasteArr[idx] += d.rate * coeff;
@@ -302,10 +312,13 @@ export function calcResidentWaste(
       }
     }
   }
+
   const result: { item: string; rate: number }[] = [];
+  // 前两个废料（Recyclables, Biomass）不乘回收率
   for (let i = 0; i < 2; i++) {
     if (wasteArr[i] > 0) result.push({ item: data.wasteNames[i].toLowerCase(), rate: wasteArr[i] });
   }
+  // 索引 >=2 的可回收废料乘以回收率
   for (let i = 2; i < wasteArr.length; i++) {
     if (wasteArr[i] > 0) result.push({ item: data.wasteNames[i].toLowerCase(), rate: wasteArr[i] * recycleRate });
   }

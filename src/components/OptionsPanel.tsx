@@ -121,7 +121,6 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
         <Checkbox label="允许外部供给" checked={allowExternal} onChange={setAllowExternal} />
         <Checkbox label="隐藏中间产物（含 stage）" checked={hideStage} onChange={setHideStage} />
         <Checkbox label="诊断模式" checked={diagnosticMode} onChange={setDiagnosticMode} />
-        <Checkbox label="显示图标" checked={showIcons} onChange={setShowIcons} />
       </div>
 
       <div style={{ marginBottom: 8 }}>

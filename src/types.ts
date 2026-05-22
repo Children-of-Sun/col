@@ -123,6 +123,7 @@ export interface Recipe {
   isHidden: boolean;
   module: 'main' | 'power' | 'resident' | 'station' | 'special' | 'trade';
   isLab?: boolean;
+  researchCohesion?: number;  // 研究所凝聚力消耗（每分钟），仅用于显示，不参与LP
   tradeUnityPer100?: number;
   tradeUnityDirect?: number;          // 贸易直接消耗（每分钟）
   tradeUnityMaintenance?: number;     // 贸易维持消耗（每分钟）

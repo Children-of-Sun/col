@@ -190,6 +190,7 @@ export const LabPanel: React.FC = () => {
   const setRecipeEnabled = useStore(s => s.setRecipeEnabled);
   const meta = labMeta.find(l => l.buildingId === labLevel);
   let researchOutput = 0;
+  let labCohesion = 0;
   const labEqMap = new Map<string, number>();
   if (meta && labCount > 0) {
     meta.recipes.forEach(r => {
@@ -203,6 +204,10 @@ export const LabPanel: React.FC = () => {
     });
     const researchPerLab = 48 * (1 + stationLevel * 0.05);
     researchOutput = researchPerLab * labCount;
+    // 凝聚力消耗从 meta.upkeep 获取
+    if (meta.upkeep && meta.upkeep['凝聚力']) {
+      labCohesion = meta.upkeep['凝聚力'] * labCount;
+    }
   }
   const labEqItems = [...labEqMap.entries()].map(([name, rate]) => ({ name, rate }));
   return (
@@ -212,6 +217,7 @@ export const LabPanel: React.FC = () => {
         <label>等级: <select value={labLevel} disabled={!dataLoaded} onChange={e => setLabLevel(e.target.value)}>{labMeta.map(l => <option key={l.buildingId} value={l.buildingId}>{t(l.name, translation)} (Lv.{l.level})</option>)}</select></label>
         <label>数量: <input type="number" value={labCount} min={0} step={1} style={{ width: 60 }} disabled={!dataLoaded} onChange={e => setLabCount(parseInt(e.target.value) || 0)} /></label>
         <span>研究产出: <b>{researchOutput.toFixed(2)}</b> /分</span>
+        {labCohesion > 0 && <span>凝聚力消耗: <b>{labCohesion.toFixed(2)}</b> /分</span>}
         {labEqItems.length > 0 ? labEqItems.map((le, i) => <span key={i}>{t(le.name, translation)}: <b>{le.rate.toFixed(2)}</b>/分 </span>) : <span>无设备消耗</span>}
         <Btn onClick={() => setLabRecipeModalOpen(true)} disabled={!dataLoaded} style={{ marginLeft: 10 }}>🧪 配方选择</Btn>
       </div>
