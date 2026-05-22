@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useStore } from './stores';
-import { MainLevelPanel, PowerPanel, SpaceStationPanel, StatuePanel, LabPanel, DemandPanel, OptionsPanel } from './components/Panels';
+import { MainLevelPanel, PowerPanel, SpaceStationPanel, StatuePanel, LabPanel, DemandPanel } from './components/Panels';
+import { OptionsPanel } from './components/OptionsPanel';
 import { LevelModal, RecipeModal, PowerRecipeModal, DemandModal, ExcludeModal } from './components/Modals';
 import { Results } from './components/Results';
 import { Btn, Checkbox } from './components/UI';
@@ -218,11 +219,14 @@ const buildActiveRecipes = (
     state.officeLevels
   );
 
+  console.log('[回收率] recycleRate =', recycleRate);
+
   const currentGameData = gameData;
   let specialActive: Recipe[] = [];
 
   if (currentGameData) {
     const maintWasteMap = getMaintenanceWasteMap(currentGameData);
+    console.log('[维护系数表]', maintWasteMap);
     const allWasteNames = currentGameData.wasteNames;
     const recyclableIndices = [0, 1, 2, 3, 4];
     const recyclableWasteNames = allWasteNames.slice(2);
@@ -262,6 +266,9 @@ const buildActiveRecipes = (
         }
       }
     });
+
+    console.log('[维护废料] 示例配方:', modifiedActive.find(r => r.outputs['recyclables']));
+    console.log('[废料生成示例]', modifiedActive.slice(0, 3).map(r => ({ name: r.name, outputs: r.outputs })));
 
     modifiedActive.forEach(r => {
       const researchLvls = [...state.researchLevels];
@@ -325,7 +332,9 @@ const buildActiveRecipes = (
     // 研究所
     if (state.labCount > 0 && state.labLevel) {
       const meta = state.labMeta.find(l => l.buildingId === state.labLevel);
+      console.log('[研究所] labCount:', state.labCount, 'labLevel:', state.labLevel, 'meta:', meta);
       if (meta) {
+        console.log('[研究所] 启用的配方:', meta.recipes.filter(r => state.recipeEnabled[r.id]).map(r => r.id));
         const labRecipe: Recipe = {
           id: `lab_module_${state.labLevel}`,
           name: `研究所 (${meta.name}) ×${state.labCount}`,
@@ -358,7 +367,10 @@ const buildActiveRecipes = (
         for (const [item, qty] of Object.entries(meta.upkeep || {})) {
           labRecipe.upkeep[item.toLowerCase()] = (qty as number) * state.labCount;
         }
+        console.log('[研究所] 输入物品:', labRecipe.inputs);
+        console.log('[研究所] 输出物品:', labRecipe.outputs);
         specialActive.push(labRecipe);
+        console.log('[实验室废物] 产出:', Object.entries(labRecipe.outputs).slice(0, 10));
       }
     }
   }
@@ -442,6 +454,7 @@ const buildActiveRecipes = (
       recycleRate
     ).map(w => ({ item: w.item, rate: w.rate }));
 
+    console.log('[居民废料明细]', residentWasteSupplies);
     allExternalSupplies = [...allExternalSupplies, ...residentWasteSupplies];
 
     residentDemands.forEach(d => {
@@ -458,6 +471,9 @@ const buildActiveRecipes = (
       residentRecipe.outputs[popWaste.item.toLowerCase()] = (residentRecipe.outputs[popWaste.item.toLowerCase()] || 0) + wasteAmount;
     }
   }
+
+  console.log('[居民废物] 产出:', Object.entries(residentRecipe.outputs).filter(([k]) => k !== 'research'));
+  console.log('[居民废料产出]', residentRecipe.outputs);
 
   const residentActive = [residentRecipe];
 
@@ -638,17 +654,22 @@ export default function App() {
           const productsData = await resp.json();
           const productIcons: Record<string, string> = {};
           const productCategories: Record<string, string> = {};
+
           for (const p of productsData.products) {
+            const nameLower = p.name.toLowerCase();
+            // 分类
+            productCategories[nameLower] = p.type || 'Other';
+
             if (p.icon_path) {
               const fileName = p.icon_path.split('/').pop() || '';
-              productIcons[p.name.toLowerCase()] = `/icons/products/${fileName}`;
+              productIcons[nameLower] = `/icons/products/${fileName}`;
             }
-            productCategories[p.name.toLowerCase()] = p.type || 'Other';
           }
           useStore.getState().setProductIcons(productIcons);
           useStore.getState().setProductCategories(productCategories);
+          console.log('产品图标映射加载完成，共', Object.keys(productIcons).length, '个');
         }
-      } catch (e) { /* ignore */ }
+      } catch (e) { console.error('加载 products.json 失败', e); }
       if (!window.__hasAutoLoadedSettings && localStorage.getItem('factorySettings')) {
         try {
           const s = JSON.parse(localStorage.getItem('factorySettings')!);

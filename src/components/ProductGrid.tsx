@@ -2,10 +2,31 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { t } from '../utils';
 
+// 图标 fallback 组件：优先使用原路径，如果加载失败则尝试替换 .svg 为 .png
+const IconWithFallback: React.FC<{ src: string; alt: string; style?: React.CSSProperties }> = ({ src, alt, style }) => {
+  const [currentSrc, setCurrentSrc] = useState(src);
+  const [hasError, setHasError] = useState(false);
+
+  const handleError = () => {
+    if (!hasError) {
+      const pngSrc = src.replace(/\.svg$/i, '.png');
+      if (pngSrc !== src) {
+        setCurrentSrc(pngSrc);
+        setHasError(true);
+      }
+    }
+  };
+
+  return <img src={currentSrc} alt={alt} style={style} onError={handleError} loading="lazy" decoding="async" />;
+};
+
 interface ProductGridProps {
   items: string[];
   selectedItem?: string | null;
   onSelect?: (item: string) => void;
+  multiSelect?: boolean;
+  selectedSet?: Set<string>;
+  onToggle?: (item: string, checked: boolean) => void;
   search: string;
   setSearch: (v: string) => void;
   placeholder?: string;
@@ -16,6 +37,9 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
   items,
   selectedItem,
   onSelect,
+  multiSelect = false,
+  selectedSet = new Set(),
+  onToggle,
   search,
   setSearch,
   placeholder = '搜索物品...',
@@ -85,37 +109,63 @@ export const ProductGrid: React.FC<ProductGridProps> = ({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12 }}>
         {currentItems.map(item => {
           const icon = productIcons[item.toLowerCase()];
-          const isSelected = selectedItem === item;
-          return (
-            <div
-              key={item}
-              onClick={() => onSelect?.(item)}
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                padding: 8,
-                background: isSelected ? '#c7e5ff' : '#f5f5f5',
-                border: isSelected ? '1px solid #1e88e5' : '1px solid #ddd',
-                borderRadius: 6,
-                cursor: 'pointer',
-                textAlign: 'center',
-                transition: 'background 0.2s',
-              }}
-            >
-              {showIcons && icon && (
-                <img
-                  src={icon}
-                  style={{ width: 32, height: 32, marginBottom: 4 }}
-                  loading="lazy"
-                  decoding="async"
-                  alt=""
+          const isSelected = multiSelect ? selectedSet.has(item) : selectedItem === item;
+          if (multiSelect) {
+            return (
+              <label
+                key={item}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 8,
+                  background: isSelected ? '#c7e5ff' : '#f5f5f5',
+                  border: isSelected ? '1px solid #1e88e5' : '1px solid #ddd',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  transition: 'all 0.2s',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={e => onToggle?.(item, e.target.checked)}
+                  style={{ marginBottom: 4 }}
                 />
-              )}
-              <span>{t(item, translation)}</span>
-            </div>
-          );
+                {showIcons && icon && (
+                  <IconWithFallback src={icon} alt="" style={{ width: 32, height: 32, marginBottom: 4 }} />
+                )}
+                <span>{t(item, translation)}</span>
+              </label>
+            );
+          } else {
+            return (
+              <div
+                key={item}
+                onClick={() => onSelect?.(item)}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: 8,
+                  background: isSelected ? '#c7e5ff' : '#f5f5f5',
+                  border: isSelected ? '1px solid #1e88e5' : '1px solid #ddd',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  textAlign: 'center',
+                  transition: 'all 0.2s',
+                }}
+              >
+                {showIcons && icon && (
+                  <IconWithFallback src={icon} alt="" style={{ width: 32, height: 32, marginBottom: 4 }} />
+                )}
+                <span>{t(item, translation)}</span>
+              </div>
+            );
+          }
         })}
       </div>
     </div>

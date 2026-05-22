@@ -181,7 +181,7 @@ const BuildingBlock: React.FC<{
           onChange={e => onToggleBuilding(e.target.checked)} />
         {showIcons && buildingIcon && <img src={buildingIcon} alt="" style={{ width: 24, height: 24, marginRight: 8 }} loading="lazy" decoding="async" />}
         <span className="building-name" onClick={() => setExpanded(!expanded)}>
-          🏭 {t(entry.buildingName, translation)} (Lv.{entry.level})
+           {t(entry.buildingName, translation)} (Lv.{entry.level})
         </span>
       </div>
       {expanded && (
