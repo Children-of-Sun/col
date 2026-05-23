@@ -869,8 +869,9 @@ export default function App() {
           const buildingIcons: Record<string, string> = {};
           for (const b of json.machines_and_buildings) {
             if (b.icon_path) {
-              const fileName = b.icon_path.split('/').pop() || '';
-              buildingIcons[b.id] = `/icons/buildings/${fileName}`;
+              let fileName = b.icon_path.split('/').pop() || '';
+              fileName = fileName.replace(/\.svg$/i, '.png');
+              buildingIcons[b.id] = `icons/buildings/${fileName}`;
             }
           }
           useStore.getState().setBuildingIcons(buildingIcons);
@@ -919,8 +920,9 @@ export default function App() {
             productCategories[nameLower] = p.type || 'Other';
 
             if (p.icon_path) {
-              const fileName = p.icon_path.split('/').pop() || '';
-              productIcons[nameLower] = `/icons/products/${fileName}`;
+              let fileName = p.icon_path.split('/').pop() || '';
+              fileName = fileName.replace(/\.svg$/i, '.png');
+              productIcons[nameLower] = `icons/products/${fileName}`;
             }
           }
           useStore.getState().setProductIcons(productIcons);
