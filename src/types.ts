@@ -27,6 +27,8 @@ export interface Office {
   effectPerLevel: number;
   maxLevel: number;
   targetCategory: string | string[];
+  costBase?: number;         // Focus 首级消耗
+  costIncrement?: number;    // Focus 每级递增消耗
 }
 
 export interface Research {
@@ -230,6 +232,18 @@ export interface StoreState {
   selectedTradeRecipes: Recipe[];
   enableTradeModule: boolean;
 
+  enableAgriculture: boolean;
+  cropRotation: boolean;
+  globalFertilizerType: 'organic' | 'I' | 'II';
+  targetFertility: number;
+  farms: FarmSetting[];
+
+  enableFocusConsumption: boolean;
+
+  officeBuildingEnabled: Record<string, boolean>;
+  officeSelectedLevel: Record<string, number>;
+  officeRecipeEnabled: Record<string, boolean>;
+
   solarEfficiency: number;
 
   optimizationMode: 'machines' | 'labor' | 'cohesion' | 'area' | 'raw' | 'custom';
@@ -305,6 +319,16 @@ export interface StoreState {
   setSelectedTradeContractIds: (ids: string[]) => void;
   setSelectedTradeRecipes: (recipes: Recipe[]) => void;
   setEnableTradeModule: (value: boolean) => void;
+  setEnableAgriculture: (value: boolean) => void;
+  setCropRotation: (value: boolean) => void;
+  setGlobalFertilizerType: (value: string) => void;
+  setTargetFertility: (value: number) => void;
+  toggleCrop: (buildingId: string, cropName: string, enabled: boolean) => void;
+  loadAgricultureBuildings: () => void;
+  setEnableFocusConsumption: (value: boolean) => void;
+  setOfficeBuildingEnabled: (id: string, value: boolean) => void;
+  setOfficeLevelById: (id: string, level: number) => void;
+  setOfficeRecipeEnabled: (id: string, value: boolean) => void;
   setSolarEfficiency: (value: number) => void;
   setOptimizationMode: (mode: StoreState['optimizationMode']) => void;
   setCustomWeights: (weights: Partial<StoreState['customWeights']>) => void;
@@ -372,4 +396,24 @@ export interface TradeParams {
   travelMode: 'normal' | 'special';
   profitBonus: number;
   unityDiscount: number;
+}
+
+// ==================== 农业模块类型 ====================
+export interface CropSetting {
+  cropName: string;
+  enabled: boolean;
+  baseRecipeId: string;
+  // 基准数据（来自基准建筑 Irrigated Farm 的有机肥配方）
+  baseWaterPerMin: number;
+  baseFertilizerPerMin: number;   // 基准肥料单位/分（有机肥）
+  baseCropPerMin: number;
+  baseFc: number;                  // 基础肥力消耗 %/min
+}
+
+export interface FarmSetting {
+  buildingId: string;
+  buildingName: string;
+  enabled: boolean;
+  level: number;
+  crops: CropSetting[];
 }

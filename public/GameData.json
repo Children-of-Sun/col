@@ -80,19 +80,20 @@
     { "name": "清洁面板", "targetCategory": "none", "effectPerLevel": [0.05, 0.15, 0.3], "unityPerLevel": [-0.5, -1.5, -2.5] },
     { "name": "研究效率", "targetCategory": "none", "effectPerLevel": [0.15, 0.25, 0.35, 0.45, 0.60], "unityPerLevel": [-1, -2, -3, -4, -6] }
   ],
-  "office": [
-    { "name": "卡车载货量", "effectPerLevel": 0.025, "maxLevel": 40, "targetCategory": [] },
-    { "name": "列车载货量", "effectPerLevel": 0.025, "maxLevel": 40, "targetCategory": [] },
-    { "name": "研究效率", "effectPerLevel": 0.02, "maxLevel": 150, "targetCategory": [] },
-    { "name": "维修产量", "effectPerLevel": 0.01, "maxLevel": 100, "targetCategory": [] },
-    { "name": "农作物产量", "effectPerLevel": 0.02, "maxLevel": 150, "targetCategory": [] },
-    { "name": "回收效率", "effectPerLevel": 0.01, "maxLevel": 15, "targetCategory": "recycle" },
-    { "name": "食物消耗", "effectPerLevel": -0.02, "maxLevel": 15, "targetCategory": "food" },
-    { "name": "商品与服务消耗", "effectPerLevel": -0.02, "maxLevel": 25, "targetCategory": ["consumer", "medical","utility"] },
-    { "name": "来自定居点的凝聚力", "effectPerLevel": 0.025, "maxLevel": 14, "targetCategory": "unity" },
-    { "name": "合同利润率", "effectPerLevel": 0.02, "maxLevel": 15, "targetCategory": [] },
-    { "name": "合同凝聚力消耗", "effectPerLevel": -0.025, "maxLevel": 20, "targetCategory": [] }
-  ],
+"office": [
+  { "name": "卡车载货量", "effectPerLevel": 0.025, "maxLevel": 40, "targetCategory": [], "costBase": 40, "costIncrement": 30 },
+  { "name": "研究效率", "effectPerLevel": 0.02, "maxLevel": 150, "targetCategory": [], "costBase": 25, "costIncrement": 10 },
+  { "name": "维修产量", "effectPerLevel": 0.01, "maxLevel": 100, "targetCategory": [], "costBase": 25, "costIncrement": 10 },
+  { "name": "农作物产量", "effectPerLevel": 0.02, "maxLevel": 150, "targetCategory": [], "costBase": 50, "costIncrement": 10 },
+  { "name": "回收效率", "effectPerLevel": 0.01, "maxLevel": 15, "targetCategory": "recycle", "costBase": 150, "costIncrement": 50 },
+  { "name": "食物消耗", "effectPerLevel": -0.02, "maxLevel": 15, "targetCategory": "food", "costBase": 75, "costIncrement": 100 },
+  { "name": "商品与服务消耗", "effectPerLevel": -0.02, "maxLevel": 25, "targetCategory": ["consumer", "medical","utility"], "costBase": 125, "costIncrement": 125 },
+  { "name": "来自定居点的凝聚力", "effectPerLevel": 0.025, "maxLevel": 14, "targetCategory": "unity", "costBase": 250, "costIncrement": 250 },
+  { "name": "合同利润率", "effectPerLevel": 0.02, "maxLevel": 15, "targetCategory": [], "costBase": 40, "costIncrement": 40 },
+  { "name": "合同凝聚力消耗", "effectPerLevel": -0.025, "maxLevel": 20, "targetCategory": [], "costBase": 40, "costIncrement": 20 },
+  { "name": "海外矿井效率", "effectPerLevel": 0.04, "maxLevel": 50, "targetCategory": [], "costBase": 50, "costIncrement": 40 },
+  { "name": "火车载货量", "effectPerLevel": 0.025, "maxLevel": 40, "targetCategory": [], "costBase": 40, "costIncrement": 30 }
+],
   "research": [
     { "name": "作物产量", "effectPerLevel": [0.01, 0.0025], "maxLevel": 250, "targetCategory": ["food", "Water"] },
     { "name": "定居点用水", "effectPerLevel": [-0.02], "maxLevel": 40, "targetCategory": "Water" },
@@ -159,7 +160,7 @@
             "recipes": [
                 {
                     "id": "OfficeI",
-                    "name": "Office I",
+                    "name": "OfficeI",
                     "duration": 60,
                     "inputs": [
                         {
@@ -264,7 +265,7 @@
             "recipes": [
                 {
                     "id": "OfficeII",
-                    "name": "Office II",
+                    "name": "OfficeII",
                     "duration": 60,
                     "inputs": [
                         {
@@ -369,7 +370,7 @@
             "recipes": [
                 {
                     "id": "OfficeIII",
-                    "name": "Office III",
+                    "name": "OfficeIII",
                     "duration": 60,
                     "inputs": [
                         {

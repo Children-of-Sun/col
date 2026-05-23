@@ -65,6 +65,9 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
     let scale = 1;
     if (!isContinuousItem) scale = 60 / recipe.duration;
     inputs[item] = (inputs[item] || 0) + qty * scale * machineCount;
+    // 如果是电力或算力，同时累加到专门的字段
+    if (item === 'electricity') electricity += qty * scale * machineCount;
+    if (item === 'computing') computing += qty * scale * machineCount;
   }
   for (const [item, qty] of Object.entries(recipe.outputs)) {
     const isContinuousItem = isContinuous(item);
@@ -87,11 +90,6 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
     if (item === 'electricity') electricity += reducedQty;
     if (item === 'computing') computing += reducedQty;
     if (item === '人力') workers += reducedQty;
-  }
-  // 如果是居民模块，将 inputs 中的电力和算力同时计入 electricity/computing 字段（用于专门列显示）
-  if (recipe.module === 'resident') {
-    if (inputs['electricity']) electricity += inputs['electricity'];
-    if (inputs['computing']) computing += inputs['computing'];
   }
   return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount };
 }
@@ -409,12 +407,18 @@ export const Results: React.FC = () => {
     const mainCategories: Record<string, { recipes: typeof recipeData; prod: Record<string, number>; cons: Record<string, number>; workers: number; electricity: number; computing: number; maintI: number; maintII: number; maintIII: number; machineCount: number }> = {};
     const powerRecipes: typeof recipeData = [];
     const tradeRecipes: typeof recipeData = [];
+    const agricultureRecipes: typeof recipeData = [];
     const specialRecipes: typeof recipeData = [];
+    const officeRecipes: typeof recipeData = [];
 
     for (const item of recipeData) {
       const r = item.recipe;
       const pm = item.perMin;
-      if (r.module === 'main') {
+      if (r.module === 'main' && r.category === '农业') {
+        agricultureRecipes.push(item);
+      } else if (r.module === 'main' && r.category === '办公室') {
+        officeRecipes.push(item);
+      } else if (r.module === 'main') {
         const cat = r.category || '其他';
         if (!mainCategories[cat]) mainCategories[cat] = { recipes: [], prod: {}, cons: {}, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount: 0 };
         const catObj = mainCategories[cat];
@@ -431,6 +435,17 @@ export const Results: React.FC = () => {
       } else if (r.module === 'power') powerRecipes.push(item);
       else if (r.module === 'trade') tradeRecipes.push(item);
       else if (r.module === 'resident' || r.module === 'station' || r.module === 'special') specialRecipes.push(item);
+    }
+
+    // 农业模块汇总
+    let agriProd: Record<string, number> = {}, agriCons: Record<string, number> = {}, agriWorkers=0, agriElectricity=0, agriComputing=0, agriMaintI=0, agriMaintII=0, agriMaintIII=0, agriMachineCount=0;
+    for (const item of agricultureRecipes) {
+      const pm = item.perMin;
+      mergeResources(agriProd, pm.outputs);
+      mergeResources(agriCons, pm.inputs);
+      agriWorkers += pm.workers; agriElectricity += pm.electricity; agriComputing += pm.computing;
+      agriMaintI += pm.maintI; agriMaintII += pm.maintII; agriMaintIII += pm.maintIII;
+      agriMachineCount += item.machineCount;
     }
 
     let powerProd = {}, powerCons = {}, powerWorkers=0, powerElectricity=0, powerComputing=0, powerMaintI=0, powerMaintII=0, powerMaintIII=0, powerMachineCount=0;
@@ -451,8 +466,10 @@ export const Results: React.FC = () => {
       tradeMaintI += pm.maintI; tradeMaintII += pm.maintII; tradeMaintIII += pm.maintIII;
       tradeMachineCount += item.machineCount;
     }
+    // 合并办公室配方到特殊模块
+    const allSpecialRecipes = [...specialRecipes, ...officeRecipes];
     let specialProd = {}, specialCons = {}, specialWorkers=0, specialElectricity=0, specialComputing=0, specialMaintI=0, specialMaintII=0, specialMaintIII=0, specialMachineCount=0;
-    for (const item of specialRecipes) {
+    for (const item of allSpecialRecipes) {
       const pm = item.perMin;
       mergeResources(specialProd, pm.outputs);
       mergeResources(specialCons, pm.inputs);
@@ -463,7 +480,9 @@ export const Results: React.FC = () => {
 
     const allProd = {}, allCons = {};
     let allWorkers=0, allElectricity=0, allComputing=0, allMaintI=0, allMaintII=0, allMaintIII=0, allMachineCount=0;
-    const allCategories = [...Object.values(mainCategories), { prod: powerProd, cons: powerCons, workers: powerWorkers, electricity: powerElectricity, computing: powerComputing, maintI: powerMaintI, maintII: powerMaintII, maintIII: powerMaintIII, machineCount: powerMachineCount },
+    const allCategories = [...Object.values(mainCategories),
+      { prod: agriProd, cons: agriCons, workers: agriWorkers, electricity: agriElectricity, computing: agriComputing, maintI: agriMaintI, maintII: agriMaintII, maintIII: agriMaintIII, machineCount: agriMachineCount },
+      { prod: powerProd, cons: powerCons, workers: powerWorkers, electricity: powerElectricity, computing: powerComputing, maintI: powerMaintI, maintII: powerMaintII, maintIII: powerMaintIII, machineCount: powerMachineCount },
       { prod: tradeProd, cons: tradeCons, workers: tradeWorkers, electricity: tradeElectricity, computing: tradeComputing, maintI: tradeMaintI, maintII: tradeMaintII, maintIII: tradeMaintIII, machineCount: tradeMachineCount },
       { prod: specialProd, cons: specialCons, workers: specialWorkers, electricity: specialElectricity, computing: specialComputing, maintI: specialMaintI, maintII: specialMaintII, maintIII: specialMaintIII, machineCount: specialMachineCount }];
     for (const cat of allCategories) {
@@ -476,22 +495,24 @@ export const Results: React.FC = () => {
 
     return {
       mainCategories,
+      agriculture: { recipes: agricultureRecipes, prod: agriProd, cons: agriCons, workers: agriWorkers, electricity: agriElectricity, computing: agriComputing, maintI: agriMaintI, maintII: agriMaintII, maintIII: agriMaintIII, machineCount: agriMachineCount },
       power: { recipes: powerRecipes, prod: powerProd, cons: powerCons, workers: powerWorkers, electricity: powerElectricity, computing: powerComputing, maintI: powerMaintI, maintII: powerMaintII, maintIII: powerMaintIII, machineCount: powerMachineCount },
       trade: { recipes: tradeRecipes, prod: tradeProd, cons: tradeCons, workers: tradeWorkers, electricity: tradeElectricity, computing: tradeComputing, maintI: tradeMaintI, maintII: tradeMaintII, maintIII: tradeMaintIII, machineCount: tradeMachineCount },
-      special: { recipes: specialRecipes, prod: specialProd, cons: specialCons, workers: specialWorkers, electricity: specialElectricity, computing: specialComputing, maintI: specialMaintI, maintII: specialMaintII, maintIII: specialMaintIII, machineCount: specialMachineCount },
+      special: { recipes: allSpecialRecipes, prod: specialProd, cons: specialCons, workers: specialWorkers, electricity: specialElectricity, computing: specialComputing, maintI: specialMaintI, maintII: specialMaintII, maintIII: specialMaintIII, machineCount: specialMachineCount },
       all: { prod: allProd, cons: allCons, workers: allWorkers, electricity: allElectricity, computing: allComputing, maintI: allMaintI, maintII: allMaintII, maintIII: allMaintIII, machineCount: allMachineCount },
     };
   }, [recipeData]);
 
   const tabNames = useMemo(() => {
     const mainTabs = Object.keys(categoryData.mainCategories).sort();
-    return ['全厂总览', ...mainTabs, '电力模块', '贸易模块', '特殊模块'];
+    return ['全厂总览', ...mainTabs, '电力模块', '贸易模块', '农业模块', '特殊模块'];
   }, [categoryData.mainCategories]);
 
   const currentData = useMemo(() => {
     if (selectedTab === '全厂总览') return { type: 'overview', ...categoryData.all };
     if (selectedTab === '电力模块') return { type: 'power', ...categoryData.power };
     if (selectedTab === '贸易模块') return { type: 'trade', ...categoryData.trade };
+    if (selectedTab === '农业模块') return { type: 'agriculture', ...categoryData.agriculture };
     if (selectedTab === '特殊模块') return { type: 'special', ...categoryData.special };
     const cat = categoryData.mainCategories[selectedTab];
     return cat ? { type: 'category', ...cat } : null;
@@ -542,6 +563,21 @@ export const Results: React.FC = () => {
       totalMaintenance: categoryData.trade.maintI + categoryData.trade.maintII + categoryData.trade.maintIII,
       netProds: Object.entries(tradeNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(tradeNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
+    });
+    // 农业模块
+    const agriNetElec = (categoryData.agriculture.prod['electricity'] || 0) - (categoryData.agriculture.cons['electricity'] || 0);
+    const agriAllItems = new Set([...Object.keys(categoryData.agriculture.prod), ...Object.keys(categoryData.agriculture.cons)]);
+    const agriNetMap: Record<string, number> = {};
+    for (const item of agriAllItems) {
+      const prod = categoryData.agriculture.prod[item] || 0, cons = categoryData.agriculture.cons[item] || 0, net = prod - cons;
+      if (Math.abs(net) > 1e-6) agriNetMap[item] = net;
+    }
+    rows.push({
+      name: '农业模块', machineCount: categoryData.agriculture.machineCount, workers: categoryData.agriculture.workers,
+      netElectricity: agriNetElec, computing: categoryData.agriculture.computing,
+      totalMaintenance: categoryData.agriculture.maintI + categoryData.agriculture.maintII + categoryData.agriculture.maintIII,
+      netProds: Object.entries(agriNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
+      netCons: Object.entries(agriNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
     // 特殊模块
     const specialNetElec = (categoryData.special.prod['electricity'] || 0) - (categoryData.special.cons['electricity'] || 0);

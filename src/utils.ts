@@ -24,7 +24,8 @@ export const NON_SCALABLE_ITEMS = new Set([
   '人力',
   'maintenance i',
   'maintenance ii',
-  'maintenance iii'
+  'maintenance iii',
+  'focus'
 ]);
 
 export function t(key: string | undefined, translation: Record<string, string>): string {

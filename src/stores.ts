@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { StoreState, DataJson, ParsedData, SolverResult, Demand, GameData, Recipe, TradeContract, TradeSetup } from './types';
+import { StoreState, DataJson, ParsedData, SolverResult, Demand, GameData, Recipe, TradeContract, TradeSetup, FarmSetting, CropSetting } from './types';
 import { parseData } from './parseData';
 import { getSeriesName, isPowerBuilding, HIDDEN_SERIES } from './utils';
 
@@ -96,6 +96,18 @@ export const useStore = create<StoreState>((set, get) => ({
   selectedTradeContractIds: [],
   enableTradeModule: true,
 
+  enableAgriculture: false,
+  cropRotation: false,
+  globalFertilizerType: 'organic',
+  targetFertility: 100,
+  farms: [],
+
+  enableFocusConsumption: false,
+
+  officeBuildingEnabled: {},
+  officeSelectedLevel: {},
+  officeRecipeEnabled: {},
+
   solarEfficiency: 1,
 
   optimizationMode: 'machines',
@@ -127,6 +139,14 @@ export const useStore = create<StoreState>((set, get) => ({
     const allBuildingIds = json.machines_and_buildings.map(b => b.id);
     const mainBuildingEnabledMap = Object.fromEntries(allBuildingIds.map(id => [id, true]));
     const powerBuildingEnabledMap = Object.fromEntries(allBuildingIds.map(id => [id, true]));
+    // 初始化办公室建筑启用状态
+    const officeBuildings = json.machines_and_buildings.filter(b => b.name.startsWith('Office'));
+    const officeBuildingEnabledMap: Record<string, boolean> = {};
+    const officeRecipeEnabledMap: Record<string, boolean> = {};
+    officeBuildings.forEach(b => {
+      officeBuildingEnabledMap[b.id] = true;
+      b.recipes?.forEach(r => { officeRecipeEnabledMap[r.id] = true; });
+    });
     set({
       fullData: json,
       recipes: p.recipes,
@@ -140,6 +160,8 @@ export const useStore = create<StoreState>((set, get) => ({
       labLevel: p.labMeta.length ? p.labMeta[p.labMeta.length - 1].buildingId : '',
       mainBuildingEnabledMap,
       powerBuildingEnabledMap,
+      officeBuildingEnabled: officeBuildingEnabledMap,
+      officeRecipeEnabled: officeRecipeEnabledMap,
     });
   },
 
@@ -228,6 +250,91 @@ export const useStore = create<StoreState>((set, get) => ({
   setSelectedTradeContractIds: (ids) => set({ selectedTradeContractIds: ids }),
   setEnableTradeModule: (value) => set({ enableTradeModule: value }),
 
+  setEnableAgriculture: (value: boolean) => set({ enableAgriculture: value }),
+  setCropRotation: (value: boolean) => set({ cropRotation: value }),
+  setEnableFocusConsumption: (value: boolean) => set({ enableFocusConsumption: value }),
+  setOfficeBuildingEnabled: (id, value) => set(s => ({ officeBuildingEnabled: { ...s.officeBuildingEnabled, [id]: value } })),
+  setOfficeLevelById: (id, level) => set(s => ({ officeSelectedLevel: { ...s.officeSelectedLevel, [id]: level } })),
+  setOfficeRecipeEnabled: (id, value) => set(s => ({ officeRecipeEnabled: { ...s.officeRecipeEnabled, [id]: value } })),
+  setGlobalFertilizerType: (v: string) => {
+    const newType = v as 'organic' | 'I' | 'II';
+    let maxFT = 100;
+    if (newType === 'I') maxFT = 120;
+    if (newType === 'II') maxFT = 140;
+    const currentFT = get().targetFertility;
+    set({
+      globalFertilizerType: newType,
+      targetFertility: Math.min(currentFT, maxFT)
+    });
+  },
+  setTargetFertility: (value: number) => set({ targetFertility: value }),
+  toggleCrop: (buildingId: string, cropName: string, enabled: boolean) => set(state => {
+    const farms = state.farms.map(f => {
+      if (f.buildingId !== buildingId) return f;
+      const crops = f.crops.map(c =>
+        c.cropName === cropName ? { ...c, enabled } : c
+      );
+      return { ...f, crops };
+    });
+    return { farms };
+  }),
+  loadAgricultureBuildings: () => set(state => {
+    // 从 Irrigated Farm 配方中提取所有作物的基准数据（仅使用肥料 I 配方）
+    const baseRecipes = state.recipes.filter(r => r.buildingId === 'Irrigated Farm' && r.module === 'main');
+    const cropBaseMap = new Map<string, any>();
+    for (const rec of baseRecipes) {
+      const fertIKey = Object.keys(rec.inputs).find(k => k.toLowerCase() === 'fertilizer i');
+      if (!fertIKey) continue;
+      const cropName = Object.keys(rec.outputs).find(k => k !== 'water' && k !== 'recyclables');
+      if (!cropName) continue;
+      const durationMin = rec.duration / 60;
+      const waterPerMin = (rec.inputs['water'] || 0) / durationMin;
+      const fertQty = rec.inputs[fertIKey];
+      const fc = (fertQty * 2) / durationMin; // 肥料 I 肥力值=2
+      const cropPerMin = (rec.outputs[cropName] || 0) / durationMin;
+      if (!cropBaseMap.has(cropName)) {
+        cropBaseMap.set(cropName, {
+          baseWaterPerMin: waterPerMin,
+          baseFertilizerPerMin: fertQty / durationMin,
+          baseCropPerMin: cropPerMin,
+          baseFc: fc,
+          baseRecipeId: rec.id,
+        });
+      }
+    }
+
+    const targetBuildings = [
+      { id: 'Irrigated Farm', name: 'Irrigated Farm', waterMul: 1.0, outputMul: 1.0 },
+      { id: 'Greenhouse', name: 'Greenhouse', waterMul: 1.12, outputMul: 1.25 },
+      { id: 'Greenhouse II', name: 'Greenhouse II', waterMul: 1.25, outputMul: 1.5 },
+    ];
+
+    const farms: FarmSetting[] = [];
+    for (const b of targetBuildings) {
+      const existingFarm = state.farms.find(f => f.buildingId === b.id);
+      const crops: CropSetting[] = Array.from(cropBaseMap.entries()).map(([cropName, data]) => {
+        const existingCrop = existingFarm?.crops.find(c => c.cropName === cropName);
+        return {
+          cropName,
+          enabled: existingCrop?.enabled ?? false, // 保留已有状态，默认 false
+          baseRecipeId: data.baseRecipeId,
+          baseWaterPerMin: data.baseWaterPerMin,
+          baseFertilizerPerMin: data.baseFertilizerPerMin,
+          baseCropPerMin: data.baseCropPerMin,
+          baseFc: data.baseFc,
+        };
+      });
+      farms.push({
+        buildingId: b.id,
+        buildingName: b.name,
+        enabled: existingFarm?.enabled ?? true,
+        level: existingFarm?.level ?? 1,
+        crops,
+      });
+    }
+    return { farms };
+  }),
+
   setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(0, Math.max(0, value)) }),
 
   setOptimizationMode: (mode) => set({ optimizationMode: mode }),
@@ -283,6 +390,21 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.enableTradeModule !== undefined) state.enableTradeModule = s.enableTradeModule;
     if (s.showIcons !== undefined) state.showIcons = s.showIcons;
     if (s.excludedItems !== undefined) state.excludedItems = s.excludedItems;
+    if (s.enableAgriculture !== undefined) state.enableAgriculture = s.enableAgriculture;
+    if (s.cropRotation !== undefined) state.cropRotation = s.cropRotation;
+    if (s.globalFertilizerType !== undefined) state.globalFertilizerType = s.globalFertilizerType;
+    if (s.targetFertility !== undefined) state.targetFertility = s.targetFertility;
+    if (s.enableFocusConsumption !== undefined) state.enableFocusConsumption = s.enableFocusConsumption;
+    if (s.officeBuildingEnabled !== undefined) state.officeBuildingEnabled = s.officeBuildingEnabled;
+    if (s.officeSelectedLevel !== undefined) state.officeSelectedLevel = s.officeSelectedLevel;
+    if (s.officeRecipeEnabled !== undefined) state.officeRecipeEnabled = s.officeRecipeEnabled;
+    if (s.farms !== undefined) {
+      // 深度恢复 farms 结构（确保每个 crop 的 enabled 等字段保留）
+      state.farms = s.farms.map((farm: any) => ({
+        ...farm,
+        crops: farm.crops.map((crop: any) => ({ ...crop }))
+      }));
+    }
     set(state);
   },
 
@@ -326,6 +448,15 @@ export const useStore = create<StoreState>((set, get) => ({
       enableTradeModule: s.enableTradeModule,
       showIcons: s.showIcons,
       excludedItems: s.excludedItems,
+      enableAgriculture: s.enableAgriculture,
+      cropRotation: s.cropRotation,
+      globalFertilizerType: s.globalFertilizerType,
+      targetFertility: s.targetFertility,
+      enableFocusConsumption: s.enableFocusConsumption,
+      officeBuildingEnabled: s.officeBuildingEnabled,
+      officeSelectedLevel: s.officeSelectedLevel,
+      officeRecipeEnabled: s.officeRecipeEnabled,
+      farms: s.farms,
     };
   },
 

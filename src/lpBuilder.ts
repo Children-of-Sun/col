@@ -1,5 +1,5 @@
 import { Recipe, Demand } from './types';
-import { isRaw } from './utils';
+import { isRaw, isNonScalable } from './utils';
 
 // 全局调试标志
 const DEBUG = typeof window !== 'undefined' && window.localStorage?.getItem('factoryDebug') === 'true';
@@ -65,7 +65,7 @@ export function buildLp(input: LpInput): LpOutput {
   const varNames = [...mainVarNames, ...powerVarNames, ...residentVarNames, ...stationVarNames, ...specialVarNames, ...tradeVarNames];
 
   const isContinuous = (item: string): boolean => {
-    return item === 'electricity' || item === 'computing' || item === '人力' || item === 'mechanical power';
+    return isNonScalable(item);
   };
 
   // 辅助函数：计算每个配方对某个目标的贡献系数（每单位变量）

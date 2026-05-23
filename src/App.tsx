@@ -10,10 +10,12 @@ import TechPanel from './components/TechPanel';
 import EdictPanel from './components/EdictPanel';
 import OfficePanel from './components/OfficePanel';
 import { TradePanel } from './components/TradePanel';
+import { AgriculturePanel } from './components/AgriculturePanel';
 import { buildLp } from './lpBuilder';
 import { ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getRecycleRate, calcResidentDemands, calcResidentWaste, getMaintenanceWasteMap } from './utils';
+import { getAgricultureMultipliers } from './utils/agricultureMultipliers';
 import { getMaintenanceReduction, t, isRaw, isPowerItem, getSeriesName, isMaintenanceRecyclingRecipe, computeImplicitCosts, getAdjustedCohesion } from './utils';
-import { Demand, Recipe, DockLevel, TradeFuel } from './types';
+import { Demand, Recipe, DockLevel, TradeFuel, CropSetting } from './types';
 import { calculateTrade } from './tradeCalculator';
 import './App.css';
 console.log('OptionsPanel imported:', OptionsPanel);
@@ -213,9 +215,9 @@ const buildActiveRecipes = (
     }
   });
 
-  if (!active.length) {
-    return null; // 没有启用的配方
-  }
+  if (!active.length && !state.enableAgriculture) {
+  return null;
+}
 
   const ignored = new Set(state.ignoredItems);
   const excludedOutputs = new Set(state.excludedOutputs);
@@ -251,7 +253,155 @@ const buildActiveRecipes = (
     }
   });
 
-  // ========== 提前构建 specialActive（雕像、研究所） ==========
+  // ========== 农业产量加成（提前计算，供农业配方生成使用） ==========
+  const multipliers = getAgricultureMultipliers(gameData, edictLevels, officeLevels, researchLevels);
+  const farmOutputMultiplier = multipliers.output;
+  const totalFarmWaterMultiplier = multipliers.water;
+  console.log('[农业加成] 产出倍率:', farmOutputMultiplier, '水消耗倍率:', totalFarmWaterMultiplier);
+
+  // ========== 农业系统 ==========
+  if (state.enableAgriculture) {
+    const calculateRecipe = (crop: CropSetting, ft: number, p: number, fertValue: number) => {
+      const waterPerMin = crop.baseWaterPerMin;
+      const fc = crop.baseFc;
+      let requiredFertility: number;
+      if (ft <= 1.0) {
+        requiredFertility = fc * p - 3 * (1 - ft);
+      } else {
+        requiredFertility = fc * p + 2 * (fc * p + 3) * (ft - 1);
+      }
+      const fertilizerPerMin = Math.max(0, requiredFertility / fertValue);
+      const cropPerMin = crop.baseCropPerMin * ft;
+      return { waterPerMin, fertilizerPerMin, cropPerMin };
+    };
+
+    const fertValue = state.globalFertilizerType === 'organic' ? 1 : (state.globalFertilizerType === 'I' ? 2 : 2.5);
+    const P = state.cropRotation ? 1.0 : 1.5;
+    const FT = state.targetFertility / 100;
+
+    // 删除所有农场建筑的原始配方（通过 buildingId 列表）
+    const farmBuildingIds = state.farms.map(f => f.buildingId);
+    for (let i = modifiedActive.length - 1; i >= 0; i--) {
+      if (farmBuildingIds.includes(modifiedActive[i].buildingId)) {
+        modifiedActive.splice(i, 1);
+      }
+    }
+
+    // 生成新配方
+    for (const farm of state.farms) {
+      if (!farm.enabled) continue;
+      for (const crop of farm.crops) {
+        if (!crop.enabled) continue;
+        // 从原始配方复制 upkeep 和 workers
+        const originalRecipe = state.recipes.find(r => r.id === crop.baseRecipeId);
+        if (!originalRecipe) continue;
+        const { waterPerMin, fertilizerPerMin, cropPerMin } = calculateRecipe(crop, FT, P, fertValue);
+
+        // 应用全局加成
+        const finalWaterPerMin = waterPerMin * totalFarmWaterMultiplier;
+        const finalCropPerMin = cropPerMin * farmOutputMultiplier;
+
+        const fertInputKey = state.globalFertilizerType === 'organic' ? 'fertilizer organic' : `fertilizer ${state.globalFertilizerType.toLowerCase()}`;
+        const newRecipe: Recipe = {
+          id: `agri_${farm.buildingId}_${crop.cropName}`,
+          name: `${t(crop.cropName, translation)} (${t(farm.buildingName, translation)})`,
+          buildingId: farm.buildingId,
+          buildingName: farm.buildingName,
+          category: '农业',
+          buildingLevel: farm.level,
+          duration: 60,  // 关键修复：设为60，避免 LP 缩放
+          inputs: {
+            'water': finalWaterPerMin,
+            [fertInputKey]: fertilizerPerMin,
+          },
+          outputs: {
+            [crop.cropName.toLowerCase()]: finalCropPerMin,
+          },
+          upkeep: originalRecipe.upkeep ? { ...originalRecipe.upkeep } : {},
+          powerMultiplier: originalRecipe.powerMultiplier || 1,
+          workers: originalRecipe.workers || 0,
+          isSolar: false,
+          isHidden: false,
+          module: 'main',
+        };
+        modifiedActive.push(newRecipe);
+      }
+    }
+  }
+
+
+
+
+  // ========== 办公室建筑配方（主模块） ==========
+  let focusBonusPerWorker = 0;
+  if (gameData) {
+    const focusResearch = gameData.research.find((r: any) => r.name === '专注点');
+    if (focusResearch) {
+      const idx = gameData.research.indexOf(focusResearch);
+      const lvl = researchLevels[idx] || 0;
+      if (lvl > 0) {
+        const bonusPerWorkerPerLevel = focusResearch.effectPerLevel?.[0] || 0;
+        focusBonusPerWorker = bonusPerWorkerPerLevel * lvl;
+      }
+    }
+  }
+  const buildingsSource = gameData?.machines_and_buildings || state.fullData?.machines_and_buildings;
+  const officeBuildings = buildingsSource?.filter((b: any) => b.name?.startsWith('Office')) || [];
+  console.log('办公室建筑数量:', officeBuildings.length);
+  for (const building of officeBuildings) {
+    const enabled = state.officeBuildingEnabled[building.id];
+    if (enabled === false) continue;
+    building.recipes?.forEach((recipe: any) => {
+      const recipeEnabled = state.officeRecipeEnabled[recipe.id];
+      if (recipeEnabled === false) return;
+
+      const inputs: Record<string, number> = {};
+      const outputs: Record<string, number> = {};
+      const upkeep: Record<string, number> = {};
+      recipe.inputs?.forEach((i: any) => inputs[i.name.toLowerCase()] = i.quantity);
+      recipe.outputs?.forEach((o: any) => outputs[o.name.toLowerCase()] = o.quantity);
+      if (building.maintenance_cost_units && building.maintenance_cost_quantity) {
+        upkeep[building.maintenance_cost_units.toLowerCase()] = building.maintenance_cost_quantity;
+      }
+      upkeep['人力'] = (upkeep['人力'] || 0) + building.workers;
+      upkeep['electricity'] = (upkeep['electricity'] || 0) + (building.electricity_consumed || 0);
+      if (building.computing_consumed) upkeep['computing'] = (upkeep['computing'] || 0) + building.computing_consumed;
+
+      const durationMin = recipe.duration / 60;
+      const scaledInputs: Record<string, number> = {};
+      const scaledOutputs: Record<string, number> = {};
+      for (const [k, v] of Object.entries(inputs)) scaledInputs[k] = (v as number) / durationMin;
+      for (const [k, v] of Object.entries(outputs)) scaledOutputs[k] = (v as number) / durationMin;
+
+      // 应用专注点科技加成（每工人额外 Focus 产量）
+      if (scaledOutputs['focus'] !== undefined && focusBonusPerWorker > 0) {
+        scaledOutputs['focus'] += focusBonusPerWorker * building.workers;
+      }
+
+      const officeRecipe: Recipe = {
+        id: recipe.id,
+        name: recipe.name,
+        buildingId: building.id,
+        buildingName: building.name,
+        category: '办公室',
+        buildingLevel: 0,
+        duration: 60,
+        inputs: scaledInputs,
+        outputs: scaledOutputs,
+        upkeep,
+        powerMultiplier: 1,
+        workers: building.workers,
+        isSolar: false,
+        isHidden: false,
+        module: 'main',
+      };
+      modifiedActive.push(officeRecipe);
+      console.log(`添加办公室配方: ${recipe.name}`);
+    });
+  }
+
+
+  // ========== 提前构建 specialActive（雕像、研究所、办公Focus消耗） ==========
   const currentGameData = gameData;
   let specialActive: Recipe[] = [];
 
@@ -348,6 +498,48 @@ const buildActiveRecipes = (
         console.log('[实验室废物] 产出:', Object.entries(labRecipe.outputs).slice(0, 10));
       }
     }
+
+
+    // ========== 办公专注点消耗 ==========
+    if (state.enableFocusConsumption) {
+      let totalFocusPerMin = 0;
+      if (gameData) {
+        for (let i = 0; i < gameData.office.length; i++) {
+          const off = gameData.office[i];
+          const level = state.officeLevels[i] || 0;
+          const base = off.costBase || 0;
+          const inc = off.costIncrement || 0;
+          let cost = 0;
+          for (let l = 1; l <= level; l++) {
+            cost += base + (l - 1) * inc;
+          }
+          console.log(`${off.name}: level=${level}, cost=${cost}`);
+          totalFocusPerMin += cost;
+        }
+      }
+      console.log('专注点总消耗:', totalFocusPerMin);
+      if (totalFocusPerMin > 0) {
+        const focusRecipe: Recipe = {
+          id: 'office_focus_consumption',
+          name: t('办公升级专注点消耗', translation),
+          buildingId: 'office',
+          buildingName: t('办公升级', translation),
+          category: '办公',
+          buildingLevel: 0,
+          duration: 60,
+          inputs: { 'focus': totalFocusPerMin },
+          outputs: {},
+          upkeep: {},
+          powerMultiplier: 1,
+          workers: 0,
+          isSolar: false,
+          isHidden: true,
+          module: 'special',
+        };
+        specialActive.push(focusRecipe);
+      }
+    }
+
   }
 
   // ========== 维护废料回收（同时处理 main/power 和 special） ==========
@@ -435,57 +627,6 @@ const buildActiveRecipes = (
       if (r.outputs['maintenance ii']) r.outputs['maintenance ii'] *= maintenanceOutputMultiplier;
       if (r.outputs['maintenance iii']) r.outputs['maintenance iii'] *= maintenanceOutputMultiplier;
     });
-
-    // ========== 农业产量加成 ==========
-    // 农业产量加成（乘数）
-    let farmOutputMultiplier = 1;
-    // 农业提振法令
-    const agriBoostEdict = gameData?.edicts.find(e => e.name === '农业提振');
-    if (agriBoostEdict) {
-      const lvl = edictLevels[gameData.edicts.indexOf(agriBoostEdict)] ?? -1;
-      if (lvl >= 0) farmOutputMultiplier *= (1 + agriBoostEdict.effectPerLevel[lvl]);
-    }
-    // 办公农作物产量
-    const officeCrop = gameData?.office.find(o => o.name === '农作物产量');
-    if (officeCrop) {
-      const lvl = officeLevels[gameData.office.indexOf(officeCrop)] || 0;
-      if (lvl > 0) farmOutputMultiplier *= (1 + officeCrop.effectPerLevel * lvl);
-    }
-    // 研究作物产量 - 第一个值
-    const researchCrop = gameData?.research.find(r => r.name === '作物产量');
-    let cropWaterMultiplier = 1; // 用于水的乘数（第二个值）
-    if (researchCrop) {
-      const lvl = researchLevels[gameData.research.indexOf(researchCrop)] || 0;
-      if (lvl > 0) {
-        farmOutputMultiplier *= (1 + researchCrop.effectPerLevel[0] * lvl);
-        cropWaterMultiplier *= (1 + researchCrop.effectPerLevel[1] * lvl);
-      }
-    }
-    // 节水器法令（影响农场水消耗和居民水需求，但居民部分已在居民模块处理）
-    const waterSaverEdict = gameData?.edicts.find(e => e.name === '节水器');
-    let farmWaterInputMultiplier = 1;
-    if (waterSaverEdict) {
-      const lvl = edictLevels[gameData.edicts.indexOf(waterSaverEdict)] ?? -1;
-      if (lvl >= 0) farmWaterInputMultiplier *= (1 - waterSaverEdict.effectPerLevel[lvl]);
-    }
-    // 组合农场水乘数（作物产量研究第二个效果 + 节水器法令，不包含定居点用水）
-    // 注意：定居点用水研究只影响居民用水（已在 calcResidentDemands 中处理），不影响农场
-    const totalFarmWaterMultiplier = farmWaterInputMultiplier * cropWaterMultiplier;
-
-    modifiedActive.forEach(r => {
-      if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
-        // 应用产出加成（农业提振、办公农作物产量、研究作物产量第一个效果）
-        for (const k in r.outputs) {
-          if (k !== 'water') {
-            r.outputs[k] *= farmOutputMultiplier;
-          }
-        }
-        // 应用农场水消耗修正（作物产量研究第二个效果、节水器法令）
-        if (r.inputs['water']) {
-          r.inputs['water'] *= totalFarmWaterMultiplier;
-        }
-      }
-    });
   }
 
   let reductionFactor = reductionFactorBase;
@@ -501,7 +642,10 @@ const buildActiveRecipes = (
   }
 
   let mainActive = modifiedActive.filter(r => {
-    if (!state.recipeEnabled[r.id] || r.module !== 'main') return false;
+    if (r.module !== 'main') return false;
+    // 农业配方无条件通过（不检查 recipeEnabled 和等级）
+    if (r.category === '农业' || r.category === '办公室') return true;
+    if (!state.recipeEnabled[r.id]) return false;
     const sn = state.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
     if (sn) {
       if (!state.mainEnabled[sn]) return false;
@@ -709,7 +853,7 @@ export default function App() {
   const [powerRecipeModalOpen, setPowerRecipeModalOpen] = useState(false);
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [excludeModalOpen, setExcludeModalOpen] = useState(false);
-  const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'resident' | 'edict' | 'office' | 'tech'>('main');
+  const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'agriculture' | 'resident' | 'edict' | 'office' | 'tech'>('main');
 
   useEffect(() => {
     window.__store = useStore;
@@ -1304,6 +1448,7 @@ export default function App() {
             <button className={`tab-button ${rightTab === 'power' ? 'active' : ''}`} onClick={() => setRightTab('power')}>⚡ 电力模块</button>
             <button className={`tab-button ${rightTab === 'stationStatueLab' ? 'active' : ''}`} onClick={() => setRightTab('stationStatueLab')}>🚀 空间站·雕像·研究所</button>
             <button className={`tab-button ${rightTab === 'trade' ? 'active' : ''}`} onClick={() => setRightTab('trade')}>🚢 贸易模块</button>
+            <button className={`tab-button ${rightTab === 'agriculture' ? 'active' : ''}`} onClick={() => setRightTab('agriculture')}>🌾 农业</button>
             <button className={`tab-button ${rightTab === 'resident' ? 'active' : ''}`} onClick={() => setRightTab('resident')}>🏠 居民</button>
             <button className={`tab-button ${rightTab === 'edict' ? 'active' : ''}`} onClick={() => setRightTab('edict')}>📜 法令</button>
             <button className={`tab-button ${rightTab === 'office' ? 'active' : ''}`} onClick={() => setRightTab('office')}>🏢 办公</button>
@@ -1320,6 +1465,7 @@ export default function App() {
               </div>
             )}
             {rightTab === 'trade' && <TradePanel />}
+            {rightTab === 'agriculture' && <AgriculturePanel />}
             {rightTab === 'resident' && <ResidentPanel />}
             {rightTab === 'edict' && <EdictPanel />}
             {rightTab === 'office' && <OfficePanel />}
