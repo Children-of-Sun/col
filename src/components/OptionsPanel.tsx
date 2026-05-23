@@ -113,7 +113,7 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
       {/* 原有选项 */}
       <div style={{ marginBottom: 8 }}>
         {ignoreOptions.map(item => (
-          <Checkbox key={item} label={item} checked={ignoredItems.includes(item)} onChange={() => toggleIgnored(item)} />
+          <Checkbox key={item} label={t(item, translation)} checked={ignoredItems.includes(item)} onChange={() => toggleIgnored(item)} />
         ))}
       </div>
 

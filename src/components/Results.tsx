@@ -236,6 +236,7 @@ const RecipeList: React.FC<{
         <thead>
           <tr>
             <th>{t('配方', translation)}</th>
+            <th>{t('建筑', translation)}</th>
             <th>{t('机器数量', translation)}</th>
             <th>{t('人力/分', translation)}</th>
             <th>{t('电力/分', translation)}</th>
@@ -267,6 +268,7 @@ const RecipeList: React.FC<{
             return (
               <tr key={idx}>
                 <td>{t(r.name, translation)}</td>
+                <td>{t(r.buildingName, translation)}</td>
                 <td>{cnt.toFixed(4)}</td>
                 <td>{pm.workers.toFixed(2)}</td>
                 <td>{pm.electricity.toFixed(2)}</td>

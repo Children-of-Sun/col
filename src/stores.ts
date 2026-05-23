@@ -94,6 +94,7 @@ export const useStore = create<StoreState>((set, get) => ({
     unityDiscount: 0,
   },
   selectedTradeContractIds: [],
+  enableTradeModule: true,
 
   solarEfficiency: 1,
 
@@ -225,6 +226,7 @@ export const useStore = create<StoreState>((set, get) => ({
   setSelectedTradeRecipes: (recipes) => set({ selectedTradeRecipes: recipes }),
   setTradeParams: (params) => set(state => ({ tradeParams: { ...state.tradeParams, ...params } })),
   setSelectedTradeContractIds: (ids) => set({ selectedTradeContractIds: ids }),
+  setEnableTradeModule: (value) => set({ enableTradeModule: value }),
 
   setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(0, Math.max(0, value)) }),
 
@@ -278,6 +280,9 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.edictLevels) state.edictLevels = s.edictLevels;
     if (s.officeLevels) state.officeLevels = s.officeLevels;
     if (s.researchLevels) state.researchLevels = s.researchLevels;
+    if (s.enableTradeModule !== undefined) state.enableTradeModule = s.enableTradeModule;
+    if (s.showIcons !== undefined) state.showIcons = s.showIcons;
+    if (s.excludedItems !== undefined) state.excludedItems = s.excludedItems;
     set(state);
   },
 
@@ -318,6 +323,9 @@ export const useStore = create<StoreState>((set, get) => ({
       edictLevels: s.edictLevels,
       officeLevels: s.officeLevels,
       researchLevels: s.researchLevels,
+      enableTradeModule: s.enableTradeModule,
+      showIcons: s.showIcons,
+      excludedItems: s.excludedItems,
     };
   },
 

@@ -154,11 +154,12 @@ export function calcResidentDemands(
       }
       if (e.itemEffect) {
         e.itemEffect.forEach(item => {
+          const itemKey = item.toLowerCase();
           // 需求减少效果始终应用
-          itemMods[item] = (itemMods[item] || 1) * (1 - eff);
+          itemMods[itemKey] = (itemMods[itemKey] || 1) * (1 - eff);
           // 只有特定法令才应用凝聚力加成
           if (unityBonusEdicts.includes(e.name)) {
-            itemUnityMods[item] = (itemUnityMods[item] || 1) * (1 + unityValue);
+            itemUnityMods[itemKey] = (itemUnityMods[itemKey] || 1) * (1 + unityValue);
           }
         });
       }
@@ -180,7 +181,8 @@ export function calcResidentDemands(
       const cats = Array.isArray(o.targetCategory) ? o.targetCategory : [o.targetCategory];
       cats.forEach(cat => {
         if (cat === 'recycle' || cat === 'unity' || cat === 'none') return;
-        catMods[cat] = (catMods[cat] || 1) * (1 - o.effectPerLevel * lvl);
+        // 办公的 effectPerLevel 负值表示减少，正值表示增加，因此使用 (1 + effectPerLevel * lvl)
+        catMods[cat] = (catMods[cat] || 1) * (1 + o.effectPerLevel * lvl);
       });
     }
   });
@@ -193,9 +195,11 @@ export function calcResidentDemands(
         if (t === 'recycle' || t === 'unity' || t === 'none') return;
         const eff = Array.isArray(r.effectPerLevel) ? (r.effectPerLevel[idx] || 0) : r.effectPerLevel;
         if (r.name === '作物产量' && t === 'Water') {
-          itemMods['Water'] = (itemMods['Water'] || 1) * (1 - eff * lvl);
+          // 作物产量研究第二效果：增加水消耗（eff 为正）
+          itemMods['Water'] = (itemMods['Water'] || 1) * (1 + eff * lvl);
         } else {
-          catMods[t] = (catMods[t] || 1) * (1 - eff * lvl);
+          // 其他研究，统一使用 (1 + eff * lvl)（正为增加，负为减少）
+          catMods[t] = (catMods[t] || 1) * (1 + eff * lvl);
         }
       });
     }
@@ -229,12 +233,13 @@ export function calcResidentDemands(
         let demand = svc.demand * factor;
         if (housing.multipliers[name]) demand *= housing.multipliers[name];
         let mod = catMods['food'] || 1;
-        if (itemMods[name]) mod *= itemMods[name];
+        const itemKey = name.toLowerCase();
+        if (itemMods[itemKey]) mod *= itemMods[itemKey];
         // 应用分摊：除以（激活的类别数 × 本类别内激活的食物数）
         demand = demand / (numActiveGroups * numFoodsInThisGroup);
         demand *= mod;
-        demands.push({ item: name.toLowerCase(), rate: demand });
-        const unityMult = itemUnityMods[name] || 1;
+        demands.push({ item: itemKey, rate: demand });
+        const unityMult = itemUnityMods[itemKey] || 1;
         foodUnity += svc.unity * unityMult;
       }
     }
@@ -245,10 +250,11 @@ export function calcResidentDemands(
     let demand = svc.demand * factor;
     if (housing.multipliers[selectedMedical]) demand *= housing.multipliers[selectedMedical];
     let mod = catMods['medical'] || 1;
-    if (itemMods[selectedMedical]) mod *= itemMods[selectedMedical];
+    const itemKey = selectedMedical.toLowerCase();
+    if (itemMods[itemKey]) mod *= itemMods[itemKey];
     demand *= mod;
-    demands.push({ item: selectedMedical.toLowerCase(), rate: demand });
-    const unityMult = itemUnityMods[selectedMedical] || 1;
+    demands.push({ item: itemKey, rate: demand });
+    const unityMult = itemUnityMods[itemKey] || 1;
     nonFoodUnity += svc.unity * unityMult;
   }
 
@@ -258,10 +264,38 @@ export function calcResidentDemands(
     let demand = svc.demand * factor;
     if (housing.multipliers[name]) demand *= housing.multipliers[name];
     let mod = catMods[svc.category] || 1;
-    if (itemMods[name]) mod *= itemMods[name];
+
+    // 对于水服务，单独应用节水器和定居点用水研究
+    if (name === 'Water') {
+      // 节水器法令（减少用水）
+      const waterSaverEdict = data.edicts.find(e => e.name === '节水器');
+      if (waterSaverEdict) {
+        const idx = data.edicts.indexOf(waterSaverEdict);
+        const lvl = edictLevels[idx] ?? -1;
+        if (lvl >= 0) {
+          const eff = waterSaverEdict.effectPerLevel[lvl];
+          mod *= (1 - eff);  // 节水器效果为正，减少消耗
+        }
+      }
+      // 定居点用水研究（减少用水）
+      const waterResearch = data.research.find(r => r.name === '定居点用水');
+      if (waterResearch) {
+        const idx = data.research.indexOf(waterResearch);
+        const lvl = researchLevels[idx] || 0;
+        if (lvl > 0) {
+          const eff = waterResearch.effectPerLevel[0]; // 通常为 -0.02
+          mod *= (1 + eff * lvl); // eff为负，乘数 <1
+        }
+      }
+    } else {
+      // 其他服务使用通用的 itemMods
+      const itemKey = name.toLowerCase();
+      if (itemMods[itemKey]) mod *= itemMods[itemKey];
+    }
+
     demand *= mod;
     demands.push({ item: name.toLowerCase(), rate: demand });
-    const unityMult = itemUnityMods[name] || 1;
+    const unityMult = itemUnityMods[name.toLowerCase()] || 1;
     nonFoodUnity += svc.unity * unityMult;
   }
 

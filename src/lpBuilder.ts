@@ -262,38 +262,36 @@ export function buildLp(input: LpInput): LpOutput {
   const rows: Record<string, string> = {};
   [...items].forEach((it, idx) => rows[it] = `r${idx}`);
 
-  // ================== 新增：电力模块特殊物品独立方程 ==================
-  const powerOnlyItems = new Set(['steam (high)', 'steam (super)', 'mechanical power']);
-  if (steamLowMode === 'internal') {
-    powerOnlyItems.add('steam (low)');
-  }
+  // ========== 1. 定义需要在电力模块单独处理的物品 ==========
+  const powerSpecialItems = new Set(['steam (high)', 'steam (super)', 'mechanical power']);
 
-  // 1. 电力模块内部约束（仅使用 powerActive 配方）
-  for (const it of powerOnlyItems) {
-    const expr = makeExpr(powerActive, powerVarNames, it);
-    if (expr) {
-      lp += ` ${rows[it]}_power: ${expr} = 0\n`;
-    }
-  }
+  // ========== 2. 辅助函数：合并多个表达式 ==========
+  const combineExprs = (...exprs: string[]): string => {
+    return exprs.filter(e => e.trim() !== '').join(' + ');
+  };
 
-  // 2. 全局约束（跳过上述特殊物品）
+  // ========== 3. 为每个物品生成约束 ==========
   for (const it of items) {
-    if (powerOnlyItems.has(it)) continue;  // 已独立处理，跳过
-
     if (it === 'research') continue;
-    if (it === 'steam (high)' || it === 'steam (super)') {
-      // 这些物品已经在上面的 powerOnlyItems 中处理，理论上不会进入这里，但保留防御
-      continue;
-    }
+
+    // 跳过那些已经在 powerSpecialItems 中的物品，后面单独处理
+    if (powerSpecialItems.has(it)) continue;
+
+    // 普通物品：全局平衡（所有配方一起）
     if (it === 'steam (low)') {
-      // 如果 steamLowMode === 'shared'，则该物品未加入 powerOnlyItems，需在这里正常处理
+      // 根据 steamLowMode 决定是内部平衡还是全局平衡（已在全局平衡中）
       if (steamLowMode === 'shared') {
         const expr = allExpr(it);
         if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
+      } else if (steamLowMode === 'internal') {
+        // 内部模式：由电力模块单独处理（已在 powerSpecialItems 中，不会走到这里）
+        // 但为了完整性，这里什么都不做（因为 internal 时 steam(low) 会在后面单独处理）
+        // 注意：下面会单独处理 powerSpecialItems 中的 steam(low)
       }
       continue;
     }
 
+    // 普通物品的全局平衡方程
     const expr = allExpr(it);
     const totalDr = demands.filter(d => d.item === it).reduce((s, d) => s + d.rate, 0);
     const supply = externalSupplyMap.get(it) || 0;
@@ -328,6 +326,33 @@ export function buildLp(input: LpInput): LpOutput {
       };
       if (!shouldConstrain(hasProducer, hasConsumer)) continue;
       if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
+    }
+  }
+
+  // ========== 4. 特殊物品的独立方程（电力模块 vs 主模块） ==========
+  // 扩展特殊物品：如果 steamLowMode === 'internal'，把 steam (low) 也加入
+  const allSpecialItems = new Set(powerSpecialItems);
+  if (steamLowMode === 'internal') {
+    allSpecialItems.add('steam (low)');
+  }
+
+  for (const it of allSpecialItems) {
+    // 主模块方程：仅使用非电力配方
+    const mainExpr = combineExprs(
+      makeExpr(mainActive, mainVarNames, it),
+      makeExpr(residentActive, residentVarNames, it),
+      makeExpr(stationActive, stationVarNames, it),
+      makeExpr(specialActive, specialVarNames, it),
+      makeExpr(tradeActive, tradeVarNames, it)
+    );
+    if (mainExpr) {
+      lp += ` ${rows[it]}_main: ${mainExpr} = 0\n`;
+    }
+
+    // 电力模块方程：仅使用电力配方
+    const powerExpr = makeExpr(powerActive, powerVarNames, it);
+    if (powerExpr) {
+      lp += ` ${rows[it]}_power: ${powerExpr} = 0\n`;
     }
   }
 

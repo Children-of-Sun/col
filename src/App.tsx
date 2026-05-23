@@ -34,13 +34,13 @@ const buildActiveRecipes = (
   SPACE_CARGO_ITEMS: Set<string>,
   t: (s: string, trans: any) => string
 ) => {
-  const { tradeParams, selectedTradeContractIds, tradeContracts, gameData, translation } = state;
+  const { tradeParams, selectedTradeContractIds, tradeContracts, gameData, translation, edictLevels, officeLevels, researchLevels, enableTradeModule } = state;
   let tradeActive: Recipe[] = [];
   let tradeUnityConsumptionTotal = 0;
   let tradeUnityDirectTotal = 0;
   let tradeUnityMaintenanceTotal = 0;
 
-  if (selectedTradeContractIds.length > 0 && tradeContracts.length > 0) {
+  if (enableTradeModule && selectedTradeContractIds.length > 0 && tradeContracts.length > 0) {
     const moduleSpeed = { S: 125, M: 250, L: 500 }[tradeParams.moduleSize] || 250;
     const moduleCapacity = tradeParams.baySlots <= 4 ? 800 : 1200;
     const getTravelInfo = (slots: number, fuelRaw: string, mode: string) => {
@@ -92,7 +92,28 @@ const buildActiveRecipes = (
     };
 
     const { travelTime, fuelPerTrip } = getTravelInfo(tradeParams.baySlots, tradeParams.fuelTypeRaw, tradeParams.travelMode);
-    const profitFactor = 1 + tradeParams.profitBonus / 100;
+
+    // 从办公等级计算利润加成和凝聚力减免（覆盖 tradeParams 中的手动值）
+    let profitBonusFromOffice = 0;
+    let unityDiscountFromOffice = 0;
+    if (gameData) {
+      const profitOffice = gameData.office.find(o => o.name === '合同利润率');
+      if (profitOffice) {
+        const idx = gameData.office.indexOf(profitOffice);
+        const lvl = officeLevels[idx] || 0;
+        profitBonusFromOffice = profitOffice.effectPerLevel * lvl * 100;
+      }
+      const unityOffice = gameData.office.find(o => o.name === '合同凝聚力消耗');
+      if (unityOffice) {
+        const idx = gameData.office.indexOf(unityOffice);
+        const lvl = officeLevels[idx] || 0;
+        unityDiscountFromOffice = -unityOffice.effectPerLevel * lvl * 100;
+      }
+    }
+    const finalProfitBonus = profitBonusFromOffice;
+    const finalUnityDiscount = unityDiscountFromOffice;
+    const profitFactor = 1 + finalProfitBonus / 100;
+    const unityDiscountFactor = 1 - finalUnityDiscount / 100;
     const newTradeRecipes: Recipe[] = [];
     for (const contract of tradeContracts) {
       if (!selectedTradeContractIds.includes(contract.id)) continue;
@@ -110,8 +131,8 @@ const buildActiveRecipes = (
       const perMinMaintI = maintI / totalTime;
       const perMinMaintII = maintII / totalTime;
       const perMinMaintIII = maintIII / totalTime;
-      const perMinUnityDirect = (perMinBuy / 100) * (contract.unity_per_100_bought || 0);
-      const perMinUnityMaintenance = contract.unity_per_month || 0; // 已是每分钟，仅用于显示
+      const perMinUnityDirect = (perMinBuy / 100) * (contract.unity_per_100_bought || 0) * unityDiscountFactor;
+      const perMinUnityMaintenance = (contract.unity_per_month || 0) * unityDiscountFactor;
 
       // 累加消耗（直接用于显示，维持不参与求解）
       tradeUnityDirectTotal += perMinUnityDirect;
@@ -204,10 +225,29 @@ const buildActiveRecipes = (
 
   const modifiedActive = active.map(r => ({ ...r, inputs: { ...r.inputs }, outputs: { ...r.outputs }, upkeep: { ...r.upkeep } }));
 
+  // 计算太阳能额外加成
+  let solarBonusMultiplier = 1;
+  // 清洁面板法令
+  if (gameData) {
+    const cleanPanelEdict = gameData.edicts.find(e => e.name === '清洁面板');
+    if (cleanPanelEdict) {
+      const lvl = edictLevels[gameData.edicts.indexOf(cleanPanelEdict)] ?? -1;
+      if (lvl >= 0) solarBonusMultiplier *= (1 + cleanPanelEdict.effectPerLevel[lvl]);
+    }
+    // 研究太阳能发电
+    const solarResearch = gameData.research.find(r => r.name === '太阳能发电');
+    if (solarResearch) {
+      const lvl = researchLevels[gameData.research.indexOf(solarResearch)] || 0;
+      if (lvl > 0) solarBonusMultiplier *= (1 + solarResearch.effectPerLevel[0] * lvl);
+    }
+  }
+  // 最终太阳能效率 = 基础太阳能效率 * 加成
+  const finalSolarEfficiency = solarEfficiency * solarBonusMultiplier;
+
   // 应用太阳能效率
   modifiedActive.forEach(recipe => {
     if (recipe.isSolar && recipe.outputs['electricity']) {
-      recipe.outputs['electricity'] *= solarEfficiency;
+      recipe.outputs['electricity'] *= finalSolarEfficiency;
     }
   });
 
@@ -373,25 +413,76 @@ const buildActiveRecipes = (
     console.log('[维护废料] 示例配方:', modifiedActive.find(r => r.outputs['recyclables']));
     console.log('[废料生成示例]', modifiedActive.slice(0, 3).map(r => ({ name: r.name, outputs: r.outputs })));
 
-    // ========== 科技加成（仅影响 main/power 中的农场配方） ==========
+    // ========== 维护产量加成 ==========
+    let maintenanceOutputMultiplier = 1;
+    // 办公维修产量
+    const officeMaint = gameData?.office.find(o => o.name === '维修产量');
+    if (officeMaint) {
+      const lvl = officeLevels[gameData.office.indexOf(officeMaint)] || 0;
+      if (lvl > 0) maintenanceOutputMultiplier *= (1 + officeMaint.effectPerLevel * lvl);
+    }
+    // 研究维修产量
+    const researchMaint = gameData?.research.find(r => r.name === '维修产量');
+    if (researchMaint) {
+      const lvl = researchLevels[gameData.research.indexOf(researchMaint)] || 0;
+      if (lvl > 0) maintenanceOutputMultiplier *= (1 + researchMaint.effectPerLevel[0] * lvl);
+    }
+
+    // 对 modifiedActive 和 specialActive 中所有配方，如果输出了 maintenance i/ii/iii，则乘以乘数
+    const allRecipesForMaint = [...modifiedActive, ...specialActive];
+    allRecipesForMaint.forEach(r => {
+      if (r.outputs['maintenance i']) r.outputs['maintenance i'] *= maintenanceOutputMultiplier;
+      if (r.outputs['maintenance ii']) r.outputs['maintenance ii'] *= maintenanceOutputMultiplier;
+      if (r.outputs['maintenance iii']) r.outputs['maintenance iii'] *= maintenanceOutputMultiplier;
+    });
+
+    // ========== 农业产量加成 ==========
+    // 农业产量加成（乘数）
+    let farmOutputMultiplier = 1;
+    // 农业提振法令
+    const agriBoostEdict = gameData?.edicts.find(e => e.name === '农业提振');
+    if (agriBoostEdict) {
+      const lvl = edictLevels[gameData.edicts.indexOf(agriBoostEdict)] ?? -1;
+      if (lvl >= 0) farmOutputMultiplier *= (1 + agriBoostEdict.effectPerLevel[lvl]);
+    }
+    // 办公农作物产量
+    const officeCrop = gameData?.office.find(o => o.name === '农作物产量');
+    if (officeCrop) {
+      const lvl = officeLevels[gameData.office.indexOf(officeCrop)] || 0;
+      if (lvl > 0) farmOutputMultiplier *= (1 + officeCrop.effectPerLevel * lvl);
+    }
+    // 研究作物产量 - 第一个值
+    const researchCrop = gameData?.research.find(r => r.name === '作物产量');
+    let cropWaterMultiplier = 1; // 用于水的乘数（第二个值）
+    if (researchCrop) {
+      const lvl = researchLevels[gameData.research.indexOf(researchCrop)] || 0;
+      if (lvl > 0) {
+        farmOutputMultiplier *= (1 + researchCrop.effectPerLevel[0] * lvl);
+        cropWaterMultiplier *= (1 + researchCrop.effectPerLevel[1] * lvl);
+      }
+    }
+    // 节水器法令（影响农场水消耗和居民水需求，但居民部分已在居民模块处理）
+    const waterSaverEdict = gameData?.edicts.find(e => e.name === '节水器');
+    let farmWaterInputMultiplier = 1;
+    if (waterSaverEdict) {
+      const lvl = edictLevels[gameData.edicts.indexOf(waterSaverEdict)] ?? -1;
+      if (lvl >= 0) farmWaterInputMultiplier *= (1 - waterSaverEdict.effectPerLevel[lvl]);
+    }
+    // 组合农场水乘数（作物产量研究第二个效果 + 节水器法令，不包含定居点用水）
+    // 注意：定居点用水研究只影响居民用水（已在 calcResidentDemands 中处理），不影响农场
+    const totalFarmWaterMultiplier = farmWaterInputMultiplier * cropWaterMultiplier;
+
     modifiedActive.forEach(r => {
-      const researchLvls = [...state.researchLevels];
       if (r.buildingName.toLowerCase().includes('farm') || r.buildingId.toLowerCase().startsWith('farm')) {
-        const cropRes = currentGameData.research.find(res => res.name === '作物产量');
-        const cropLvl = cropRes ? (researchLvls[currentGameData.research.indexOf(cropRes)] || 0) : 0;
-        if (cropLvl > 0 && cropRes) {
-          const bonus = (cropRes.effectPerLevel[0] || 0) * cropLvl;
-          for (const k in r.outputs) {
-            if (k !== 'water') r.outputs[k] *= (1 + bonus);
+        // 应用产出加成（农业提振、办公农作物产量、研究作物产量第一个效果）
+        for (const k in r.outputs) {
+          if (k !== 'water') {
+            r.outputs[k] *= farmOutputMultiplier;
           }
         }
-        const waterRes = currentGameData.research.find(res => res.name === '定居点用水');
-        const waterLvl = waterRes ? (researchLvls[currentGameData.research.indexOf(waterRes)] || 0) : 0;
-        if (waterLvl > 0 && waterRes) {
-          const waterBonus = (waterRes.effectPerLevel[0] || 0) * waterLvl;
-          if (r.inputs['water']) {
-            r.inputs['water'] *= (1 + waterBonus);
-          }
+        // 应用农场水消耗修正（作物产量研究第二个效果、节水器法令）
+        if (r.inputs['water']) {
+          r.inputs['water'] *= totalFarmWaterMultiplier;
         }
       }
     });
@@ -618,7 +709,7 @@ export default function App() {
   const [powerRecipeModalOpen, setPowerRecipeModalOpen] = useState(false);
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [excludeModalOpen, setExcludeModalOpen] = useState(false);
-  const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'resident' | 'tech' | 'edict' | 'office' | 'trade'>('main');
+  const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'resident' | 'edict' | 'office' | 'tech'>('main');
 
   useEffect(() => {
     window.__store = useStore;
@@ -1212,11 +1303,11 @@ export default function App() {
             <button className={`tab-button ${rightTab === 'main' ? 'active' : ''}`} onClick={() => setRightTab('main')}>🏗️ 主模块</button>
             <button className={`tab-button ${rightTab === 'power' ? 'active' : ''}`} onClick={() => setRightTab('power')}>⚡ 电力模块</button>
             <button className={`tab-button ${rightTab === 'stationStatueLab' ? 'active' : ''}`} onClick={() => setRightTab('stationStatueLab')}>🚀 空间站·雕像·研究所</button>
+            <button className={`tab-button ${rightTab === 'trade' ? 'active' : ''}`} onClick={() => setRightTab('trade')}>🚢 贸易模块</button>
             <button className={`tab-button ${rightTab === 'resident' ? 'active' : ''}`} onClick={() => setRightTab('resident')}>🏠 居民</button>
-            <button className={`tab-button ${rightTab === 'tech' ? 'active' : ''}`} onClick={() => setRightTab('tech')}>🔬 科技</button>
             <button className={`tab-button ${rightTab === 'edict' ? 'active' : ''}`} onClick={() => setRightTab('edict')}>📜 法令</button>
             <button className={`tab-button ${rightTab === 'office' ? 'active' : ''}`} onClick={() => setRightTab('office')}>🏢 办公</button>
-            <button className={`tab-button ${rightTab === 'trade' ? 'active' : ''}`} onClick={() => setRightTab('trade')}>🚢 贸易模块</button>
+            <button className={`tab-button ${rightTab === 'tech' ? 'active' : ''}`} onClick={() => setRightTab('tech')}>🔬 科技</button>
           </div>
           <div className="tab-content">
             {rightTab === 'main' && <MainLevelPanel onOpenLevelModal={() => setLevelModalOpen(true)} onOpenRecipeModal={() => setRecipeModalOpen(true)} />}
@@ -1228,11 +1319,11 @@ export default function App() {
                 <LabPanel />
               </div>
             )}
+            {rightTab === 'trade' && <TradePanel />}
             {rightTab === 'resident' && <ResidentPanel />}
-            {rightTab === 'tech' && <TechPanel />}
             {rightTab === 'edict' && <EdictPanel />}
             {rightTab === 'office' && <OfficePanel />}
-            {rightTab === 'trade' && <TradePanel />}
+            {rightTab === 'tech' && <TechPanel />}
           </div>
         </div>
       </div>

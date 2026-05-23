@@ -88,7 +88,7 @@
     { "name": "农作物产量", "effectPerLevel": 0.02, "maxLevel": 150, "targetCategory": [] },
     { "name": "回收效率", "effectPerLevel": 0.01, "maxLevel": 15, "targetCategory": "recycle" },
     { "name": "食物消耗", "effectPerLevel": -0.02, "maxLevel": 15, "targetCategory": "food" },
-    { "name": "商品与服务消耗", "effectPerLevel": -0.02, "maxLevel": 25, "targetCategory": ["consumer", "medical"] },
+    { "name": "商品与服务消耗", "effectPerLevel": -0.02, "maxLevel": 25, "targetCategory": ["consumer", "medical","utility"] },
     { "name": "来自定居点的凝聚力", "effectPerLevel": 0.025, "maxLevel": 14, "targetCategory": "unity" },
     { "name": "合同利润率", "effectPerLevel": 0.02, "maxLevel": 15, "targetCategory": [] },
     { "name": "合同凝聚力消耗", "effectPerLevel": -0.025, "maxLevel": 20, "targetCategory": [] }

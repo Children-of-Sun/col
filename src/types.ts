@@ -228,6 +228,7 @@ export interface StoreState {
   tradeParams: TradeParams;
   selectedTradeContractIds: string[];
   selectedTradeRecipes: Recipe[];
+  enableTradeModule: boolean;
 
   solarEfficiency: number;
 
@@ -303,6 +304,7 @@ export interface StoreState {
   setTradeParams: (params: Partial<TradeParams>) => void;
   setSelectedTradeContractIds: (ids: string[]) => void;
   setSelectedTradeRecipes: (recipes: Recipe[]) => void;
+  setEnableTradeModule: (value: boolean) => void;
   setSolarEfficiency: (value: number) => void;
   setOptimizationMode: (mode: StoreState['optimizationMode']) => void;
   setCustomWeights: (weights: Partial<StoreState['customWeights']>) => void;

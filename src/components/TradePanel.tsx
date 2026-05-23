@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useStore } from '../stores';
 import { TradeContract, Recipe } from '../types';
 import { t, isOreContract } from '../utils';
-import { Btn, ModalShell, SearchInput } from './UI';
+import { Btn, ModalShell, SearchInput, Checkbox } from './UI';
 
 const MODULE_SPEEDS = { S: 125, M: 250, L: 500 };
 
@@ -53,6 +53,9 @@ export const TradePanel: React.FC = () => {
   const setTradeParams = useStore(s => s.setTradeParams);
   const selectedTradeContractIds = useStore(s => s.selectedTradeContractIds);
   const setSelectedTradeContractIds = useStore(s => s.setSelectedTradeContractIds);
+  const enableTradeModule = useStore(s => s.enableTradeModule);
+  const setEnableTradeModule = useStore(s => s.setEnableTradeModule);
+  const officeLevels = useStore(s => s.officeLevels);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<Set<string>>(new Set(selectedTradeContractIds));
@@ -61,15 +64,35 @@ export const TradePanel: React.FC = () => {
   const moduleSize = tradeParams.moduleSize;
   const fuelTypeRaw = tradeParams.fuelTypeRaw;
   const travelMode = tradeParams.travelMode;
-  const profitBonus = tradeParams.profitBonus;
-  const unityDiscount = tradeParams.unityDiscount;
 
   const setBaySlots = (v: number) => setTradeParams({ baySlots: v });
   const setModuleSize = (v: 'S'|'M'|'L') => setTradeParams({ moduleSize: v });
   const setFuelTypeRaw = (v: string) => setTradeParams({ fuelTypeRaw: v });
   const setTravelMode = (v: 'normal'|'special') => setTradeParams({ travelMode: v });
-  const setProfitBonus = (v: number) => setTradeParams({ profitBonus: v });
-  const setUnityDiscount = (v: number) => setTradeParams({ unityDiscount: v });
+
+  // 从办公等级计算利润加成和凝聚力减免
+  const profitBonusFromOffice = useMemo(() => {
+    if (!gameData) return 0;
+    const profitOffice = gameData.office.find(o => o.name === '合同利润率');
+    if (profitOffice) {
+      const idx = gameData.office.indexOf(profitOffice);
+      const lvl = officeLevels[idx] || 0;
+      return profitOffice.effectPerLevel * lvl * 100; // effectPerLevel 通常是 0.02 -> 2%
+    }
+    return 0;
+  }, [gameData, officeLevels]);
+
+  const unityDiscountFromOffice = useMemo(() => {
+    if (!gameData) return 0;
+    const unityOffice = gameData.office.find(o => o.name === '合同凝聚力消耗');
+    if (unityOffice) {
+      const idx = gameData.office.indexOf(unityOffice);
+      const lvl = officeLevels[idx] || 0;
+      // effectPerLevel 为 -0.025，乘以 -1 得正百分比
+      return -unityOffice.effectPerLevel * lvl * 100;
+    }
+    return 0;
+  }, [gameData, officeLevels]);
 
   const availableFuels = useMemo(() => {
     if (gameData?.ship_fuel_configs) {
@@ -119,7 +142,7 @@ export const TradePanel: React.FC = () => {
     return { buy: bestBuy, sell: bestSell, m: bestM, n: bestN, loadTime: bestLoadTime };
   };
 
-  const buildTradeRecipe = (contract: TradeContract, result: Omit<TradeResult, 'contract'>): Recipe | null => {
+  const buildTradeRecipe = (contract: TradeContract, result: Omit<TradeResult, 'contract'>, unityDiscountFactor: number): Recipe | null => {
     const { buyAmount, sellAmount, totalTime, fuelPerTrip, workers, electricity, maintI, maintII, maintIII } = result;
     const perMinBuy = buyAmount / totalTime;
     const perMinSell = sellAmount / totalTime;
@@ -130,7 +153,8 @@ export const TradePanel: React.FC = () => {
     const perMinMaintII = maintII / totalTime;
     const perMinMaintIII = maintIII / totalTime;
     const unityPer100 = contract.unity_per_100_bought || 0;
-    const perMinUnity = (perMinBuy / 100) * unityPer100;
+    const perMinUnityDirect = (perMinBuy / 100) * unityPer100 * unityDiscountFactor;
+    const perMinUnityMaintenance = (contract.unity_per_month || 0) * unityDiscountFactor;
 
     const recipe: Recipe = {
       id: `trade_${contract.id}`,
@@ -153,7 +177,7 @@ export const TradePanel: React.FC = () => {
         'maintenance i': perMinMaintI,
         'maintenance ii': perMinMaintII,
         'maintenance iii': perMinMaintIII,
-        '凝聚力': perMinUnity,
+        '凝聚力': perMinUnityDirect,
       },
       powerMultiplier: 1,
       workers: perMinWorkers,
@@ -161,6 +185,8 @@ export const TradePanel: React.FC = () => {
       isHidden: false,
       module: 'trade',
       tradeUnityPer100: unityPer100,
+      tradeUnityDirect: perMinUnityDirect,
+      tradeUnityMaintenance: perMinUnityMaintenance,
     };
     return recipe;
   };
@@ -170,8 +196,8 @@ export const TradePanel: React.FC = () => {
     const moduleSpeed = MODULE_SPEEDS[moduleSize];
     const moduleCapacity = getModuleCapacity(baySlots);
     const { travelTime, fuelPerTrip } = getTravelInfo(baySlots, fuelTypeRaw, travelMode);
-    const profitFactor = 1 + profitBonus / 100;
-    const unityDiscountFactor = 1 - unityDiscount / 100;
+    const profitFactor = 1 + profitBonusFromOffice / 100;
+    const unityDiscountFactor = 1 - unityDiscountFromOffice / 100;
 
     let results = tradeContracts.map(contract => {
       const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
@@ -210,7 +236,7 @@ export const TradePanel: React.FC = () => {
       });
     }
     return results;
-  }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonus, unityDiscount, translation]);
+  }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusFromOffice, unityDiscountFromOffice, translation]);
 
   const openModal = () => {
     setTempSelectedIds(new Set(selectedTradeContractIds));
@@ -220,10 +246,11 @@ export const TradePanel: React.FC = () => {
   const saveSelection = () => {
     const newIds = Array.from(tempSelectedIds);
     setSelectedTradeContractIds(newIds);
+    const unityDiscountFactor = 1 - unityDiscountFromOffice / 100;
     const newRecipes: Recipe[] = [];
     for (const result of allContractResults) {
       if (tempSelectedIds.has(result.contract.id)) {
-        const recipe = buildTradeRecipe(result.contract, result);
+        const recipe = buildTradeRecipe(result.contract, result, unityDiscountFactor);
         if (recipe) newRecipes.push(recipe);
       }
     }
@@ -238,6 +265,14 @@ export const TradePanel: React.FC = () => {
   return (
     <div className="section">
       <h3>🚢 贸易模块</h3>
+      <div className="flex-row" style={{ marginBottom: 10 }}>
+        <Checkbox
+          label="启用贸易模块（全局）"
+          checked={enableTradeModule}
+          onChange={setEnableTradeModule}
+        />
+        <span className="hint">关闭后所有贸易合同暂不参与求解，已选配方不受影响</span>
+      </div>
       <div className="flex-row" style={{ flexWrap: 'wrap', gap: '15px', marginBottom: '15px' }}>
         <div>
           <label>码头槽位: </label>
@@ -265,14 +300,10 @@ export const TradePanel: React.FC = () => {
             <option value="special">{t('特殊', translation)}</option>
           </select>
         </div>
-        <div>
-          <label>{t('利润加成', translation)} (%): </label>
-          <input type="number" value={profitBonus} min={0} max={100} step={1} onChange={e => setProfitBonus(Number(e.target.value))} style={{ width: 70 }} />
-        </div>
-        <div>
-          <label>{t('维护减免', translation)} (%): </label>
-          <input type="number" value={unityDiscount} min={0} max={100} step={1} onChange={e => setUnityDiscount(Number(e.target.value))} style={{ width: 70 }} />
-        </div>
+        <span style={{ display: 'inline-flex', gap: '15px' }}>
+          <span>📈 合同利润率: +{profitBonusFromOffice.toFixed(0)}%</span>
+          <span>💎 合同凝聚力减免: {unityDiscountFromOffice.toFixed(0)}%</span>
+        </span>
       </div>
 
       <div className="stat" style={{ marginBottom: 10 }}>
