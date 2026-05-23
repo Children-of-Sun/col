@@ -31,27 +31,12 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
   const powerSelectedLevel = useStore(s => s.powerSelectedLevel);
   const setPowerEnabled = useStore(s => s.setPowerEnabled);
   const setPowerLevel = useStore(s => s.setPowerLevel);
-  const setRecipeEnabled = useStore(s => s.setRecipeEnabled);
-  const recipes = useStore(s => s.recipes);
   const translation = useStore(s => s.translation);
   const dataLoaded = useStore(s => s.dataLoaded);
   const steamLowMode = useStore(s => s.steamLowMode);
   const setSteamLowMode = useStore(s => s.setSteamLowMode);
   const solarEfficiency = useStore(s => s.solarEfficiency);
   const setSolarEfficiency = useStore(s => s.setSolarEfficiency);
-
-  const syncRecipes = (seriesName: string, enabled: boolean, level: number) => {
-    const series = powerSeriesList.find(ps => ps.name === seriesName);
-    if (!series) return;
-    const levelEntry = series.levels.find(lv => lv.level === level);
-    if (!levelEntry) return;
-    if (!enabled) {
-      levelEntry.recipeIds.forEach(rid => {
-        const recipe = recipes.find(r => r.id === rid && r.module === 'power');
-        if (recipe) setRecipeEnabled(recipe.id, false);
-      });
-    }
-  };
 
   return (
     <div className="section">
@@ -60,9 +45,25 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
         {powerSeriesList.length === 0 ? <span className="hint">无电力相关建筑</span> :
           powerSeriesList.map(ps => (
             <div className="power-item" key={ps.name}>
-              <input type="checkbox" checked={powerEnabled[ps.name] !== false} onChange={e => { const checked = e.target.checked; setPowerEnabled(ps.name, checked); if (checked) { const maxLv = ps.levels[ps.levels.length - 1].level; setPowerLevel(ps.name, maxLv); } else { syncRecipes(ps.name, false, powerSelectedLevel[ps.name] || ps.levels[0].level); } }} />
+              <input
+                type="checkbox"
+                checked={powerEnabled[ps.name] !== false}
+                onChange={e => {
+                  const checked = e.target.checked;
+                  setPowerEnabled(ps.name, checked);
+                  // 开启时自动设置为最高等级，关闭时不清除配方状态
+                  if (checked) {
+                    const maxLv = ps.levels[ps.levels.length - 1].level;
+                    setPowerLevel(ps.name, maxLv);
+                  }
+                }}
+              />
               <span>{t(ps.name, translation)}: </span>
-              <Select value={powerSelectedLevel[ps.name] || ps.levels[ps.levels.length - 1].level} options={ps.levels.map(lv => ({ value: lv.level, label: `Lv${lv.level}` }))} onChange={v => { const lv = parseInt(v); setPowerLevel(ps.name, lv); if (!powerEnabled[ps.name]) setPowerEnabled(ps.name, true); }} />
+              <Select
+                value={powerSelectedLevel[ps.name] || ps.levels[ps.levels.length - 1].level}
+                options={ps.levels.map(lv => ({ value: lv.level, label: `Lv${lv.level}` }))}
+                onChange={v => { const lv = parseInt(v); setPowerLevel(ps.name, lv); if (!powerEnabled[ps.name]) setPowerEnabled(ps.name, true); }}
+              />
             </div>
           ))}
       </div>

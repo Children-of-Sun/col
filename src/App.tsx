@@ -470,23 +470,24 @@ const buildActiveRecipes = (
     unityProduction = result.unityProduction;
     unityConsumption = result.unityConsumption;
 
-    const residentWasteSupplies = calcResidentWaste(
-      currentGameData,
-      residentDemands,
-      recycleRate
-    ).map(w => ({ item: w.item, rate: w.rate }));
-
-    console.log('[居民废料明细]', residentWasteSupplies);
-    allExternalSupplies = [...residentWasteSupplies];
-
+    // 居民需求添加到 inputs
     residentDemands.forEach(d => {
       residentRecipe.inputs[d.item] = d.rate;
     });
 
-    residentWasteSupplies.forEach(w => {
-      residentRecipe.outputs[w.item] = w.rate;
+    // 计算居民产生的废料（包括可回收和不可回收）
+    const residentWastes = calcResidentWaste(
+      currentGameData,
+      residentDemands,
+      recycleRate
+    );
+    console.log('[居民废料明细]', residentWastes);
+    // 将废料添加到 outputs
+    residentWastes.forEach(w => {
+      residentRecipe.outputs[w.item] = (residentRecipe.outputs[w.item] || 0) + w.rate;
     });
 
+    // 人口固定废物（例如 waste）
     const popWaste = currentGameData.populationWaste;
     if (popWaste) {
       const wasteAmount = popWaste.ratePerPop * state.population;

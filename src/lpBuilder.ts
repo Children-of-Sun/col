@@ -262,17 +262,33 @@ export function buildLp(input: LpInput): LpOutput {
   const rows: Record<string, string> = {};
   [...items].forEach((it, idx) => rows[it] = `r${idx}`);
 
-  // 核心约束生成（修复语法错误）
+  // ================== 新增：电力模块特殊物品独立方程 ==================
+  const powerOnlyItems = new Set(['steam (high)', 'steam (super)', 'mechanical power']);
+  if (steamLowMode === 'internal') {
+    powerOnlyItems.add('steam (low)');
+  }
+
+  // 1. 电力模块内部约束（仅使用 powerActive 配方）
+  for (const it of powerOnlyItems) {
+    const expr = makeExpr(powerActive, powerVarNames, it);
+    if (expr) {
+      lp += ` ${rows[it]}_power: ${expr} = 0\n`;
+    }
+  }
+
+  // 2. 全局约束（跳过上述特殊物品）
   for (const it of items) {
+    if (powerOnlyItems.has(it)) continue;  // 已独立处理，跳过
+
     if (it === 'research') continue;
     if (it === 'steam (high)' || it === 'steam (super)') {
-      const expr = allExpr(it);
-      if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
+      // 这些物品已经在上面的 powerOnlyItems 中处理，理论上不会进入这里，但保留防御
       continue;
     }
     if (it === 'steam (low)') {
-      if (steamLowMode === 'internal') {
-        const expr = makeExpr(powerActive, powerVarNames, it);
+      // 如果 steamLowMode === 'shared'，则该物品未加入 powerOnlyItems，需在这里正常处理
+      if (steamLowMode === 'shared') {
+        const expr = allExpr(it);
         if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
       }
       continue;
@@ -286,7 +302,6 @@ export function buildLp(input: LpInput): LpOutput {
       const effectiveDr = Math.max(0, totalDr - supply);
       if (expr) {
         lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-        // 对于非连续模式（包括 milp），始终添加上限约束（即使 redundancy=0）
         if (integerMode !== 'continuous') {
           const upperBound = effectiveDr * (1 + redundancy);
           lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
@@ -296,7 +311,7 @@ export function buildLp(input: LpInput): LpOutput {
       }
     } else if (supply > 0) {
       if (!consumers.has(it)) {
-        missing.push(it);
+        if (!missing.includes(it)) missing.push(it);
         continue;
       }
       if (expr) lp += ` ${rows[it]}: ${expr} = ${-supply}\n`;
@@ -330,7 +345,5 @@ export function buildLp(input: LpInput): LpOutput {
       lp += '\nINTEGER\n ' + integerVars.join(' ') + '\n';
     }
   }
-  console.log('DEBUG after INTEGER addition, lp ends with:', lp.slice(-1000));
-
   return { lpString: lp + 'END\n', varNames, missing };
 }

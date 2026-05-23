@@ -313,19 +313,31 @@ export function calcResidentWaste(
     }
   }
 
-  const result: { item: string; rate: number }[] = [];
+  // 使用 Map 合并所有废料，避免重复
+  const wasteMap = new Map<string, number>();
+
   // 前两个废料（Recyclables, Biomass）不乘回收率
   for (let i = 0; i < 2; i++) {
-    if (wasteArr[i] > 0) result.push({ item: data.wasteNames[i].toLowerCase(), rate: wasteArr[i] });
+    if (wasteArr[i] > 0) {
+      const key = data.wasteNames[i].toLowerCase();
+      wasteMap.set(key, (wasteMap.get(key) || 0) + wasteArr[i]);
+    }
   }
   // 索引 >=2 的可回收废料乘以回收率
   for (let i = 2; i < wasteArr.length; i++) {
-    if (wasteArr[i] > 0) result.push({ item: data.wasteNames[i].toLowerCase(), rate: wasteArr[i] * recycleRate });
+    if (wasteArr[i] > 0) {
+      const key = data.wasteNames[i].toLowerCase();
+      wasteMap.set(key, (wasteMap.get(key) || 0) + wasteArr[i] * recycleRate);
+    }
   }
+  // 添加 extraWaste（已经累加过系数，不需要再乘回收率）
   for (const [item, rate] of Object.entries(extraWasteMap)) {
-    result.push({ item: item.toLowerCase(), rate });
+    const key = item.toLowerCase();
+    wasteMap.set(key, (wasteMap.get(key) || 0) + rate);
   }
-  return result;
+
+  // 转换为数组返回
+  return Array.from(wasteMap.entries()).map(([item, rate]) => ({ item, rate }));
 }
 
 export function getMaintenanceWasteMap(data: GameData) {
