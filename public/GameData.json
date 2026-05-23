@@ -54,10 +54,14 @@
     { "name": "Housing", "multipliers": {}, "unityMultiplierConditions": [] },
     { "name": "Housing II", "multipliers": { "Electricity": 1.1, "Water": 1.05 }, "unityMultiplierConditions": [{ "requires": ["Electricity", "Water"], "multiplier": 1.5 }] },
     { "name": "Housing III", "multipliers": { "Electricity": 1.2, "Water": 1.1, "Household goods": 1.05 }, "unityMultiplierConditions": [
+      { "requires": ["Electricity", "Water"], "multiplier": 1.5 },
       { "requires": ["Electricity", "Water", "Household goods"], "multiplier": 1.75 },
       { "requires": ["Electricity", "Water", "Household goods", "Household appliances"], "multiplier": 2.0 }
     ]},
-    { "name": "Housing IV", "multipliers": { "电": 1.4, "Water": 1.2, "Household goods": 1.1, "Household appliances": 1.1, "奢侈品": 1.1 }, "unityMultiplierConditions": [
+    { "name": "Housing IV", "multipliers": { "电": 1.4, "Water": 1.2, "Household goods": 1.1, "Household appliances": 1.1, "Luxury goods": 1.1 }, "unityMultiplierConditions": [
+      { "requires": ["Electricity", "Water"], "multiplier": 1.5 },
+      { "requires": ["Electricity", "Water", "Household goods"], "multiplier": 1.75 },
+      { "requires": ["Electricity", "Water", "Household goods", "Household appliances"], "multiplier": 2.0 },
       { "requires": ["Electricity", "Water", "Household goods", "Household appliances", "Consumer Electronics"], "multiplier": 2.25 }
     ]}
   ],

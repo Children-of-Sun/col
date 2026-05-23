@@ -42,10 +42,14 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
       outputs[item] = qty * machineCount;
     }
     for (const [item, qty] of Object.entries(recipe.upkeep)) {
+      let reducedQty = qty * machineCount;
+      if (item.startsWith('maintenance')) {
+        reducedQty *= (1 - reductionFactor);
+      }
       if (item === '凝聚力') {
-        cohesion = qty * machineCount;
+        cohesion = reducedQty;
       } else {
-        inputs[item] = (inputs[item] || 0) + qty * machineCount;
+        inputs[item] = (inputs[item] || 0) + reducedQty;
       }
     }
     return { inputs, outputs, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount, cohesion };
@@ -83,6 +87,11 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
     if (item === 'electricity') electricity += reducedQty;
     if (item === 'computing') computing += reducedQty;
     if (item === '人力') workers += reducedQty;
+  }
+  // 如果是居民模块，将 inputs 中的电力和算力同时计入 electricity/computing 字段（用于专门列显示）
+  if (recipe.module === 'resident') {
+    if (inputs['electricity']) electricity += inputs['electricity'];
+    if (inputs['computing']) computing += inputs['computing'];
   }
   return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount };
 }
@@ -357,7 +366,25 @@ export const Results: React.FC = () => {
     return map;
   }, [result, solverVarNames]);
 
-  const reductionFactor = getMaintenanceReduction(statueCount);
+  const gameData = useStore(s => s.gameData);
+  const edictLevels = useStore(s => s.edictLevels);
+
+  // 计算 maintenance reduction（与 buildActiveRecipes 一致）
+  const reductionFactor = useMemo(() => {
+    let reduction = getMaintenanceReduction(statueCount);
+    if (gameData) {
+      const edictReduce = gameData.edicts.find(e => e.name === '减少维护');
+      if (edictReduce) {
+        const lvl = edictLevels[gameData.edicts.indexOf(edictReduce)] ?? -1;
+        if (lvl >= 0) {
+          reduction += edictReduce.effectPerLevel[lvl];
+        }
+      }
+      reduction = Math.min(reduction, 1);
+    }
+    return reduction;
+  }, [statueCount, gameData, edictLevels]);
+
   const recipeData = useMemo(() => {
     if (!solverActive.length || !Object.keys(varValues).length) return [];
     return solverActive.map((recipe, idx) => {

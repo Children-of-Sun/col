@@ -135,18 +135,41 @@ export function calcResidentDemands(
 
   let catMods: Record<string, number> = {};
   let itemMods: Record<string, number> = {};
+  let itemUnityMods: Record<string, number> = {}; // 特定物品的凝聚力乘数
+
+  // 定义需要特殊处理的法令名称
+  const unityBonusEdicts = ['更多家具用品', '更多家电', '更多消费电子产品'];
+
+  let edictUnityProduction = 0;     // 法令提供的正凝聚力
+  let unityConsumptionFromEdicts = 0; // 法令消耗的凝聚力（绝对值）
 
   data.edicts.forEach((e, i) => {
     const lvl = edictLevels[i] ?? -1;
     if (lvl >= 0 && lvl < e.effectPerLevel.length) {
       const eff = e.effectPerLevel[lvl];
+      const unityValue = e.unityPerLevel[lvl] || 0;
+
       if (e.targetCategory && e.targetCategory !== 'none' && !e.itemEffect) {
         catMods[e.targetCategory] = (catMods[e.targetCategory] || 1) * (1 - eff);
       }
       if (e.itemEffect) {
         e.itemEffect.forEach(item => {
+          // 需求减少效果始终应用
           itemMods[item] = (itemMods[item] || 1) * (1 - eff);
+          // 只有特定法令才应用凝聚力加成
+          if (unityBonusEdicts.includes(e.name)) {
+            itemUnityMods[item] = (itemUnityMods[item] || 1) * (1 + unityValue);
+          }
         });
+      }
+      // 凝聚力分为产量（正值）和消耗（负值）
+      if (unityValue > 0) {
+        // 三个特殊法令的凝聚力已通过 itemUnityMods 处理，不在此累加
+        if (!unityBonusEdicts.includes(e.name)) {
+          edictUnityProduction += unityValue;
+        }
+      } else if (unityValue < 0) {
+        unityConsumptionFromEdicts += -unityValue;
       }
     }
   });
@@ -211,7 +234,8 @@ export function calcResidentDemands(
         demand = demand / (numActiveGroups * numFoodsInThisGroup);
         demand *= mod;
         demands.push({ item: name.toLowerCase(), rate: demand });
-        foodUnity += svc.unity;
+        const unityMult = itemUnityMods[name] || 1;
+        foodUnity += svc.unity * unityMult;
       }
     }
   }
@@ -224,7 +248,8 @@ export function calcResidentDemands(
     if (itemMods[selectedMedical]) mod *= itemMods[selectedMedical];
     demand *= mod;
     demands.push({ item: selectedMedical.toLowerCase(), rate: demand });
-    nonFoodUnity += svc.unity;
+    const unityMult = itemUnityMods[selectedMedical] || 1;
+    nonFoodUnity += svc.unity * unityMult;
   }
 
   for (const [name, svc] of Object.entries(data.services)) {
@@ -236,12 +261,20 @@ export function calcResidentDemands(
     if (itemMods[name]) mod *= itemMods[name];
     demand *= mod;
     demands.push({ item: name.toLowerCase(), rate: demand });
-    nonFoodUnity += svc.unity;
+    const unityMult = itemUnityMods[name] || 1;
+    nonFoodUnity += svc.unity * unityMult;
   }
 
+  // 计算住房凝聚力乘数（只有满足所需服务均被启用时才生效）
   let housingMult = 1;
   for (const cond of housing.unityMultiplierConditions) {
-    const satisfied = cond.requires.every(r => data.services[r] !== undefined);
+    const satisfied = cond.requires.every(req => {
+      // 检查该服务是否被用户启用（食物、医疗、其他）
+      if (selectedFoods.has(req)) return true;
+      if (selectedMedical === req) return true;
+      if (selectedOthers.has(req)) return true;
+      return false;
+    });
     if (satisfied && cond.multiplier > housingMult) {
       housingMult = cond.multiplier;
     }
@@ -267,19 +300,11 @@ export function calcResidentDemands(
     }
   });
 
-  let edictUnity = 0;
-  data.edicts.forEach((e, i) => {
-    const lvl = edictLevels[i] ?? -1;
-    if (lvl >= 0 && e.unityPerLevel[lvl] !== undefined) {
-      edictUnity += e.unityPerLevel[lvl];
-    }
-  });
-
   const stationBonus = stationLevel * 0.05;
 
-  const cohesion = ((nonFoodUnity + 1) * housingMult + foodUnity) * (1 + unityPct) + stationBonus + edictUnity;
+  const unityProduction = ((nonFoodUnity + 1) * housingMult + foodUnity) * (1 + unityPct) + stationBonus + edictUnityProduction;
 
-  return { demands, unityProduction: cohesion, unityConsumption: 0, recycleRate };
+  return { demands, unityProduction, unityConsumption: unityConsumptionFromEdicts, recycleRate };
 }
 
 export function calcResidentWaste(

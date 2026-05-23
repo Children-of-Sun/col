@@ -553,8 +553,8 @@ const buildActiveRecipes = (
 
   const stationActive = [stationRecipe];
 
-  // 将贸易凝聚力消耗加到居民凝聚力消耗上
-  const totalUnityConsumption = unityConsumption + tradeUnityConsumptionTotal;
+  // 法令消耗已包含在 calcResidentDemands 返回的 unityConsumption 中
+  const totalUnityConsumption = unityConsumption;
 
   return {
     mainActive,
@@ -744,7 +744,7 @@ export default function App() {
   };
 
   // solveLp：基础 LP 求解
-  const solveLp = async (lpString: string, varNames: string[], integerMode?: string, tradeActive?: Recipe[], edictUnityConsumption?: number) => {
+  const solveLp = async (lpString: string, varNames: string[], integerMode?: string, tradeActive?: Recipe[], fixedUnityConsumption?: number, researchCohesionTotal?: number) => {
     const result = await runLpSolver(lpString, varNames, integerMode);
     console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
     setResult(result);
@@ -763,7 +763,7 @@ export default function App() {
         });
         setCohesionTradeDirect(actualDirect);
         setCohesionTradeMaintenance(actualMaintenance);
-        setUnityConsumption(actualDirect + actualMaintenance + (edictUnityConsumption || 0));
+        setUnityConsumption(actualDirect + actualMaintenance + (fixedUnityConsumption || 0) + (researchCohesionTotal || 0));
       }
     } else if (result?.Status === 'Infeasible') {
       const prev = useStore.getState().diagnostic;
@@ -1044,25 +1044,18 @@ export default function App() {
       fixedUnityProduction, fixedUnityConsumption, tradeUnityConsumptionTotal,
       tradeUnityDirectTotal, tradeUnityMaintenanceTotal, positiveDemands } = result;
 
-    // 计算法令消耗
-    let edictUnityConsumption = 0;
-    const currentGameData = s.gameData;
-    if (currentGameData) {
-      for (let i = 0; i < currentGameData.edicts.length; i++) {
-        const lvl = s.edictLevels[i] ?? -1;
-        if (lvl >= 0) {
-          const unity = currentGameData.edicts[i].unityPerLevel[lvl] || 0;
-          if (unity < 0) edictUnityConsumption += -unity; // 消耗取正值
-        }
-      }
-    }
+    // 计算研究所凝聚力消耗（从 specialActive 中汇总）
+    const researchCohesionTotal = specialActive
+      .filter(r => (r as any).researchCohesion)
+      .reduce((sum, r) => sum + ((r as any).researchCohesion || 0), 0);
 
-    // 存储三项消耗到 store
+    // 法令消耗已包含在 fixedUnityConsumption 中
+    // 存储各项消耗到 store
     setCohesionTradeDirect(tradeUnityDirectTotal);
     setCohesionTradeMaintenance(tradeUnityMaintenanceTotal);
-    setCohesionEdict(edictUnityConsumption);
+    setCohesionEdict(fixedUnityConsumption);
     setUnityProduction(fixedUnityProduction);
-    setUnityConsumption(tradeUnityDirectTotal + tradeUnityMaintenanceTotal + edictUnityConsumption);
+    setUnityConsumption(fixedUnityConsumption + tradeUnityDirectTotal + tradeUnityMaintenanceTotal + researchCohesionTotal);
     setExternalSupplies(allExternalSupplies);
     useStore.getState().setSolverFixedDemands(getFixedDemands().filter(d => d.rate > 0));
 
@@ -1134,7 +1127,7 @@ export default function App() {
     try {
       if (integerMode === 'continuous' || integerMode === 'milp') {
         // 直接 LP 求解（milp 模式由 HiGHS 自动处理整数）
-        await solveLp(lpString, varNames, integerMode, tradeActive, edictUnityConsumption);
+        await solveLp(lpString, varNames, integerMode, tradeActive, fixedUnityConsumption, researchCohesionTotal);
         if (DEBUG) {
           const result = useStore.getState().result;
           if (result?.Status === 'Optimal') {
