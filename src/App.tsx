@@ -643,7 +643,9 @@ const buildActiveRecipes = (
 
   let mainActive = modifiedActive.filter(r => {
     if (r.module !== 'main') return false;
-    // 农业配方无条件通过（不检查 recipeEnabled 和等级）
+    // 排除主模块中的研究所配方（确保它们只在特殊模块中）
+    if (r.buildingId?.startsWith('ResearchLab')) return false;
+    // 农业和办公室配方无条件通过（不检查 recipeEnabled 和等级）
     if (r.category === '农业' || r.category === '办公室') return true;
     if (!state.recipeEnabled[r.id]) return false;
     const sn = state.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;

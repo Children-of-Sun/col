@@ -9,6 +9,38 @@ const isContinuous = (item: string): boolean => {
   return item === 'electricity' || item === 'computing' || item === '人力' || item === 'mechanical power';
 };
 
+// 电力单位自动转换（kW → MW / GW），带符号（净产出用）
+const formatPowerSigned = (val: number): string => {
+  const sign = val >= 0 ? '+' : '-';
+  const absVal = Math.abs(val);
+  if (absVal >= 1_000_000) return `${sign}${(absVal / 1_000_000).toFixed(2)} GW`;
+  if (absVal >= 1000) return `${sign}${(absVal / 1000).toFixed(2)} MW`;
+  return `${sign}${absVal.toFixed(2)} kW`;
+};
+
+// 电力单位转换，不带符号（产出/消耗用）
+const formatPowerValue = (val: number): string => {
+  const absVal = Math.abs(val);
+  if (absVal >= 1_000_000) return (absVal / 1_000_000).toFixed(2) + ' GW';
+  if (absVal >= 1000) return (absVal / 1000).toFixed(2) + ' MW';
+  return absVal.toFixed(2) + ' kW';
+};
+
+// 算力单位自动转换（TF → PF），带符号（净产出用）
+const formatComputingSigned = (val: number): string => {
+  const sign = val >= 0 ? '+' : '-';
+  const absVal = Math.abs(val);
+  if (absVal >= 1000) return `${sign}${(absVal / 1000).toFixed(2)} PF`;
+  return `${sign}${absVal.toFixed(2)} TF`;
+};
+
+// 算力单位转换，不带符号（产出/消耗用）
+const formatComputingValue = (val: number): string => {
+  const absVal = Math.abs(val);
+  if (absVal >= 1000) return (absVal / 1000).toFixed(2) + ' PF';
+  return absVal.toFixed(2) + ' TF';
+};
+
 // 辅助组件：自动尝试 SVG -> PNG 降级
 const IconWithFallback: React.FC<{ src: string; alt: string; style?: React.CSSProperties }> = ({ src, alt, style }) => {
   const [currentSrc, setCurrentSrc] = useState(src);
@@ -147,6 +179,18 @@ const SummaryTable: React.FC<{
           <tbody>
             {finalItems.map(({ item, prod, cons, net }) => {
               const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
+              let prodDisplay = prod.toFixed(2);
+              let consDisplay = cons.toFixed(2);
+              let netDisplay = (net >= 0 ? '+' : '') + net.toFixed(4);
+              if (item === 'electricity') {
+                prodDisplay = formatPowerValue(prod);
+                consDisplay = formatPowerValue(cons);
+                netDisplay = formatPowerSigned(net);
+              } else if (item === 'computing') {
+                prodDisplay = formatComputingValue(prod);
+                consDisplay = formatComputingValue(cons);
+                netDisplay = formatComputingSigned(net);
+              }
               return (
               <tr key={item}>
                 <td style={{ textAlign: 'center' }}>
@@ -157,9 +201,9 @@ const SummaryTable: React.FC<{
                     </div>
                   ) : t(item, translation)}
                 </td>
-                <td>{prod.toFixed(2)}</td>
-                <td>{cons.toFixed(2)}</td>
-                <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>{(net >= 0 ? '+' : '') + net.toFixed(4)}</td>
+                <td>{prodDisplay}</td>
+                <td>{consDisplay}</td>
+                <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>{netDisplay}</td>
               </tr>
             )})}
           </tbody>
@@ -189,7 +233,7 @@ const SummaryTable: React.FC<{
                     </div>
                   ) : t(item, translation)}
                 </td>
-                <td className="positive-value">+{net.toFixed(4)}</td>
+                <td className="positive-value">{item === 'electricity' ? formatPowerSigned(net) : item === 'computing' ? formatComputingSigned(net) : '+' + net.toFixed(4)}</td>
               </tr>
             )})}
             {Array.from({ length: maxRows - positiveItems.length }).map((_, i) => <tr key={`empty-pos-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
@@ -212,7 +256,7 @@ const SummaryTable: React.FC<{
                     </div>
                   ) : t(item, translation)}
                 </td>
-                <td className="negative-value">{net.toFixed(4)}</td>
+                <td className="negative-value">{item === 'electricity' ? formatPowerSigned(net) : item === 'computing' ? formatComputingSigned(net) : net.toFixed(4)}</td>
               </tr>
             )})}
             {Array.from({ length: maxRows - negativeItems.length }).map((_, i) => <tr key={`empty-neg-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
@@ -269,8 +313,8 @@ const RecipeList: React.FC<{
                 <td>{t(r.buildingName, translation)}</td>
                 <td>{cnt.toFixed(4)}</td>
                 <td>{pm.workers.toFixed(2)}</td>
-                <td>{pm.electricity.toFixed(2)}</td>
-                <td>{pm.computing.toFixed(2)}</td>
+                <td>{formatPowerSigned(pm.electricity)}</td>
+                <td>{formatComputingSigned(pm.computing)}</td>
                 <td>{maintStr}</td>
                 {isTrade && <td>{cohesionConsumption}</td>}
                 <td>{inputs}</td>
@@ -305,8 +349,8 @@ const ModuleRow: React.FC<{
         <span className="module-stats">
           🏭 {t('机器', translation)}: {machineCount.toFixed(2)} &nbsp;|&nbsp;
           👷 {t('人力', translation)}: {workers.toFixed(2)} &nbsp;|&nbsp;
-          ⚡ {t('净电力', translation)}: {netElectricity.toFixed(2)} &nbsp;|&nbsp;
-          💻 {t('算力', translation)}: {computing.toFixed(2)} &nbsp;|&nbsp;
+          ⚡ {t('净电力', translation)}: {formatPowerSigned(netElectricity)} &nbsp;|&nbsp;
+          💻 {t('算力', translation)}: {formatComputingSigned(computing)} &nbsp;|&nbsp;
           🔧 {t('维护总量', translation)}: {totalMaintenance.toFixed(2)}
         </span>
         <span className="expand-icon">{expanded ? '▼' : '▶'}</span>
@@ -644,7 +688,7 @@ export const Results: React.FC = () => {
             </Btn>
           </div>
           <div className="stat">
-            ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0)).toFixed(2)}</b><br/>
+            ✅ 总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{formatPowerSigned((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0))}</b><br/>
             🎯 凝聚力产量: <b>{unityProduction.toFixed(2)}</b><br/>
             📉 凝聚力消耗: 贸易直接: <b>{cohesionTradeDirect.toFixed(2)}</b> | 贸易维持: <b>{cohesionTradeMaintenance.toFixed(2)}</b> | 法令: <b>{cohesionEdict.toFixed(2)}</b> | 研究: <b>{labCohesionTotal.toFixed(2)}</b> | 总计: <b>{(cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal).toFixed(2)}</b><br/>
             净凝聚力: <b>{(unityProduction - (cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal)).toFixed(2)}</b>
