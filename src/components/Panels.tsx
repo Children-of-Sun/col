@@ -177,70 +177,8 @@ export const StatuePanel: React.FC = () => {
   );
 };
 
-export const LabPanel: React.FC = () => {
-  const labLevel = useStore(s => s.labLevel);
-  const labCount = useStore(s => s.labCount);
-  const labMeta = useStore(s => s.labMeta);
-  const stationLevel = useStore(s => s.stationLevel);
-  const setLabLevel = useStore(s => s.setLabLevel);
-  const setLabCount = useStore(s => s.setLabCount);
-  const translation = useStore(s => s.translation);
-  const dataLoaded = useStore(s => s.dataLoaded);
-  const [labRecipeModalOpen, setLabRecipeModalOpen] = useState(false);
-  const recipeEnabled = useStore(s => s.recipeEnabled);
-  const setRecipeEnabled = useStore(s => s.setRecipeEnabled);
-  const meta = labMeta.find(l => l.buildingId === labLevel);
-  let researchOutput = 0;
-  let labCohesion = 0;
-  const labEqMap = new Map<string, number>();
-  if (meta && labCount > 0) {
-    meta.recipes.forEach(r => {
-      if (!recipeEnabled[r.id]) return;
-      Object.entries(r.inputs).forEach(([item, qty]) => {
-        if (item.startsWith('lab equipment') || item === 'electronics iv') {
-          const rate = (60 / r.duration) * qty * labCount;
-          labEqMap.set(item, (labEqMap.get(item) || 0) + rate);
-        }
-      });
-    });
-    const researchPerLab = 48 * (1 + stationLevel * 0.05);
-    researchOutput = researchPerLab * labCount;
-    // 凝聚力消耗从 meta.upkeep 获取
-    if (meta.upkeep && meta.upkeep['凝聚力']) {
-      labCohesion = meta.upkeep['凝聚力'] * labCount;
-    }
-  }
-  const labEqItems = [...labEqMap.entries()].map(([name, rate]) => ({ name, rate }));
-  return (
-    <div className="section">
-      <h3>🔬 研究所 (Research Lab)</h3>
-      <div className="space-station-row">
-        <label>等级: <select value={labLevel} disabled={!dataLoaded} onChange={e => setLabLevel(e.target.value)}>{labMeta.map(l => <option key={l.buildingId} value={l.buildingId}>{t(l.name, translation)} (Lv.{l.level})</option>)}</select></label>
-        <label>数量: <input type="number" value={labCount} min={0} step={1} style={{ width: 60 }} disabled={!dataLoaded} onChange={e => setLabCount(parseInt(e.target.value) || 0)} /></label>
-        <span>研究产出: <b>{researchOutput.toFixed(2)}</b> /分</span>
-        {labCohesion > 0 && <span>凝聚力消耗: <b>{labCohesion.toFixed(2)}</b> /分</span>}
-        {labEqItems.length > 0 ? labEqItems.map((le, i) => <span key={i}>{t(le.name, translation)}: <b>{le.rate.toFixed(2)}</b>/分 </span>) : <span>无设备消耗</span>}
-        <Btn onClick={() => setLabRecipeModalOpen(true)} disabled={!dataLoaded} style={{ marginLeft: 10 }}>🧪 配方选择</Btn>
-      </div>
-      <ModalShell open={labRecipeModalOpen} onClose={() => setLabRecipeModalOpen(false)} title="研究所配方选择" maxWidth="700px">
-        {meta && (
-          <div>
-            <h4>{meta.name}</h4>
-            {meta.recipes.map(r => (
-              <div key={r.id} style={{ marginBottom: 8, borderBottom: '1px solid #eee', padding: 6 }}>
-                <label>
-                  <input type="checkbox" checked={recipeEnabled[r.id] !== false} onChange={e => { const checked = e.target.checked; if (checked) { meta.recipes.forEach(other => { if (other.id !== r.id && recipeEnabled[other.id]) setRecipeEnabled(other.id, false); }); } setRecipeEnabled(r.id, checked); }} />
-                  {' '}{r.id}
-                </label>
-              </div>
-            ))}
-          </div>
-        )}
-        <div style={{ marginTop: 10, textAlign: 'right' }}><Btn onClick={() => setLabRecipeModalOpen(false)}>关闭</Btn></div>
-      </ModalShell>
-    </div>
-  );
-};
+
+
 
 export const DemandPanel: React.FC<{ onOpenDemandModal: () => void }> = ({ onOpenDemandModal }) => {
   const demands = useStore(s => s.demands);

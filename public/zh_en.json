@@ -1457,5 +1457,6 @@
   "CountableProductProto": "固体产品",
   "LooseProductProto": "松散产品",
   "FluidProductProto": "流体产品",
-  "MoltenProductProto": "熔融产品"
+  "MoltenProductProto": "熔融产品",
+  "research": "研究点"
 }

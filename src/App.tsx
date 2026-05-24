@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useStore } from './stores';
-import { MainLevelPanel, PowerPanel, SpaceStationPanel, StatuePanel, LabPanel, DemandPanel } from './components/Panels';
+import { MainLevelPanel, PowerPanel, SpaceStationPanel, StatuePanel, DemandPanel } from './components/Panels';
+import { LabPanel } from './components/LabPanel';
 import { OptionsPanel } from './components/OptionsPanel';
 import { LevelModal, RecipeModal, PowerRecipeModal, DemandModal, ExcludeModal } from './components/Modals';
 import { Results } from './components/Results';
@@ -449,12 +450,57 @@ const buildActiveRecipes = (
       console.log('[研究所] labCount:', state.labCount, 'labLevel:', state.labLevel, 'meta:', meta);
       if (meta) {
         console.log('[研究所] 启用的配方:', meta.recipes.filter(r => state.recipeEnabled[r.id]).map(r => r.id));
-        
+
+        // 判断是否为不消耗设备的基础研究所
+        const isBasicLab = state.labLevel === 'ResearchLab' || (meta.name?.toLowerCase() === 'research lab');
+
+        // 计算基础研究产出
+        let baseOutput = 0;
+        if (isBasicLab) {
+          baseOutput = 3 * state.labCount;
+        } else {
+          // 高级研究所：从启用的配方中累计 lab equipment 消耗速率作为基础产出
+          for (const r of meta.recipes) {
+            if (!state.recipeEnabled[r.id]) continue;
+            for (const [item, qty] of Object.entries(r.inputs)) {
+              if (item.toLowerCase().includes('lab equipment')) {
+                const rate = (60 / r.duration) * (qty as number) * state.labCount;
+                baseOutput += rate;
+              }
+            }
+          }
+        }
+
+        // 计算加成倍率（与 LabPanel 保持一致）
+        let multiplier = 1;
+        // 人口加成：每人 +0.005%
+        multiplier *= (1 + state.population * 0.00005);
+        if (gameData) {
+          // 法令"研究效率"
+          const edict = gameData.edicts.find(e => e.name === '研究效率');
+          if (edict) {
+            const idx = gameData.edicts.indexOf(edict);
+            const lvl = state.edictLevels[idx] ?? -1;
+            if (lvl >= 0) multiplier *= (1 + (edict.effectPerLevel[lvl] || 0));
+          }
+          // 办公"研究效率"
+          const office = gameData.office.find(o => o.name === '研究效率');
+          if (office) {
+            const idx = gameData.office.indexOf(office);
+            const lvl = state.officeLevels[idx] || 0;
+            if (lvl > 0) multiplier *= (1 + (office.effectPerLevel || 0) * lvl);
+          }
+        }
+        // 空间站等级加成：每级 +5%
+        multiplier *= (1 + state.stationLevel * 0.05);
+
+        const finalOutput = baseOutput * multiplier;
+
         // 获取建筑数据中的 unity_cost（每分钟凝聚力消耗）
         const labBuilding = state.fullData?.machines_and_buildings?.find((b: any) => b.id === state.labLevel);
         const unityCostPerBuilding = labBuilding?.unity_cost || 0;
         const researchCohesionTotal = unityCostPerBuilding * state.labCount;
-        
+
         const labRecipe: Recipe = {
           id: `lab_module_${state.labLevel}`,
           name: `研究所 (${meta.name}) ×${state.labCount}`,
@@ -464,7 +510,7 @@ const buildActiveRecipes = (
           buildingLevel: meta.level,
           duration: 60,
           inputs: {},
-          outputs: { 'research': 48 * (1 + state.stationLevel * 0.05) * state.labCount },
+          outputs: { 'research': finalOutput },
           upkeep: {},
           powerMultiplier: 1,
           workers: 0,
@@ -472,9 +518,9 @@ const buildActiveRecipes = (
           isHidden: true,
           module: 'special',
           isLab: true,
-          researchCohesion: researchCohesionTotal,  // 直接赋值
+          researchCohesion: researchCohesionTotal,
         };
-        
+
         meta.recipes.forEach((r: any) => {
           if (!state.recipeEnabled[r.id]) return;
           for (const [item, qty] of Object.entries(r.inputs)) {
@@ -489,13 +535,10 @@ const buildActiveRecipes = (
         for (const [item, qty] of Object.entries(meta.upkeep || {})) {
           labRecipe.upkeep[item.toLowerCase()] = (qty as number) * state.labCount;
         }
-        // 不再处理 upkeeping['凝聚力']
-        
+
+        console.log('[研究所] 基础产出:', baseOutput.toFixed(2), '倍率:', multiplier.toFixed(4), '最终产出:', finalOutput.toFixed(2));
         console.log('[研究所] 凝聚力消耗:', researchCohesionTotal, '/分');
-        console.log('[研究所] 输入物品:', labRecipe.inputs);
-        console.log('[研究所] 输出物品:', labRecipe.outputs);
         specialActive.push(labRecipe);
-        console.log('[实验室废物] 产出:', Object.entries(labRecipe.outputs).slice(0, 10));
       }
     }
 

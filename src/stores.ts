@@ -389,7 +389,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.researchLevels) state.researchLevels = s.researchLevels;
     if (s.enableTradeModule !== undefined) state.enableTradeModule = s.enableTradeModule;
     if (s.showIcons !== undefined) state.showIcons = s.showIcons;
-    if (s.excludedItems !== undefined) state.excludedItems = s.excludedItems;
+    if (s.ignoredItems !== undefined) state.ignoredItems = s.ignoredItems;
     if (s.enableAgriculture !== undefined) state.enableAgriculture = s.enableAgriculture;
     if (s.cropRotation !== undefined) state.cropRotation = s.cropRotation;
     if (s.globalFertilizerType !== undefined) state.globalFertilizerType = s.globalFertilizerType;
@@ -398,6 +398,9 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.officeBuildingEnabled !== undefined) state.officeBuildingEnabled = s.officeBuildingEnabled;
     if (s.officeSelectedLevel !== undefined) state.officeSelectedLevel = s.officeSelectedLevel;
     if (s.officeRecipeEnabled !== undefined) state.officeRecipeEnabled = s.officeRecipeEnabled;
+    if (s.integerMode !== undefined) state.integerMode = s.integerMode;
+    if (s.redundancyFactor !== undefined) state.redundancyFactor = s.redundancyFactor;
+    if (s.milpTimeLimit !== undefined) state.milpTimeLimit = s.milpTimeLimit;
     if (s.farms !== undefined) {
       // 深度恢复 farms 结构（确保每个 crop 的 enabled 等字段保留）
       state.farms = s.farms.map((farm: any) => ({
@@ -447,7 +450,7 @@ export const useStore = create<StoreState>((set, get) => ({
       researchLevels: s.researchLevels,
       enableTradeModule: s.enableTradeModule,
       showIcons: s.showIcons,
-      excludedItems: s.excludedItems,
+      ignoredItems: s.ignoredItems,
       enableAgriculture: s.enableAgriculture,
       cropRotation: s.cropRotation,
       globalFertilizerType: s.globalFertilizerType,
@@ -457,6 +460,9 @@ export const useStore = create<StoreState>((set, get) => ({
       officeSelectedLevel: s.officeSelectedLevel,
       officeRecipeEnabled: s.officeRecipeEnabled,
       farms: s.farms,
+      integerMode: s.integerMode,
+      redundancyFactor: s.redundancyFactor,
+      milpTimeLimit: s.milpTimeLimit,
     };
   },
 
