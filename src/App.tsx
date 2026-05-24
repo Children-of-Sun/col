@@ -18,6 +18,7 @@ import { getAgricultureMultipliers } from './utils/agricultureMultipliers';
 import { getMaintenanceReduction, t, isRaw, isPowerItem, getSeriesName, isMaintenanceRecyclingRecipe, computeImplicitCosts, getAdjustedCohesion } from './utils';
 import { Demand, Recipe, DockLevel, TradeFuel, CropSetting } from './types';
 import { calculateTrade } from './tradeCalculator';
+import { buildTradeRecipe } from './utils/trade';
 import './App.css';
 console.log('OptionsPanel imported:', OptionsPanel);
 
@@ -44,58 +45,6 @@ const buildActiveRecipes = (
   let tradeUnityMaintenanceTotal = 0;
 
   if (enableTradeModule && selectedTradeContractIds.length > 0 && tradeContracts.length > 0) {
-    const moduleSpeed = { S: 125, M: 250, L: 500 }[tradeParams.moduleSize] || 250;
-    const moduleCapacity = tradeParams.baySlots <= 4 ? 800 : 1200;
-    const getTravelInfo = (slots: number, fuelRaw: string, mode: string) => {
-      if (gameData?.ship_fuel_configs) {
-        const dockKey = `dock_${slots}`;
-        const dock = gameData.ship_fuel_configs[dockKey];
-        if (dock && dock[fuelRaw] && dock[fuelRaw][mode]) {
-          return {
-            travelTime: dock[fuelRaw][mode].fuel_per_trip,
-            fuelPerTrip: dock[fuelRaw][mode].travel_time_min,
-          };
-        }
-      }
-      return { travelTime: 3, fuelPerTrip: 200 };
-    };
-    const computeBestTrade = (contract: any, slots: number, moduleSpeed: number, moduleCapacity: number) => {
-      const { buyRate, sellRate } = contract;
-      let bestBuy = 0, bestSell = 0, bestM = 0, bestN = 0, bestLoadTime = 0;
-      for (let m = 1; m < slots; m++) {
-        const n = slots - m;
-        const buy1 = Math.floor(m * moduleCapacity);
-        const sell1 = Math.floor(buy1 * (sellRate / buyRate));
-        const loadBuy1 = m > 0 ? buy1 / (m * moduleSpeed) : 0;
-        const loadSell1 = n > 0 ? sell1 / (n * moduleSpeed) : 0;
-        const load1 = Math.max(loadBuy1, loadSell1);
-        if (sell1 <= n * moduleCapacity && buy1 > bestBuy) {
-          bestBuy = buy1; bestSell = sell1; bestM = m; bestN = n; bestLoadTime = load1;
-        }
-        const sell2 = Math.floor(n * moduleCapacity);
-        const buy2 = Math.floor(sell2 * (buyRate / sellRate));
-        const loadBuy2 = m > 0 ? buy2 / (m * moduleSpeed) : 0;
-        const loadSell2 = n > 0 ? sell2 / (n * moduleSpeed) : 0;
-        const load2 = Math.max(loadBuy2, loadSell2);
-        if (buy2 <= m * moduleCapacity && buy2 > bestBuy) {
-          bestBuy = buy2; bestSell = sell2; bestM = m; bestN = n; bestLoadTime = load2;
-        }
-      }
-      return { buy: bestBuy, sell: bestSell, m: bestM, n: bestN, loadTime: bestLoadTime };
-    };
-    const getDockMaintenance = (slots: number, moduleCount: number, moduleSize: string) => {
-      let workers = slots * 2;
-      const moduleWorkerMap = { S: 2, M: 3, L: 4 };
-      workers += moduleCount * moduleWorkerMap[moduleSize as keyof typeof moduleWorkerMap];
-      let electricity = slots * 100 + moduleCount * 50;
-      let maintI = slots * 1 + moduleCount * 1;
-      let maintII = slots * 0.5 + moduleCount * 0.5;
-      let maintIII = 0;
-      return { workers, electricity, maintI, maintII, maintIII };
-    };
-
-    const { travelTime, fuelPerTrip } = getTravelInfo(tradeParams.baySlots, tradeParams.fuelTypeRaw, tradeParams.travelMode);
-
     // 从办公等级计算利润加成和凝聚力减免（覆盖 tradeParams 中的手动值）
     let profitBonusFromOffice = 0;
     let unityDiscountFromOffice = 0;
@@ -113,67 +62,30 @@ const buildActiveRecipes = (
         unityDiscountFromOffice = -unityOffice.effectPerLevel * lvl * 100;
       }
     }
-    const finalProfitBonus = profitBonusFromOffice;
-    const finalUnityDiscount = unityDiscountFromOffice;
-    const profitFactor = 1 + finalProfitBonus / 100;
-    const unityDiscountFactor = 1 - finalUnityDiscount / 100;
+
     const newTradeRecipes: Recipe[] = [];
     for (const contract of tradeContracts) {
       if (!selectedTradeContractIds.includes(contract.id)) continue;
-      const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
-      const { buy, sell, m, n, loadTime } = computeBestTrade(adjustedContract, tradeParams.baySlots, moduleSpeed, moduleCapacity);
-      if (buy === 0) continue;
-      const totalTime = travelTime + loadTime;
-      const perMinBuy = buy / totalTime;
-      const perMinSell = sell / totalTime;
-      const perMinFuel = fuelPerTrip / totalTime;
-      const totalModules = m + n;
-      const { workers, electricity, maintI, maintII, maintIII } = getDockMaintenance(tradeParams.baySlots, totalModules, tradeParams.moduleSize);
-      const perMinWorkers = workers / totalTime;
-      const perMinElectricity = electricity / totalTime;
-      const perMinMaintI = maintI / totalTime;
-      const perMinMaintII = maintII / totalTime;
-      const perMinMaintIII = maintIII / totalTime;
-      const perMinUnityDirect = (perMinBuy / 100) * (contract.unity_per_100_bought || 0) * unityDiscountFactor;
-      const perMinUnityMaintenance = (contract.unity_per_month || 0) * unityDiscountFactor;
-
-      // 累加消耗（直接用于显示，维持不参与求解）
-      tradeUnityDirectTotal += perMinUnityDirect;
-      tradeUnityMaintenanceTotal += perMinUnityMaintenance;
-      tradeUnityConsumptionTotal += perMinUnityDirect; // 注意：只加直接消耗
-
-      const recipe: Recipe = {
-        id: `trade_${contract.id}`,
-        name: `贸易: ${t(contract.name || contract.id, translation)}`,
-        buildingId: 'trade',
-        buildingName: t('贸易码头', translation),
-        category: '贸易',
-        buildingLevel: 0,
-        duration: 1,
-        inputs: {
-          [contract.sellItem.toLowerCase()]: perMinSell,
-          [tradeParams.fuelTypeRaw.toLowerCase()]: perMinFuel,
-        },
-        outputs: {
-          [contract.buyItem.toLowerCase()]: perMinBuy,
-        },
-        upkeep: {
-          '人力': perMinWorkers,
-          'electricity': perMinElectricity,
-          'maintenance i': perMinMaintI,
-          'maintenance ii': perMinMaintII,
-          'maintenance iii': perMinMaintIII,
-          '凝聚力': perMinUnityDirect,   // 只包含直接消耗
-        },
-        powerMultiplier: 1,
-        workers: perMinWorkers,
-        isSolar: false,
-        isHidden: false,
-        module: 'trade',
-        tradeUnityDirect: perMinUnityDirect,
-        tradeUnityMaintenance: perMinUnityMaintenance,
-      };
-      newTradeRecipes.push(recipe);
+      const { recipe } = buildTradeRecipe({
+        contract,
+        baySlots: tradeParams.baySlots,
+        moduleSize: tradeParams.moduleSize,
+        fuelTypeRaw: tradeParams.fuelTypeRaw,
+        travelMode: tradeParams.travelMode,
+        profitBonusPercent: profitBonusFromOffice,
+        unityDiscountPercent: unityDiscountFromOffice,
+        gameData,
+        fullData: state.fullData,
+        translation,
+        edictLevels: state.edictLevels,
+        researchLevels: state.researchLevels,
+      });
+      if (recipe) {
+        newTradeRecipes.push(recipe);
+        tradeUnityDirectTotal += recipe.tradeUnityDirect || 0;
+        tradeUnityMaintenanceTotal += recipe.tradeUnityMaintenance || 0;
+        tradeUnityConsumptionTotal += recipe.tradeUnityDirect || 0;
+      }
     }
     if (newTradeRecipes.length) {
       state.setSelectedTradeRecipes(newTradeRecipes);

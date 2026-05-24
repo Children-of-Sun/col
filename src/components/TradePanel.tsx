@@ -3,23 +3,9 @@ import { useStore } from '../stores';
 import { TradeContract, Recipe } from '../types';
 import { t, isOreContract } from '../utils';
 import { Btn, ModalShell, SearchInput, Checkbox } from './UI';
+import { buildTradeRecipe } from '../utils/trade';
 
-const MODULE_SPEEDS = { S: 125, M: 250, L: 500 };
 
-const getModuleCapacity = (slots: number): number => {
-  return slots <= 4 ? 800 : 1200;
-};
-
-const getDockMaintenance = (slots: number, moduleCount: number, moduleSize: 'S'|'M'|'L') => {
-  let workers = slots * 2;
-  const moduleWorkerMap = { S: 2, M: 3, L: 4 };
-  workers += moduleCount * moduleWorkerMap[moduleSize];
-  let electricity = slots * 100 + moduleCount * 50;
-  let maintI = slots * 1 + moduleCount * 1;
-  let maintII = slots * 0.5 + moduleCount * 0.5;
-  let maintIII = 0;
-  return { workers, electricity, maintI, maintII, maintIII };
-};
 
 interface TradeResult {
   contract: TradeContract;
@@ -45,6 +31,7 @@ interface TradeResult {
 
 export const TradePanel: React.FC = () => {
   const gameData = useStore(s => s.gameData);
+  const fullData = useStore(s => s.fullData);
   const tradeContracts = useStore(s => s.tradeContracts);
   const selectedTradeRecipes = useStore(s => s.selectedTradeRecipes);
   const setSelectedTradeRecipes = useStore(s => s.setSelectedTradeRecipes);
@@ -56,6 +43,8 @@ export const TradePanel: React.FC = () => {
   const enableTradeModule = useStore(s => s.enableTradeModule);
   const setEnableTradeModule = useStore(s => s.setEnableTradeModule);
   const officeLevels = useStore(s => s.officeLevels);
+  const edictLevels = useStore(s => s.edictLevels);
+  const researchLevels = useStore(s => s.researchLevels);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<Set<string>>(new Set(selectedTradeContractIds));
@@ -103,130 +92,26 @@ export const TradePanel: React.FC = () => {
     return ['Diesel', 'Heavy Oil', 'Hydrogen'];
   }, [gameData, baySlots]);
 
-  const getTravelInfo = (slots: number, fuelRaw: string, mode: string) => {
-    if (gameData?.ship_fuel_configs) {
-      const dockKey = `dock_${slots}`;
-      const dock = gameData.ship_fuel_configs[dockKey];
-      if (dock && dock[fuelRaw] && dock[fuelRaw][mode]) {
-        return {
-          travelTime: dock[fuelRaw][mode].fuel_per_trip,
-          fuelPerTrip: dock[fuelRaw][mode].travel_time_min,
-        };
-      }
-    }
-    return { travelTime: 3, fuelPerTrip: 200 };
-  };
-
-  const computeBestTrade = (contract: TradeContract, slots: number, moduleSpeed: number, moduleCapacity: number) => {
-    const { buyRate, sellRate } = contract;
-    let bestBuy = 0, bestSell = 0, bestM = 0, bestN = 0, bestLoadTime = 0;
-    for (let m = 1; m < slots; m++) {
-      const n = slots - m;
-      const buy1 = Math.floor(m * moduleCapacity);
-      const sell1 = Math.floor(buy1 * (sellRate / buyRate));
-      const loadBuy1 = m > 0 ? buy1 / (m * moduleSpeed) : 0;
-      const loadSell1 = n > 0 ? sell1 / (n * moduleSpeed) : 0;
-      const load1 = Math.max(loadBuy1, loadSell1);
-      if (sell1 <= n * moduleCapacity && buy1 > bestBuy) {
-        bestBuy = buy1; bestSell = sell1; bestM = m; bestN = n; bestLoadTime = load1;
-      }
-      const sell2 = Math.floor(n * moduleCapacity);
-      const buy2 = Math.floor(sell2 * (buyRate / sellRate));
-      const loadBuy2 = m > 0 ? buy2 / (m * moduleSpeed) : 0;
-      const loadSell2 = n > 0 ? sell2 / (n * moduleSpeed) : 0;
-      const load2 = Math.max(loadBuy2, loadSell2);
-      if (buy2 <= m * moduleCapacity && buy2 > bestBuy) {
-        bestBuy = buy2; bestSell = sell2; bestM = m; bestN = n; bestLoadTime = load2;
-      }
-    }
-    return { buy: bestBuy, sell: bestSell, m: bestM, n: bestN, loadTime: bestLoadTime };
-  };
-
-  const buildTradeRecipe = (contract: TradeContract, result: Omit<TradeResult, 'contract'>, unityDiscountFactor: number): Recipe | null => {
-    const { buyAmount, sellAmount, totalTime, fuelPerTrip, workers, electricity, maintI, maintII, maintIII } = result;
-    const perMinBuy = buyAmount / totalTime;
-    const perMinSell = sellAmount / totalTime;
-    const perMinFuel = fuelPerTrip / totalTime;
-    const perMinWorkers = workers / totalTime;
-    const perMinElectricity = electricity / totalTime;
-    const perMinMaintI = maintI / totalTime;
-    const perMinMaintII = maintII / totalTime;
-    const perMinMaintIII = maintIII / totalTime;
-    const unityPer100 = contract.unity_per_100_bought || 0;
-    const perMinUnityDirect = (perMinBuy / 100) * unityPer100 * unityDiscountFactor;
-    const perMinUnityMaintenance = (contract.unity_per_month || 0) * unityDiscountFactor;
-
-    const recipe: Recipe = {
-      id: `trade_${contract.id}`,
-      name: `贸易: ${t(contract.name || contract.id, translation)}`,
-      buildingId: 'trade',
-      buildingName: t('贸易码头', translation),
-      category: '贸易',
-      buildingLevel: 0,
-      duration: 1,
-      inputs: {
-        [contract.sellItem.toLowerCase()]: perMinSell,
-        [fuelTypeRaw.toLowerCase()]: perMinFuel,
-      },
-      outputs: {
-        [contract.buyItem.toLowerCase()]: perMinBuy,
-      },
-      upkeep: {
-        '人力': perMinWorkers,
-        'electricity': perMinElectricity,
-        'maintenance i': perMinMaintI,
-        'maintenance ii': perMinMaintII,
-        'maintenance iii': perMinMaintIII,
-        '凝聚力': perMinUnityDirect,
-      },
-      powerMultiplier: 1,
-      workers: perMinWorkers,
-      isSolar: false,
-      isHidden: false,
-      module: 'trade',
-      tradeUnityPer100: unityPer100,
-      tradeUnityDirect: perMinUnityDirect,
-      tradeUnityMaintenance: perMinUnityMaintenance,
-    };
-    return recipe;
-  };
 
   const allContractResults = useMemo(() => {
     if (!tradeContracts.length) return [];
-    const moduleSpeed = MODULE_SPEEDS[moduleSize];
-    const moduleCapacity = getModuleCapacity(baySlots);
-    const { travelTime, fuelPerTrip } = getTravelInfo(baySlots, fuelTypeRaw, travelMode);
-    const profitFactor = 1 + profitBonusFromOffice / 100;
-    const unityDiscountFactor = 1 - unityDiscountFromOffice / 100;
-
-    let results = tradeContracts.map(contract => {
-      const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
-      const { buy, sell, m, n, loadTime } = computeBestTrade(adjustedContract, baySlots, moduleSpeed, moduleCapacity);
-      if (buy === 0) return null;
-      const totalTime = travelTime + loadTime;
-      const buyPerMin = buy / totalTime;
-      const sellPerMin = sell / totalTime;
-      const fuelPerMin = fuelPerTrip / totalTime;
-      const perMinUnity = (buyPerMin / 100) * (contract.unity_per_100_bought || 0);
-      const effectiveUnityPerMonth = (contract.unity_per_month || 0) * unityDiscountFactor;
-      const totalModules = m + n;
-      const { workers, electricity, maintI, maintII, maintIII } = getDockMaintenance(baySlots, totalModules, moduleSize);
-      return {
+    const results = tradeContracts.map(contract => {
+      const { displayData } = buildTradeRecipe({
         contract,
-        buyAmount: buy,
-        sellAmount: sell,
-        loadTime,
-        travelTime,
-        totalTime,
-        buyPerMin,
-        sellPerMin,
-        fuelPerTrip,
-        fuelPerMin,
-        unityPerMin: perMinUnity,
-        unityPerMonthEffective: effectiveUnityPerMonth,
-        m, n,
-        workers, electricity, maintI, maintII, maintIII,
-      };
+        baySlots,
+        moduleSize,
+        fuelTypeRaw,
+        travelMode,
+        profitBonusPercent: profitBonusFromOffice,
+        unityDiscountPercent: unityDiscountFromOffice,
+        gameData,
+        fullData,
+        translation,
+        edictLevels,
+        researchLevels,
+      });
+      if (!displayData) return null;
+      return { contract, ...displayData } as TradeResult;
     }).filter((r): r is TradeResult => r !== null);
     results.sort((a, b) => t(a.contract.buyItem, translation).localeCompare(t(b.contract.buyItem, translation)));
     if (typeof window !== 'undefined' && window.localStorage.getItem('factoryDebug') === 'true') {
@@ -236,7 +121,7 @@ export const TradePanel: React.FC = () => {
       });
     }
     return results;
-  }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusFromOffice, unityDiscountFromOffice, translation]);
+  }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusFromOffice, unityDiscountFromOffice, gameData, fullData, translation, edictLevels, researchLevels]);
 
   const openModal = () => {
     setTempSelectedIds(new Set(selectedTradeContractIds));
@@ -246,11 +131,23 @@ export const TradePanel: React.FC = () => {
   const saveSelection = () => {
     const newIds = Array.from(tempSelectedIds);
     setSelectedTradeContractIds(newIds);
-    const unityDiscountFactor = 1 - unityDiscountFromOffice / 100;
     const newRecipes: Recipe[] = [];
-    for (const result of allContractResults) {
-      if (tempSelectedIds.has(result.contract.id)) {
-        const recipe = buildTradeRecipe(result.contract, result, unityDiscountFactor);
+    for (const contract of tradeContracts) {
+      if (tempSelectedIds.has(contract.id)) {
+        const { recipe } = buildTradeRecipe({
+          contract,
+          baySlots,
+          moduleSize,
+          fuelTypeRaw,
+          travelMode,
+          profitBonusPercent: profitBonusFromOffice,
+          unityDiscountPercent: unityDiscountFromOffice,
+          gameData,
+          fullData,
+          translation,
+          edictLevels,
+          researchLevels,
+        });
         if (recipe) newRecipes.push(recipe);
       }
     }

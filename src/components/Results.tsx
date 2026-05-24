@@ -67,6 +67,7 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
     const inputs: Record<string, number> = {};
     const outputs: Record<string, number> = {};
     let cohesion = 0;
+    let workers = 0, electricity = 0, computing = 0, maintI = 0, maintII = 0, maintIII = 0;
     for (const [item, qty] of Object.entries(recipe.inputs)) {
       inputs[item] = qty * machineCount;
     }
@@ -83,8 +84,15 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
       } else {
         inputs[item] = (inputs[item] || 0) + reducedQty;
       }
+      // 累加人力、电力、算力、维护
+      if (item === '人力') workers = reducedQty;
+      if (item === 'electricity') electricity = reducedQty;
+      if (item === 'computing') computing = reducedQty;
+      if (item === 'maintenance i') maintI = reducedQty;
+      if (item === 'maintenance ii') maintII = reducedQty;
+      if (item === 'maintenance iii') maintIII = reducedQty;
     }
-    return { inputs, outputs, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount, cohesion };
+    return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount, cohesion };
   }
 
   // 非贸易配方
@@ -137,7 +145,9 @@ const SummaryTable: React.FC<{
   showTinyErrors: boolean;
   translation: Record<string, string>;
   splitMode?: boolean;
-}> = ({ data, showTinyErrors, translation, splitMode = false }) => {
+  netWorkers?: number;
+  showLaborRow?: boolean;
+}> = ({ data, showTinyErrors, translation, splitMode = false, netWorkers = 0, showLaborRow = false }) => {
   const productIcons = useStore(s => s.productIcons);
   const showIcons = useStore(s => s.showIcons);
   const forcedOrder = ['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research'];
@@ -192,19 +202,31 @@ const SummaryTable: React.FC<{
                 netDisplay = formatComputingSigned(net);
               }
               return (
-              <tr key={item}>
-                <td style={{ textAlign: 'center' }}>
-                  {showIcons && icon ? (
-                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
-                      <span>{t(item, translation)}</span>
-                    </div>
-                  ) : t(item, translation)}
-                </td>
-                <td>{prodDisplay}</td>
-                <td>{consDisplay}</td>
-                <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>{netDisplay}</td>
-              </tr>
+              <React.Fragment key={item}>
+                <tr>
+                  <td style={{ textAlign: 'center' }}>
+                    {showIcons && icon ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                        <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
+                        <span>{t(item, translation)}</span>
+                      </div>
+                    ) : t(item, translation)}
+                  </td>
+                  <td>{prodDisplay}</td>
+                  <td>{consDisplay}</td>
+                  <td className={net < 0 ? 'negative-value' : net > 0 ? 'positive-value' : ''}>{netDisplay}</td>
+                </tr>
+                {showLaborRow && item === '人力' && (
+                  <tr style={{ borderTop: '1px solid #ccc', background: '#f9f9f9' }}>
+                    <td style={{ textAlign: 'center' }}><strong>{t('人力（工人）', translation)}</strong></td>
+                    <td>-</td>
+                    <td>-</td>
+                    <td className={netWorkers < 0 ? 'negative-value' : netWorkers > 0 ? 'positive-value' : ''}>
+                      {(netWorkers >= 0 ? '+' : '') + netWorkers.toFixed(2)}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
             )})}
           </tbody>
         </table>
@@ -454,6 +476,7 @@ export const Results: React.FC = () => {
     const agricultureRecipes: typeof recipeData = [];
     const specialRecipes: typeof recipeData = [];
     const officeRecipes: typeof recipeData = [];
+    let officeWorkers = 0;
 
     for (const item of recipeData) {
       const r = item.recipe;
@@ -462,6 +485,7 @@ export const Results: React.FC = () => {
         agricultureRecipes.push(item);
       } else if (r.module === 'main' && r.category === '办公室') {
         officeRecipes.push(item);
+        officeWorkers += pm.workers;
       } else if (r.module === 'main') {
         const cat = r.category || '其他';
         if (!mainCategories[cat]) mainCategories[cat] = { recipes: [], prod: {}, cons: {}, workers: 0, electricity: 0, computing: 0, maintI: 0, maintII: 0, maintIII: 0, machineCount: 0 };
@@ -544,6 +568,7 @@ export const Results: React.FC = () => {
       trade: { recipes: tradeRecipes, prod: tradeProd, cons: tradeCons, workers: tradeWorkers, electricity: tradeElectricity, computing: tradeComputing, maintI: tradeMaintI, maintII: tradeMaintII, maintIII: tradeMaintIII, machineCount: tradeMachineCount },
       special: { recipes: allSpecialRecipes, prod: specialProd, cons: specialCons, workers: specialWorkers, electricity: specialElectricity, computing: specialComputing, maintI: specialMaintI, maintII: specialMaintII, maintIII: specialMaintIII, machineCount: specialMachineCount },
       all: { prod: allProd, cons: allCons, workers: allWorkers, electricity: allElectricity, computing: allComputing, maintI: allMaintI, maintII: allMaintII, maintIII: allMaintIII, machineCount: allMachineCount },
+      officeWorkers,
     };
   }, [recipeData]);
 
@@ -702,10 +727,15 @@ export const Results: React.FC = () => {
             ))}
           </div>
 
+          {(() => {
+            const isOverview = selectedTab === '全厂总览';
+            const officeWorkers = categoryData.officeWorkers || 0;
+            const netWorkers = -(categoryData.all.workers - officeWorkers);
+            return (
           <div className="results-layout">
             <div className="summary-panel">
               <h4>{t('资源平衡', translation)}</h4>
-              {currentData && <SummaryTable data={{ prod: currentData.prod || {}, cons: currentData.cons || {} }} showTinyErrors={showTinyErrors} translation={translation} splitMode={selectedTab !== '全厂总览'} />}
+              {currentData && <SummaryTable data={{ prod: currentData.prod || {}, cons: currentData.cons || {} }} showTinyErrors={showTinyErrors} translation={translation} splitMode={!isOverview} netWorkers={netWorkers} showLaborRow={isOverview} />}
             </div>
             <div className="detail-panel">
               {selectedTab === '全厂总览' ? (
@@ -723,6 +753,7 @@ export const Results: React.FC = () => {
               )}
             </div>
           </div>
+          ); })()}
         </>
       )}
       {result && resultStatus !== 'Optimal' && <div>❌ 状态: {resultStatus || '未知'}</div>}

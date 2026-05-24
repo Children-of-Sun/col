@@ -443,7 +443,207 @@
                     "power_multiplier": 1
                 }
             ]
-        }  
+        }, 
+        
+         {
+            "id": "CargoDepotT4",
+            "name": "Cargo depot (8)",
+            "category": "Cargo docks",
+            "subcategory": "",
+            "next_tier": "",
+            "workers": 36,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 0,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/CargoDepotT4.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts II",
+                    "quantity": 300
+                },
+                {
+                    "product": "Concrete slab",
+                    "quantity": 600
+                }
+            ],
+            "recipes": []
+        },
+        {
+            "id": "CargoDepotT3",
+            "name": "Cargo depot (6)",
+            "category": "Cargo docks",
+            "subcategory": "",
+            "next_tier": "CargoDepotT4",
+            "workers": 30,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 0,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/CargoDepotT3.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts II",
+                    "quantity": 200
+                },
+                {
+                    "product": "Concrete slab",
+                    "quantity": 400
+                }
+            ],
+            "recipes": []
+        },
+        {
+            "id": "CargoDepotT2",
+            "name": "Cargo depot (4)",
+            "category": "Cargo docks",
+            "subcategory": "",
+            "next_tier": "",
+            "workers": 22,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 0,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/CargoDepotT2.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts II",
+                    "quantity": 120
+                },
+                {
+                    "product": "Concrete slab",
+                    "quantity": 240
+                }
+            ],
+            "recipes": []
+        },
+        {
+            "id": "CargoDepotT1",
+            "name": "Cargo depot (2)",
+            "category": "Cargo docks",
+            "subcategory": "",
+            "next_tier": "CargoDepotT2",
+            "workers": 12,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 0,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/CargoDepotT1.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts II",
+                    "quantity": 40
+                },
+                {
+                    "product": "Concrete slab",
+                    "quantity": 100
+                }
+            ],
+            "recipes": []
+        },
+        {
+            "id": "ModuleT3",
+            "name": "module (L)",
+            "category": "Cargo docks",
+            "subcategory": "",
+            "next_tier": "",
+            "workers": 5,
+            "maintenance_cost_units": "Maintenance I",
+            "maintenance_cost_quantity": 4,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 1600,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/CargoDepotModuleUnitT3.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts III",
+                    "quantity": 120
+                }
+            ],
+            "recipes": []
+        },
+        {
+            "id": "ModuleT2",
+            "name": "module (M)",
+            "category": "Cargo docks",
+            "subcategory": "",
+            "next_tier": "ModuleT3",
+            "workers": 4,
+            "maintenance_cost_units": "Maintenance I",
+            "maintenance_cost_quantity": 3,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 800,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/CargoDepotModuleUnitT2.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts III",
+                    "quantity": 60
+                }
+            ],
+            "recipes": []
+        },
+        {
+            "id": "moduleT1",
+            "name": "module (S)",
+            "category": "Cargo docks",
+            "subcategory": "",
+            "next_tier": "ModuleT2",
+            "workers": 3,
+            "maintenance_cost_units": "Maintenance I",
+            "maintenance_cost_quantity": 2,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 400,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/CargoDepotModuleFluidT1.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts II",
+                    "quantity": 40
+                }
+            ],
+            "recipes": []
+                
+        }
 
 
 ]
