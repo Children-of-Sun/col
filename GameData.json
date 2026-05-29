@@ -26,7 +26,7 @@
     "Household goods": { "demand": 10.0, "unity": 1.4, "category": "consumer", "waste":                    [0.5, 0.4, 0.25, 0, 0.5, 0, 0] },
     "Household appliances": { "demand": 7.0, "unity": 1.4, "category": "consumer", "waste":                [0.125, 0, 0.33333333, 1.4166666666, 0.0833333333, 0, 0] },
     "Consumer Electronics": { "demand": 3.6, "unity": 1.8, "category": "consumer", "waste":                [1.08333, 0, 0, 1.722222222, 0.166666666, 0.166666666, 0.5] },
-    "Luxury goods": { "demand": 3.6, "unity": 1, "category": "consumer", "waste":                          [0.5, 0, 0, 0, 0, 0.5, 0] },
+    "Luxury goods": { "demand": 3.6, "unity": 1, "category": "consumer", "waste":                          [0.5, 0, 0, 0, 0, 0.25, 0] },
 
     "Medical Supplies": { "demand": 5, "unity": 0.5, "category": "medical", "waste":                     [0.54, 0, 1, 0, 0, 0, 0] },
     "Medical Supplies II": { "demand": 5, "unity": 0.75, "category": "medical", "waste":                 [0.54, 0, 1, 0, 0, 0, 0] },
