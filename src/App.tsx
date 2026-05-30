@@ -552,9 +552,9 @@ const buildActiveRecipes = (
           });
         }
       }
-      // 删除原始的 recyclables 输出
-      delete r.outputs['recyclables'];
-      delete r.outputs['Recyclables'];
+      // 保留原始的 recyclables 输出（不删除）
+      // delete r.outputs['recyclables'];
+      // delete r.outputs['Recyclables'];
     });
 
     console.log('[维护废料] 示例配方:', modifiedActive.find(r => r.outputs['recyclables']));

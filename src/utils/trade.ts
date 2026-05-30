@@ -133,7 +133,12 @@ export function buildTradeRecipe(params: {
   const profitFactor = 1 + profitBonusPercent / 100;
   const unityDiscountFactor = 1 - unityDiscountPercent / 100;
 
-  const adjustedContract = { ...contract, buyRate: contract.buyRate * profitFactor };
+  // 检查出口品是否为不需要利润加成的矿石
+  const noProfitSellItems = new Set(['iron ore', 'copper ore', 'limestone', 'coal']);
+  const isNoProfit = noProfitSellItems.has(contract.sellItem.toLowerCase());
+  const effectiveProfitFactor = isNoProfit ? 1 : profitFactor;
+
+  const adjustedContract = { ...contract, buyRate: contract.buyRate * effectiveProfitFactor };
   const { buy, sell, m, n, loadTime } = computeBestTrade(adjustedContract, baySlots, moduleSpeed, moduleCapacity);
   if (buy === 0) return { recipe: null, displayData: null };
 
