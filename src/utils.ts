@@ -151,7 +151,10 @@ export function calcResidentDemands(
       const unityValue = e.unityPerLevel[lvl] || 0;
 
       if (e.targetCategory && e.targetCategory !== 'none' && !e.itemEffect) {
-        catMods[e.targetCategory] = (catMods[e.targetCategory] || 1) * (1 - eff);
+        // 农业提振不应影响居民食物消耗
+        if (e.name !== '农业提振') {
+          catMods[e.targetCategory] = (catMods[e.targetCategory] || 1) * (1 - eff);
+        }
       }
       if (e.itemEffect) {
         e.itemEffect.forEach(item => {
@@ -194,6 +197,8 @@ export function calcResidentDemands(
       const targets = Array.isArray(r.targetCategory) ? r.targetCategory : [r.targetCategory];
       targets.forEach((t, idx) => {
         if (t === 'recycle' || t === 'unity' || t === 'none') return;
+        // 作物产量研究不应影响居民食物需求，跳过 food 类别
+        if (t === 'food') return;
         const eff = Array.isArray(r.effectPerLevel) ? (r.effectPerLevel[idx] || 0) : r.effectPerLevel;
         if (r.name === '作物产量' && t === 'Water') {
           // 作物产量研究第二效果：增加水消耗（eff 为正）
@@ -225,20 +230,24 @@ export function calcResidentDemands(
   let foodUnity = 0;
   let nonFoodUnity = 0;
 
+  console.log('catMods:', catMods);
+  console.log('itemMods:', itemMods);
   if (numActiveGroups > 0) {
     for (const [grp, enabledList] of Object.entries(activeGroups)) {
       const numFoodsInThisGroup = enabledList.length;
       for (const name of enabledList) {
         const svc = data.services[name];
-        // 基础需求（已按人口缩放）
         let demand = svc.demand * factor;
+        console.log(`[食物] ${name}: 基础需求=${svc.demand}, factor=${factor}, 初步demand=${demand}`);
         if (housing.multipliers[name]) demand *= housing.multipliers[name];
         let mod = catMods['food'] || 1;
         const itemKey = name.toLowerCase();
         if (itemMods[itemKey]) mod *= itemMods[itemKey];
-        // 应用分摊：除以（激活的类别数 × 本类别内激活的食物数）
+        console.log(`  mod=${mod}, 乘后demand=${demand}`);
         demand = demand / (numActiveGroups * numFoodsInThisGroup);
+        console.log(`  除以组数: numActiveGroups=${numActiveGroups}, numFoods=${numFoodsInThisGroup}, 结果=${demand}`);
         demand *= mod;
+        console.log(`  最终需求=${demand}`);
         demands.push({ item: itemKey, rate: demand });
         const unityMult = itemUnityMods[itemKey] || 1;
         foodUnity += svc.unity * unityMult;

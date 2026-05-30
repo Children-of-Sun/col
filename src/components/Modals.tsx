@@ -174,29 +174,59 @@ const BuildingBlock: React.FC<{
   const [expanded, setExpanded] = useState(openByDefault);
   const buildingIcon = useStore(s => s.buildingIcons[entry.buildingId]);
   const showIcons = useStore(s => s.showIcons);
+  const buildingEnabled = entry.buildingEnabled;
+
   return (
-    <div className="building-block">
-      <div className="building-header">
-        <input type="checkbox" checked={entry.buildingEnabled}
-          onChange={e => onToggleBuilding(e.target.checked)} />
-        {showIcons && buildingIcon && <img src={buildingIcon} alt="" style={{ width: 24, height: 24, marginRight: 8 }} loading="lazy" decoding="async" />}
-        <span className="building-name" onClick={() => setExpanded(!expanded)}>
-           {t(entry.buildingName, translation)} (Lv.{entry.level})
-        </span>
+    <div
+      className="building-block"
+      style={{
+        backgroundColor: buildingEnabled ? '#e8f5e9' : '#fafafa',
+        border: buildingEnabled ? '1px solid #4caf50' : '1px solid #ddd',
+        borderRadius: '6px',
+        marginBottom: '8px',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px' }}>
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', flex: 1 }}
+          onClick={() => onToggleBuilding(!buildingEnabled)}
+        >
+          {showIcons && buildingIcon && <img src={buildingIcon} alt="" style={{ width: 24, height: 24 }} />}
+          <span style={{ fontWeight: 'bold' }}>
+             {t(entry.buildingName, translation)} (Lv.{entry.level})
+          </span>
+        </div>
+        <div
+          style={{ cursor: 'pointer', padding: '4px 8px', userSelect: 'none' }}
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? '▼' : '▶'}
+        </div>
       </div>
       {expanded && (
-        <div className="recipe-sublist">
+        <div className="recipe-sublist" style={{ marginLeft: '20px', paddingBottom: '8px' }}>
           {entry.recipes.map(r => {
             const rOn = recipeEnabled[r.id] !== false;
             const imp = Object.entries(r.inputs).map(([k, v]) => `${t(k, translation)}×${isPowerItem(k) ? v : ((60 / r.duration) * v).toFixed(2)}`).join(', ') || '无';
             const oup = Object.entries(r.outputs).map(([k, v]) => `${t(k, translation)}×${isPowerItem(k) ? v : ((60 / r.duration) * v).toFixed(2)}`).join(', ') || '无';
             return (
-              <div className="recipe-entry" key={r.id}>
-                <label>
-                  <input type="checkbox" checked={rOn} onChange={e => onToggleRecipe(r.id, e.target.checked)} />
-                  {' '}{t(r.name, translation)}
-                </label>
-                <span className="recipe-info">投入: {imp} → 产出: {oup}</span>
+              <div
+                key={r.id}
+                className="recipe-entry"
+                onClick={() => onToggleRecipe(r.id, !rOn)}
+                style={{
+                  cursor: 'pointer',
+                  backgroundColor: rOn ? '#81c784' : 'transparent',
+                  padding: '4px 6px',
+                  borderRadius: '4px',
+                  marginBottom: '2px',
+                }}
+              >
+                <span>{t(r.name, translation)}</span>
+                <span className="recipe-info" style={{ marginLeft: '10px', fontSize: '0.8rem' }}>
+                  投入: {imp} → 产出: {oup}
+                </span>
               </div>
             );
           })}

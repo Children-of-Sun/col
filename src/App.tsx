@@ -1348,7 +1348,7 @@ export default function App() {
 
   return (
     <>
-      <h1>🏭 工厂计算器</h1>
+      <h1> 工业巨头量化计算器</h1>
       <div className="app-layout">
         <div className="left-column">
           <div className="section">
