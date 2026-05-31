@@ -14,6 +14,8 @@ const ResidentPanel: React.FC = () => {
   const setHousingIndex = useStore(s => s.setHousingIndex);
   const toggleFood = useStore(s => s.toggleFood);
   const setMedical = useStore(s => s.setMedical);
+  const medicalMultiplier = useStore(s => s.medicalMultiplier);
+  const setMedicalMultiplier = useStore(s => s.setMedicalMultiplier);
   const toggleOther = useStore(s => s.toggleOther);
 
   if (!gameData) return <div>请先加载居民配置文件</div>;
@@ -69,6 +71,19 @@ const ResidentPanel: React.FC = () => {
           {t(name, translation)}
         </label>
       ))}
+      <div style={{ marginBottom: 10 }}>
+        <label>🏥 医疗用品需求倍率 (1.0 ~ 2.0): </label>
+        <input
+          type="number"
+          step={0.01}
+          min={1}
+          max={2}
+          value={medicalMultiplier}
+          onChange={e => setMedicalMultiplier(parseFloat(e.target.value) || 1)}
+          style={{ width: 80 }}
+        />
+        <span className="hint">（实际需求 = 基础需求 × 倍率）</span>
+      </div>
       <h4>⚙️ 其他服务（多选）</h4>
       {otherList.map(name => (
         <label key={name} style={{ marginRight: 15 }}>

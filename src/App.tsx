@@ -656,7 +656,8 @@ const buildActiveRecipes = (
       state.officeLevels,
       state.researchLevels,
       recycleRate,
-      state.stationLevel
+      state.stationLevel,
+      state.medicalMultiplier
     );
     const residentDemands = result.demands;
     unityProduction = result.unityProduction;

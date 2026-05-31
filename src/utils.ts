@@ -129,7 +129,8 @@ export function calcResidentDemands(
   officeLevels: number[],
   researchLevels: number[],
   recycleRate: number,
-  stationLevel: number = 0
+  stationLevel: number = 0,
+  medicalMultiplier: number = 1
 ) {
   const factor = pop / data.populationScale;
   const housing = data.housingTiers[housingIdx] || { multipliers: {}, unityMultiplierConditions: [] };
@@ -263,6 +264,7 @@ export function calcResidentDemands(
     const itemKey = selectedMedical.toLowerCase();
     if (itemMods[itemKey]) mod *= itemMods[itemKey];
     demand *= mod;
+    demand *= medicalMultiplier;   // 应用倍率
     demands.push({ item: itemKey, rate: demand });
     const unityMult = itemUnityMods[itemKey] || 1;
     nonFoodUnity += svc.unity * unityMult;

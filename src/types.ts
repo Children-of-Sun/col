@@ -245,6 +245,7 @@ export interface StoreState {
   officeRecipeEnabled: Record<string, boolean>;
 
   solarEfficiency: number;
+  medicalMultiplier: number;
 
   optimizationMode: 'machines' | 'labor' | 'cohesion' | 'area' | 'raw' | 'custom';
   customWeights: { machines: number; labor: number; cohesion: number; area: number; raw: number };
@@ -307,6 +308,7 @@ export interface StoreState {
   setHousingIndex: (v: number) => void;
   toggleFood: (name: string) => void;
   setMedical: (name: string | null) => void;
+  setMedicalMultiplier: (value: number) => void;
   toggleOther: (name: string) => void;
   setEdictLevel: (idx: number, lvl: number) => void;
   setOfficeLevel: (idx: number, lvl: number) => void;

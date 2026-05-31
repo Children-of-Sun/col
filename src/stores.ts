@@ -109,6 +109,7 @@ export const useStore = create<StoreState>((set, get) => ({
   officeRecipeEnabled: {},
 
   solarEfficiency: 1,
+  medicalMultiplier: 1,
 
   optimizationMode: 'machines',
   customWeights: { machines: 100, labor: 0, cohesion: 0, area: 0, raw: 0 },
@@ -221,6 +222,7 @@ export const useStore = create<StoreState>((set, get) => ({
     return { selectedFoods: foods };
   }),
   setMedical: (name: string | null) => set({ selectedMedical: name }),
+  setMedicalMultiplier: (value) => set({ medicalMultiplier: Math.min(2, Math.max(1, value)) }),
   toggleOther: (name: string) => set(s => {
     const others = new Set(s.selectedOthers);
     if (others.has(name)) others.delete(name);
@@ -401,6 +403,7 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.integerMode !== undefined) state.integerMode = s.integerMode;
     if (s.redundancyFactor !== undefined) state.redundancyFactor = s.redundancyFactor;
     if (s.milpTimeLimit !== undefined) state.milpTimeLimit = s.milpTimeLimit;
+    if (s.medicalMultiplier !== undefined) state.medicalMultiplier = s.medicalMultiplier;
     if (s.farms !== undefined) {
       // 深度恢复 farms 结构（确保每个 crop 的 enabled 等字段保留）
       state.farms = s.farms.map((farm: any) => ({
@@ -436,6 +439,7 @@ export const useStore = create<StoreState>((set, get) => ({
       tradeDockLevel: s.tradeSetup.dockLevel,
       tradeFuel: s.tradeSetup.fuelName,
       solarEfficiency: s.solarEfficiency,
+      medicalMultiplier: s.medicalMultiplier,
       tradeParams: s.tradeParams,
       selectedTradeContractIds: s.selectedTradeContractIds,
       optimizationMode: s.optimizationMode,
