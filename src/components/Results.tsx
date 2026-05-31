@@ -244,7 +244,7 @@ const RecipeList: React.FC<{
       <table className="data-table">
         <thead>
           <tr>
-            <th>{t('配方', translation)}</th>
+            <th>{t('         配方         ', translation)}</th>
             <th>{t('建筑', translation)}</th>
             <th>{t('机器数量', translation)}</th>
             <th>{t('人力/分', translation)}</th>

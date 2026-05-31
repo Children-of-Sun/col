@@ -468,49 +468,83 @@ export default function App() {
     const customWeights = s.customWeights;
     const integerMode = s.integerMode;
 
-    const { lpString, varNames, missing } = buildLp({
-      mainActive,
-      powerActive,
-      residentActive,
-      stationActive,
-      specialActive,
-      tradeActive,
-      ignored,
-      demands: positiveDemands,
-      externalSupplies: allExternalSupplies,
-      reductionFactor,
-      steamLowMode: s.steamLowMode as 'internal' | 'shared',
-      excludedOutputs,
-      excludedInputs,
-      constraintMode: s.constraintMode,
-      allowExternal: effectiveAllowExternal,
-      optimizationMode,
-      customWeights,
-      fixedUnityProduction,
-      fixedUnityConsumption,
-      integerMode,
-      redundancy: s.redundancyFactor,
+    // 将结果后处理抽取为公共函数
+    const finalizeResult = (lpResult: any, usedVarNames: string[], diagnosticExtra: string) => {
+      setResult(lpResult);
+      setIsSolving(false);
+      if (lpResult?.Status === 'Optimal') {
+        setDiagnostic(diagnosticExtra || '');
+        if (tradeActive && tradeActive.length) {
+          let actualDirect = 0;
+          let actualMaintenance = 0;
+          tradeActive.forEach((recipe, idx) => {
+            const cols = lpResult?.Columns || lpResult?.columns || {};
+            const val = cols[`tr${idx}`]?.Primal ?? cols[`tr${idx}`]?.primal ?? 0;
+            actualDirect += (recipe.tradeUnityDirect || 0) * val;
+            actualMaintenance += (recipe.tradeUnityMaintenance || 0) * val;
+          });
+          setCohesionTradeDirect(actualDirect);
+          setCohesionTradeMaintenance(actualMaintenance);
+          setUnityConsumption(actualDirect + actualMaintenance + fixedUnityConsumption + researchCohesionTotal);
+        }
+      } else if (lpResult?.Status === 'Infeasible') {
+        setDiagnostic((diagnosticExtra || '') + '<br>💡 当前设置无法平衡所有中间产物。');
+      }
+    };
+
+    // 构建 LP 基础参数
+    const lpBaseParams = {
+      mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+      ignored, demands: positiveDemands, externalSupplies: allExternalSupplies,
+      reductionFactor, steamLowMode: s.steamLowMode as 'internal' | 'shared',
+      excludedOutputs, excludedInputs, constraintMode: s.constraintMode,
+      allowExternal: effectiveAllowExternal, optimizationMode, customWeights,
+      fixedUnityProduction, fixedUnityConsumption, integerMode, redundancy: s.redundancyFactor,
+    };
+
+    // 计算总人力消耗（从 LP 结果）
+    const computeTotalLabor = (lpResult: any, lpVarNames: string[]) => {
+      const cols = lpResult?.Columns || lpResult?.columns;
+      if (!cols) return 0;
+      let total = 0;
+      const allRecipes = [...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive];
+      for (let i = 0; i < lpVarNames.length; i++) {
+        const col = cols[lpVarNames[i]] || cols[`Column${i}`];
+        const val = col?.Primal ?? col?.primal ?? 0;
+        if (val > 0) total += (allRecipes[i]?.upkeep['人力'] || 0) * val;
+      }
+      return total;
+    };
+
+    const pop = s.population;
+    const residentFixed = pop > 0 ? pop / 1000 : 0;
+
+    // ========== 第一趟：居民自由但 >= 人口/1000，人力平衡约束 ==========
+    const pass1Lp = buildLp({
+      ...lpBaseParams,
+      relaxLabor: false,
+      minResidentValue: residentFixed > 0 ? residentFixed : undefined,
     });
 
     if (integerMode === 'milp') {
       console.log('=== MILP 模式 LP 结尾 ===');
-      console.log(lpString.slice(-800));
+      console.log(pass1Lp.lpString.slice(-800));
     }
 
     useStore.getState().setSolverActive([...mainActive, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive]);
-    useStore.getState().setSolverVarNames(varNames);
-    setSolverMissing(missing);
+    useStore.getState().setSolverVarNames(pass1Lp.varNames);
+    setSolverMissing(pass1Lp.missing);
 
     if (DEBUG) {
-      console.log('[调试] LP 字符串长度:', lpString.length);
-      console.log('[调试] 变量数量:', varNames.length);
-      console.log('[调试] 缺失物品:', missing);
+      console.log('[调试] LP 字符串长度:', pass1Lp.lpString.length);
+      console.log('[调试] 变量数量:', pass1Lp.varNames.length);
+      console.log('[调试] 缺失物品:', pass1Lp.missing);
       console.log('[调试] integerMode:', integerMode);
     }
 
-    if (missing.length) {
+    if (pass1Lp.missing.length) {
       const trans = s.translation;
-      setDiagnostic(`⚠️ 以下物品无生产配方：<br>${missing.map(m =>
+      setDiagnostic(`⚠️ 以下物品无生产配方：<br>${pass1Lp.missing.map(m =>
         `${t(m, trans)} (${m}) <span class="missing-producer" data-item="${m}">🔧 启用建筑</span>`
       ).join('<br>')}`);
       setTimeout(() => {
@@ -530,31 +564,58 @@ export default function App() {
     setIsSolving(true);
     try {
       if (integerMode === 'continuous' || integerMode === 'milp') {
-        // 直接 LP 求解（milp 模式由 HiGHS 自动处理整数）
-        await solveLp(lpString, varNames, integerMode, tradeActive, fixedUnityConsumption, researchCohesionTotal);
-        if (DEBUG) {
-          const result = useStore.getState().result;
-          if (result?.Status === 'Optimal') {
-            console.log('=== 求解结果 - 贸易变量值 ===');
-            tradeActive.forEach((recipe, idx) => {
-              const varName = `tr${idx}`;
-              const val = result.Columns?.[varName]?.Primal || result.columns?.[varName]?.Primal || 0;
-              console.log(`${recipe.name}: ${val}`);
-            });
+        // 第一趟求解
+        setDiagnostic('🔍 第一趟：按设定人口求解...');
+        const pass1Result = await runLpSolver(pass1Lp.lpString, pass1Lp.varNames, integerMode);
+
+        if (pass1Result?.Status === 'Optimal') {
+          const actualLabor = computeTotalLabor(pass1Result, pass1Lp.varNames);
+          const laborIgnored = s.ignoredItems.includes('人力');
+          if (actualLabor <= pop + 1e-9 || laborIgnored) {
+            const msg = laborIgnored ? '✅ 求解完成（人力已忽略，跳过第二趟）。' : '✅ 求解完成，人力未超人口。';
+            finalizeResult(pass1Result, pass1Lp.varNames, msg);
+            return;
           }
+          // 人力超人口 → 第二趟
+          setDiagnostic(`⚠️ 实际人力(${Math.ceil(actualLabor)})超人口(${pop})，第二趟：加入人力约束...`);
+          const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+          useStore.getState().setSolverVarNames(pass2Lp.varNames);
+          setSolverMissing(pass2Lp.missing);
+          const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, integerMode);
+          if (pass2Result?.Status === 'Optimal') {
+            finalizeResult(pass2Result, pass2Lp.varNames, `⚠️ 人力不足（需${Math.ceil(actualLabor)}，人口${pop}），已加入人力约束。`);
+          } else {
+            finalizeResult(pass2Result, pass2Lp.varNames, `⚠️ 人力约束下不可行。`);
+          }
+          if (DEBUG) {
+            console.log('=== 求解结果 - 贸易变量值 ===');
+            const result = useStore.getState().result;
+            if (result?.Status === 'Optimal') {
+              tradeActive.forEach((recipe, idx) => {
+                const val = (result.Columns || result.columns || {})[`tr${idx}`]?.Primal ?? (result.Columns || result.columns || {})[`tr${idx}`]?.primal ?? 0;
+                console.log(`${recipe.name}: ${val}`);
+              });
+            }
+          }
+        } else {
+          // 第一趟不可行 → 尝试人力约束版
+          setDiagnostic('⚠️ 第一趟不可行，尝试加入人力约束...');
+          const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+          useStore.getState().setSolverVarNames(pass2Lp.varNames);
+          setSolverMissing(pass2Lp.missing);
+          const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, integerMode);
+          finalizeResult(pass2Result, pass2Lp.varNames, pass2Result?.Status === 'Optimal' ? '⚠️ 人力约束下求得可行解。' : '');
         }
       } else if (integerMode === 'ceil') {
-        // 向上取整模式
-        await solveCeilMode(lpString, varNames);
+        await solveCeilMode(pass1Lp.lpString, pass1Lp.varNames);
       } else if (integerMode === 'heuristic') {
-        // 启发式取整模式
-        await solveHeuristicMode(lpString, varNames);
+        await solveHeuristicMode(pass1Lp.lpString, pass1Lp.varNames);
       }
     } catch (err: any) {
       setIsSolving(false);
       setDiagnostic(`求解器错误: ${err.message}`);
     }
-  }, [getFixedDemands, solarEfficiency, solveLp, solveCeilMode, solveHeuristicMode]);
+  }, [getFixedDemands, solarEfficiency, solveCeilMode, solveHeuristicMode]);
 
   return (
     <>

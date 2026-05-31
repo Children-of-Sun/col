@@ -606,6 +606,19 @@ export function buildActiveRecipes(
       residentRecipe.outputs[popWaste.item.toLowerCase()] =
         (residentRecipe.outputs[popWaste.item.toLowerCase()] || 0) + wasteAmount;
     }
+
+    // 将居民模块标准化为"每1000人"单位，LP 可自由缩放
+    if (state.population > 0) {
+      const laborScale = state.population / 1000;
+      for (const k of Object.keys(residentRecipe.inputs)) {
+        residentRecipe.inputs[k] /= laborScale;
+      }
+      for (const k of Object.keys(residentRecipe.outputs)) {
+        residentRecipe.outputs[k] /= laborScale;
+      }
+    }
+    // 每单位（1000人）提供 1000 人力
+    residentRecipe.outputs['人力'] = 1000;
   }
 
   const residentActive = [residentRecipe];

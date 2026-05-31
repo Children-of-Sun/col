@@ -29,6 +29,10 @@ export interface LpInput {
   redundancy?: number;
   milpTimeLimit?: number;
   fixedMachines?: Record<string, number>;
+  // 人力约束：false 时强制人力 <= 人口，true 时跳过人力约束
+  relaxLabor?: boolean;
+  // 居民模块最小比例（r0 >= value），undefined 表示不加此约束
+  minResidentValue?: number;
 }
 
 export interface LpOutput {
@@ -44,7 +48,9 @@ export function buildLp(input: LpInput): LpOutput {
     constraintMode, allowExternal, optimizationMode, customWeights, 
     fixedUnityProduction = 0, fixedUnityConsumption = 0,
     integerMode = 'continuous', redundancy = 0, milpTimeLimit = 30,
-    fixedMachines = {}
+    fixedMachines = {},
+    relaxLabor = false,
+    minResidentValue,
   } = input;
   
   const isAllowExternal = allowExternal ?? false;
@@ -170,8 +176,7 @@ export function buildLp(input: LpInput): LpOutput {
 
   let lp = `MIN\nOBJ: ${objExpr}\nST\n`;
 
-  // 固定居民、空间站、特殊模块数量为 1
-  residentVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
+  // 固定空间站、特殊模块数量为 1（居民模块自由缩放，不再固定）
   stationVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
   specialVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
 
@@ -242,6 +247,11 @@ export function buildLp(input: LpInput): LpOutput {
   });
 
   const demandSet = new Set(demands.map(d => d.item));
+
+  // 人力约束：居民模块产出人口作为人力供给上限，注入隐式零需求以生成 >= 0 约束
+  if (!relaxLabor && producers.has('人力') && consumers.has('人力')) {
+    demandSet.add('人力');
+  }
   const items = new Set([...demandSet].filter(i => !ignored.has(i) && !excludedOutputs.has(i) && !excludedInputs.has(i)));
   producers.forEach(i => { if (!demandSet.has(i)) items.add(i); });
   consumers.forEach(i => items.add(i));
@@ -260,7 +270,7 @@ export function buildLp(input: LpInput): LpOutput {
   }
 
   const rows: Record<string, string> = {};
-  [...items].forEach((it, idx) => rows[it] = `r${idx}`);
+  [...items].forEach((it, idx) => rows[it] = `c${idx}`);
 
   // ========== 1. 定义需要在电力模块单独处理的物品 ==========
   const powerSpecialItems = new Set(['steam (high)', 'steam (super)', 'mechanical power']);
@@ -300,7 +310,7 @@ export function buildLp(input: LpInput): LpOutput {
       const effectiveDr = Math.max(0, totalDr - supply);
       if (expr) {
         lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-        if (integerMode !== 'continuous') {
+        if (integerMode !== 'continuous' && it !== '人力') {
           const upperBound = effectiveDr * (1 + redundancy);
           lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
         }
@@ -319,7 +329,18 @@ export function buildLp(input: LpInput): LpOutput {
       const hasProducer = producers.has(it);
       const hasConsumer = consumers.has(it);
       if (isAllowExternal && !hasProducer && hasConsumer) continue;
-      if ((isExcludedOutput && hasProducer) || (isExcludedInput && hasConsumer)) continue;
+      // 同时在排除产出和排除输入 → 不约束
+      if (isExcludedOutput && isExcludedInput) continue;
+      // 排除输入：允许净消耗但不允许净产出 → <= 0
+      if (isExcludedInput && hasConsumer && expr) {
+        lp += ` ${rows[it]}: ${expr} <= 0\n`;
+        continue;
+      }
+      // 排除产出：允许净产出但不允许净消耗 → >= 0
+      if (isExcludedOutput && hasProducer && expr) {
+        lp += ` ${rows[it]}: ${expr} >= 0\n`;
+        continue;
+      }
       const shouldConstrain = (hasProd: boolean, hasCons: boolean): boolean => {
         if (constraintMode === 'noProdOrCons') return hasProd && hasCons;
         return hasProd;
@@ -361,6 +382,11 @@ export function buildLp(input: LpInput): LpOutput {
     for (const [varName, value] of Object.entries(fixedMachines)) {
       lp += ` ${varName} = ${value}\n`;
     }
+  }
+
+  // 居民模块最小比例（r0 >= minResidentValue）
+  if (minResidentValue !== undefined && residentVarNames.length > 0) {
+    lp += ` ${residentVarNames[0]} >= ${minResidentValue}\n`;
   }
 
   // 添加整数声明（仅在 milp 模式下）

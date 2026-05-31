@@ -187,6 +187,7 @@ const perMinMaintIII = maintIII;
     isSolar: false,
     isHidden: false,
     module: 'trade',
+    tradeUnityPer100: contract.unity_per_100_bought || 0,
     tradeUnityDirect: perMinUnityDirect,
     tradeUnityMaintenance: perMinUnityMaintenance,
   };

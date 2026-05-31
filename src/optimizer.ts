@@ -34,6 +34,33 @@ interface SolveResult {
   surplusItems?: { item: string; amount: number; sourceRecipes: Recipe[] }[];
 }
 
+/** 从 LP 求解结果计算实际人力消耗 */
+function computeTotalLabor(
+  result: any,
+  varNames: string[],
+  recipeBuild: ReturnType<typeof buildActiveRecipes>,
+): number {
+  const cols = result?.Columns || result?.columns;
+  if (!cols) return 0;
+  let totalLabor = 0;
+  const allRecipes = [
+    ...recipeBuild.mainActive,
+    ...recipeBuild.powerActive,
+    ...recipeBuild.residentActive,
+    ...recipeBuild.stationActive,
+    ...recipeBuild.specialActive,
+    ...recipeBuild.tradeActive,
+  ];
+  for (let i = 0; i < varNames.length; i++) {
+    const col = cols[varNames[i]];
+    const val = col?.Primal ?? col?.primal ?? 0;
+    if (val > 0) {
+      totalLabor += (allRecipes[i]?.upkeep['人力'] || 0) * val;
+    }
+  }
+  return totalLabor;
+}
+
 export async function solveWithFallback(
   solarEfficiency: number,
   getFixedDemands: () => Demand[],
@@ -49,21 +76,21 @@ export async function solveWithFallback(
   setSolverMissing: (m: string[]) => void,
 ): Promise<SolveResult> {
   const state = useStore.getState();
-  
+
   // 辅助函数：构建并求解 LP
   const runWithParams = async (params: {
     allowExternal: boolean;
     demands: Demand[];
     externalSupplies: { item: string; rate: number }[];
-    priorityCut?: number; // 如果提供，将优先级高于此值的需求设为0
+    priorityCut?: number;
+    relaxLabor?: boolean;
+    fixedMachines?: Record<string, number>;
   }) => {
-    // 构建配方
     const recipeBuild = buildActiveRecipes(
       state, solarEfficiency, getFixedDemands,
     );
     if (!recipeBuild) throw new Error('没有启用的配方');
 
-    // 可能调整需求
     let finalDemands = params.demands;
     if (params.priorityCut !== undefined) {
       finalDemands = params.demands.map(d => {
@@ -91,6 +118,8 @@ export async function solveWithFallback(
       excludedOutputs: new Set(state.excludedOutputs),
       excludedInputs: new Set(state.excludedInputs),
       ignored: new Set(state.ignoredItems),
+      relaxLabor: params.relaxLabor ?? false,
+      fixedMachines: params.fixedMachines ?? {},
     });
 
     setSolverMissing(missing);
@@ -98,36 +127,68 @@ export async function solveWithFallback(
     return { result, varNames, recipeBuild, finalDemands };
   };
 
-  // 阶段1：严格模式
-  setDiagnostic('🔍 尝试严格平衡...');
-  const strict = await runWithParams({
+  const pop = state.population;
+  const residentFixed = pop > 0 ? pop / 1000 : 0;
+
+  // ========== 第一趟：居民固定为人口/1000，无人力约束 ==========
+  setDiagnostic('🔍 第一趟：按设定人口求解...');
+  const pass1 = await runWithParams({
     allowExternal: false,
     demands: state.demands,
     externalSupplies: [],
+    relaxLabor: true,
+    fixedMachines: residentFixed > 0 ? { r0: residentFixed } : {},
   });
-  if (strict.result?.Status === 'Optimal') {
-    // 成功，直接返回
-    setResult(strict.result);
-    setIsSolving(false);
-    return { status: 'optimal', result: strict.result, diagnostic: '' };
+
+  if (pass1.result?.Status === 'Optimal') {
+    const actualLabor = computeTotalLabor(pass1.result, pass1.varNames, pass1.recipeBuild);
+
+    if (actualLabor <= pop + 1e-9) {
+      // 人力足够，直接返回
+      setResult(pass1.result);
+      setIsSolving(false);
+      setDiagnostic('✅ 求解完成，人力未超人口。');
+      return { status: 'optimal', result: pass1.result, diagnostic: '' };
+    }
+
+    // ========== 第二趟：人力超人口，加入人力约束 ==========
+    setDiagnostic(`⚠️ 实际人力(${Math.ceil(actualLabor)})超人口(${pop})，第二趟：加入人力约束...`);
+    const pass2 = await runWithParams({
+      allowExternal: false,
+      demands: state.demands,
+      externalSupplies: [],
+      relaxLabor: false, // 强制人力约束
+    });
+
+    if (pass2.result?.Status === 'Optimal') {
+      setResult(pass2.result);
+      setIsSolving(false);
+      setDiagnostic(`⚠️ 人力不足（需${Math.ceil(actualLabor)}，人口${pop}），已加入人力约束重新求解。`);
+      return { status: 'relaxed', result: pass2.result, diagnostic: '人力约束' };
+    }
+
+    // 第二趟人力约束下不可行 → 继续走回退
+  } else {
+    // 第一趟就不可行
   }
 
-  // 阶段2：允许外部供给，但不削减需求
-  setDiagnostic('⚠️ 严格平衡不可行，尝试允许外部供给...');
+  // ========== 回退阶段：允许外部供给 ==========
+  setDiagnostic('⚠️ 不可行，尝试允许外部供给...');
   const relaxed = await runWithParams({
     allowExternal: true,
     demands: state.demands,
     externalSupplies: [],
+    relaxLabor: true,
   });
   if (relaxed.result?.Status === 'Optimal') {
     setResult(relaxed.result);
     setIsSolving(false);
-    setDiagnostic('✅ 在允许外部供给下求得可行解。请查看“副产物过剩诊断”了解可改进项。');
+    setDiagnostic('✅ 在允许外部供给下求得可行解。请查看"副产物过剩诊断"了解可改进项。');
     return { status: 'relaxed', result: relaxed.result, diagnostic: '允许外部供给' };
   }
 
-  // 阶段3：逐步削减低优先级需求
-  const priorities = [5, 4, 3, 2]; // 先削减优先级4，再3...
+  // ========== 回退阶段：逐步削减低优先级需求 ==========
+  const priorities = [5, 4, 3, 2];
   for (const cutLevel of priorities) {
     setDiagnostic(`🔄 削减优先级 >${cutLevel} 的需求...`);
     const cut = await runWithParams({
@@ -135,6 +196,7 @@ export async function solveWithFallback(
       demands: state.demands,
       externalSupplies: [],
       priorityCut: cutLevel,
+      relaxLabor: true,
     });
     if (cut.result?.Status === 'Optimal') {
       setResult(cut.result);
