@@ -1,10 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useStore } from '../stores';
 import { Btn, Checkbox, Select, ModalShell, SearchInput } from './UI';
 import { t, isPowerBuilding, HIDDEN_SERIES, ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getMaintenanceReduction, getSeriesName } from '../utils';
 import { Recipe, Series } from '../types';
-import { isRaw } from '../utils';
-
 export const MainLevelPanel: React.FC<{ onOpenLevelModal: () => void; onOpenRecipeModal: () => void }> = ({ onOpenLevelModal, onOpenRecipeModal }) => {
   const mainSeriesList = useStore(s => s.mainSeriesList);
   const mainEnabled = useStore(s => s.mainEnabled);

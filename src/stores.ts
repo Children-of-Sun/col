@@ -337,7 +337,7 @@ export const useStore = create<StoreState>((set, get) => ({
     return { farms };
   }),
 
-  setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(0, Math.max(0, value)) }),
+  setSolarEfficiency: (value) => set({ solarEfficiency: Math.min(1, Math.max(0, value)) }),
 
   setOptimizationMode: (mode) => set({ optimizationMode: mode }),
   setCustomWeights: (weights) => set({ customWeights: { ...get().customWeights, ...weights } }),

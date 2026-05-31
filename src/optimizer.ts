@@ -1,8 +1,7 @@
 import { buildLp } from './lpBuilder';
 import { useStore } from './stores';
 import { Recipe, Demand } from './types';
-import { getMaintenanceReduction, getRecycleRate, t, ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, calcResidentDemands, calcResidentWaste, getMaintenanceWasteMap } from './utils';
-import { buildActiveRecipes } from './buildActiveRecipes'; // 需要把 buildActiveRecipes 提取到单独文件
+import { buildActiveRecipes } from './buildActiveRecipes';
 
 // 求解器运行函数（复用原有 runLpSolver）
 declare function runLpSolver(lpString: string, varNames: string[], integerMode?: string): Promise<any>;
@@ -61,11 +60,6 @@ export async function solveWithFallback(
     // 构建配方
     const recipeBuild = buildActiveRecipes(
       state, solarEfficiency, getFixedDemands,
-      getMaintenanceReduction, getRecycleRate,
-      calcResidentDemands, calcResidentWaste,
-      getMaintenanceWasteMap,
-      ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE,
-      SPACE_CARGO_ITEMS, t
     );
     if (!recipeBuild) throw new Error('没有启用的配方');
 

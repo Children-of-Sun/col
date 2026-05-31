@@ -1,24 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { t } from '../utils';
-
-// 图标 fallback 组件：优先使用原路径，如果加载失败则尝试替换 .svg 为 .png
-const IconWithFallback: React.FC<{ src: string; alt: string; style?: React.CSSProperties }> = ({ src, alt, style }) => {
-  const [currentSrc, setCurrentSrc] = useState(src);
-  const [hasError, setHasError] = useState(false);
-
-  const handleError = () => {
-    if (!hasError) {
-      const pngSrc = src.replace(/\.svg$/i, '.png');
-      if (pngSrc !== src) {
-        setCurrentSrc(pngSrc);
-        setHasError(true);
-      }
-    }
-  };
-
-  return <img src={currentSrc} alt={alt} style={style} onError={handleError} loading="lazy" decoding="async" />;
-};
+import { IconWithFallback } from './IconWithFallback';
 
 interface ProductGridProps {
   items: string[];

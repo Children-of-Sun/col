@@ -3,63 +3,8 @@ import { useStore } from '../stores';
 import { Btn } from './UI';
 import { t, getMaintenanceReduction } from '../utils';
 import { Recipe } from '../types';
-
-// 判断物品是否为持续类型（不缩放）
-const isContinuous = (item: string): boolean => {
-  return item === 'electricity' || item === 'computing' || item === '人力' || item === 'mechanical power';
-};
-
-// 电力单位自动转换（kW → MW / GW），带符号（净产出用）
-const formatPowerSigned = (val: number): string => {
-  const sign = val >= 0 ? '+' : '-';
-  const absVal = Math.abs(val);
-  if (absVal >= 1_000_000) return `${sign}${(absVal / 1_000_000).toFixed(2)} GW`;
-  if (absVal >= 1000) return `${sign}${(absVal / 1000).toFixed(2)} MW`;
-  return `${sign}${absVal.toFixed(2)} kW`;
-};
-
-// 电力单位转换，不带符号（产出/消耗用）
-const formatPowerValue = (val: number): string => {
-  const absVal = Math.abs(val);
-  if (absVal >= 1_000_000) return (absVal / 1_000_000).toFixed(2) + ' GW';
-  if (absVal >= 1000) return (absVal / 1000).toFixed(2) + ' MW';
-  return absVal.toFixed(2) + ' kW';
-};
-
-// 算力单位自动转换（TF → PF），带符号（净产出用）
-const formatComputingSigned = (val: number): string => {
-  const sign = val >= 0 ? '+' : '-';
-  const absVal = Math.abs(val);
-  if (absVal >= 1000) return `${sign}${(absVal / 1000).toFixed(2)} PF`;
-  return `${sign}${absVal.toFixed(2)} TF`;
-};
-
-// 算力单位转换，不带符号（产出/消耗用）
-const formatComputingValue = (val: number): string => {
-  const absVal = Math.abs(val);
-  if (absVal >= 1000) return (absVal / 1000).toFixed(2) + ' PF';
-  return absVal.toFixed(2) + ' TF';
-};
-
-// 辅助组件：自动尝试 SVG -> PNG 降级
-const IconWithFallback: React.FC<{ src: string; alt: string; style?: React.CSSProperties }> = ({ src, alt, style }) => {
-  const [currentSrc, setCurrentSrc] = useState(src);
-  const [hasError, setHasError] = useState(false);
-
-  const handleError = () => {
-    if (!hasError) {
-      const pngSrc = src.replace(/\.svg$/i, '.png');
-      if (pngSrc !== src) {
-        setCurrentSrc(pngSrc);
-        setHasError(true);
-      } else {
-        console.warn(`无法加载图标: ${src}`);
-      }
-    }
-  };
-
-  return <img src={currentSrc} alt={alt} style={style} onError={handleError} loading="lazy" decoding="async" />;
-};
+import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue } from '../utils/format';
+import { IconWithFallback } from './IconWithFallback';
 
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number) {
   // 贸易配方特殊处理（已为每分钟速率）
