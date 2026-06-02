@@ -255,6 +255,12 @@ export interface StoreState {
   redundancyFactor: number;
   milpTimeLimit: number;
 
+  // 资源冗余设置
+  enableRedundancy: boolean;
+  globalLower: number;
+  globalUpper: number;
+  redundancyResources: Record<string, RedundancyResource>;
+
   // 凝聚力消耗细分
   cohesionTradeDirect: number;
   cohesionTradeMaintenance: number;
@@ -349,6 +355,10 @@ export interface StoreState {
   setProductIcons: (icons: Record<string, string>) => void;
   setProductCategories: (categories: Record<string, string>) => void;
   setShowIcons: (show: boolean) => void;
+  setEnableRedundancy: (v: boolean) => void;
+  setGlobalLower: (v: number) => void;
+  setGlobalUpper: (v: number) => void;
+  setRedundancyResources: (r: Record<string, RedundancyResource>) => void;
 }
 
 export interface SolverResult {
@@ -418,4 +428,11 @@ export interface FarmSetting {
   enabled: boolean;
   level: number;
   crops: CropSetting[];
+}
+
+// ==================== 资源冗余类型 ====================
+export interface RedundancyResource {
+  enabled: boolean;   // 该资源是否启用冗余
+  lower: number;      // 下限百分比 (50-150)
+  upper: number;      // 上限百分比 (50-150)
 }

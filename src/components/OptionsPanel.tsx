@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { Btn, Checkbox, ModalShell } from './UI';
 import { ExcludeContent } from './ExcludeGrid';
+import { RedundancyModal } from './RedundancyModal';
 import { t } from '../utils';
 
 export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onOpenExcludeModal }) => {
@@ -40,6 +41,7 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
 
   const [outputModalOpen, setOutputModalOpen] = useState(false);
   const [inputModalOpen, setInputModalOpen] = useState(false);
+  const [redundancyModalOpen, setRedundancyModalOpen] = useState(false);
   const [tempOutputs, setTempOutputs] = useState<Set<string>>(new Set(excludedOutputs));
   const [tempInputs, setTempInputs] = useState<Set<string>>(new Set(excludedInputs));
   const [searchOutput, setSearchOutput] = useState('');
@@ -158,6 +160,7 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
       <div className="exclude-buttons">
         <Btn onClick={openOutputModal} disabled={!dataLoaded}>🚮 排除产出</Btn>
         <Btn onClick={openInputModal} disabled={!dataLoaded}>📥 排除输入</Btn>
+        <Btn onClick={() => setRedundancyModalOpen(true)} disabled={!dataLoaded}>📊 资源冗余</Btn>
       </div>
 
       {/* 排除产出模态框 */}
@@ -201,6 +204,9 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
           <Btn onClick={() => setInputModalOpen(false)}>{t('取消', translation)}</Btn>
         </div>
       </ModalShell>
+
+      {/* 资源冗余模态框 */}
+      <RedundancyModal open={redundancyModalOpen} onClose={() => setRedundancyModalOpen(false)} />
     </div>
   );
 };

@@ -119,6 +119,12 @@ export const useStore = create<StoreState>((set, get) => ({
   redundancyFactor: 0,
   milpTimeLimit: 30,
 
+  // 资源冗余设置
+  enableRedundancy: false,
+  globalLower: 100,
+  globalUpper: 100,
+  redundancyResources: {},
+
   // 凝聚力消耗细分
   cohesionTradeDirect: 0,
   cohesionTradeMaintenance: 0,
@@ -345,6 +351,10 @@ export const useStore = create<StoreState>((set, get) => ({
   setIntegerMode: (mode) => set({ integerMode: mode }),
   setRedundancyFactor: (v) => set({ redundancyFactor: v }),
   setMilpTimeLimit: (v) => set({ milpTimeLimit: v }),
+  setEnableRedundancy: (v) => set({ enableRedundancy: v }),
+  setGlobalLower: (v) => set({ globalLower: v }),
+  setGlobalUpper: (v) => set({ globalUpper: v }),
+  setRedundancyResources: (r) => set({ redundancyResources: r }),
   setCohesionTradeDirect: (value: number) => set({ cohesionTradeDirect: value }),
   setCohesionTradeMaintenance: (value: number) => set({ cohesionTradeMaintenance: value }),
   setCohesionEdict: (value: number) => set({ cohesionEdict: value }),
@@ -403,6 +413,10 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.integerMode !== undefined) state.integerMode = s.integerMode;
     if (s.redundancyFactor !== undefined) state.redundancyFactor = s.redundancyFactor;
     if (s.milpTimeLimit !== undefined) state.milpTimeLimit = s.milpTimeLimit;
+    if (s.enableRedundancy !== undefined) state.enableRedundancy = s.enableRedundancy;
+    if (s.globalLower !== undefined) state.globalLower = s.globalLower;
+    if (s.globalUpper !== undefined) state.globalUpper = s.globalUpper;
+    if (s.redundancyResources !== undefined) state.redundancyResources = s.redundancyResources;
     if (s.medicalMultiplier !== undefined) state.medicalMultiplier = s.medicalMultiplier;
     if (s.farms !== undefined) {
       // 深度恢复 farms 结构（确保每个 crop 的 enabled 等字段保留）
@@ -467,6 +481,10 @@ export const useStore = create<StoreState>((set, get) => ({
       integerMode: s.integerMode,
       redundancyFactor: s.redundancyFactor,
       milpTimeLimit: s.milpTimeLimit,
+      enableRedundancy: s.enableRedundancy,
+      globalLower: s.globalLower,
+      globalUpper: s.globalUpper,
+      redundancyResources: s.redundancyResources,
     };
   },
 

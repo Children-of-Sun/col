@@ -281,6 +281,10 @@ export default function App() {
         integerMode: 'continuous', // 取整模式不需要 milp
         redundancy: 0,
         fixedMachines: fixed, // 传入固定值
+        enableRedundancy: state.enableRedundancy,
+        globalLower: state.globalLower,
+        globalUpper: state.globalUpper,
+        redundancyResources: state.redundancyResources,
       });
 
       const fixedResult = await runLpSolver(newLp, newVarNames);
@@ -344,6 +348,10 @@ export default function App() {
           integerMode: 'continuous',
           redundancy: 0,
           fixedMachines: fixed,
+          enableRedundancy: state.enableRedundancy,
+          globalLower: state.globalLower,
+          globalUpper: state.globalUpper,
+          redundancyResources: state.redundancyResources,
         });
 
         const lpResult = await runLpSolver(newLp, newVarNames);
@@ -409,6 +417,10 @@ export default function App() {
           integerMode: 'continuous',
           redundancy: 0,
           fixedMachines: fixed,
+          enableRedundancy: state.enableRedundancy,
+          globalLower: state.globalLower,
+          globalUpper: state.globalUpper,
+          redundancyResources: state.redundancyResources,
         });
 
         const finalResult = await runLpSolver(finalLp, finalVarNames);
@@ -431,6 +443,20 @@ export default function App() {
   const handleSolve = useCallback(async () => {
     const s = useStore.getState();
 
+    // [DIAGNOSTIC] 冗余设置日志
+    const rdEnabled = s.enableRedundancy;
+    const rdExplicitlyConfigured = Object.keys(s.redundancyResources || {}).filter(k => s.redundancyResources[k]?.enabled === true);
+    const rdExplicitlyDisabled = Object.keys(s.redundancyResources || {}).filter(k => s.redundancyResources[k]?.enabled === false);
+    console.warn('[冗余] handleSolve 读取状态:', {
+      enableRedundancy: rdEnabled,
+      globalLower: s.globalLower,
+      globalUpper: s.globalUpper,
+      explicitlyConfigured: rdExplicitlyConfigured.length,
+      explicitlyDisabled: rdExplicitlyDisabled.length,
+      configuredItems: rdExplicitlyConfigured,
+      disabledItems: rdExplicitlyDisabled,
+    });
+
     // 使用 buildActiveRecipes 构建所有配方
     const result = buildActiveRecipes(
       s,
@@ -441,6 +467,11 @@ export default function App() {
     if (!result) {
       setDiagnostic('没有启用的配方。');
       return;
+    }
+
+    // [DIAGNOSTIC] 冗余状态摘要（显示在诊断输出中）
+    if (rdEnabled) {
+      console.warn(`[冗余] 状态: 已启用 (全局 L=${s.globalLower}% U=${s.globalUpper}%), 显式配置=${rdExplicitlyConfigured.length}个, 显式禁用=${rdExplicitlyDisabled.length}个, 其余物品自动使用全局值`);
     }
 
     const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
@@ -500,6 +531,11 @@ export default function App() {
       excludedOutputs, excludedInputs, constraintMode: s.constraintMode,
       allowExternal: effectiveAllowExternal, optimizationMode, customWeights,
       fixedUnityProduction, fixedUnityConsumption, integerMode, redundancy: s.redundancyFactor,
+      // 资源冗余设置
+      enableRedundancy: s.enableRedundancy,
+      globalLower: s.globalLower,
+      globalUpper: s.globalUpper,
+      redundancyResources: s.redundancyResources,
     };
 
     // 计算总人力消耗（从 LP 结果）
@@ -565,7 +601,11 @@ export default function App() {
     try {
       if (integerMode === 'continuous' || integerMode === 'milp') {
         // 第一趟求解
-        setDiagnostic('🔍 第一趟：按设定人口求解...');
+        let diagHeader = '🔍 第一趟：按设定人口求解...';
+        if (rdEnabled) {
+          diagHeader += `<br>📊 <b>冗余已启用</b>: 全局 ${s.globalLower}%~${s.globalUpper}%, 显式配置=${rdExplicitlyConfigured.length}个, 禁用=${rdExplicitlyDisabled.length}个，其余自动启用`;
+        }
+        setDiagnostic(diagHeader);
         const pass1Result = await runLpSolver(pass1Lp.lpString, pass1Lp.varNames, integerMode);
 
         if (pass1Result?.Status === 'Optimal') {

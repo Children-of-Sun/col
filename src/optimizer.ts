@@ -120,6 +120,10 @@ export async function solveWithFallback(
       ignored: new Set(state.ignoredItems),
       relaxLabor: params.relaxLabor ?? false,
       fixedMachines: params.fixedMachines ?? {},
+      enableRedundancy: state.enableRedundancy,
+      globalLower: state.globalLower,
+      globalUpper: state.globalUpper,
+      redundancyResources: state.redundancyResources,
     });
 
     setSolverMissing(missing);

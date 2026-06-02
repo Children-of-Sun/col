@@ -122,10 +122,27 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
 
   const filtered = useMemo(() => {
     return entries.filter(e => {
+      // 清除之前的匹配记录
+      e.matchedRecipes = undefined;
       if (currentCat === '🚫 已禁用') return !e.buildingEnabled;
       if (e.category !== currentCat) return false;
-      if (search && !t(e.buildingName, translation).toLowerCase().includes(search.toLowerCase())
-        && !e.recipes.some(r => t(r.name, translation).toLowerCase().includes(search.toLowerCase()))) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        const buildingNameMatch = t(e.buildingName, translation).toLowerCase().includes(s);
+        // 匹配配方名、原料、产物
+        const matchingRecipes = e.recipes.filter(r => {
+          if (t(r.name, translation).toLowerCase().includes(s)) return true;
+          if (Object.keys(r.inputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
+          if (Object.keys(r.outputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
+          return false;
+        });
+        if (!buildingNameMatch && matchingRecipes.length === 0) return false;
+        // 仅配方匹配（建筑名未匹配）→ 只显示匹配的配方
+        if (!buildingNameMatch) {
+          e.matchedRecipes = matchingRecipes;
+        }
+        // 建筑名匹配 → matchedRecipes 保持 undefined → 显示全部配方
+      }
       return true;
     });
   }, [entries, currentCat, search, translation]);
@@ -162,6 +179,7 @@ interface BuildingBlockEntry {
   recipes: Recipe[];
   buildingEnabled: boolean;
   seriesName: string;
+  matchedRecipes?: Recipe[];  // 搜索匹配的配方子集（仅当建筑名未匹配时设置）
 }
 const BuildingBlock: React.FC<{
   entry: BuildingBlockEntry;
@@ -206,7 +224,12 @@ const BuildingBlock: React.FC<{
       </div>
       {expanded && (
         <div className="recipe-sublist" style={{ marginLeft: '20px', paddingBottom: '8px' }}>
-          {entry.recipes.map(r => {
+          {entry.matchedRecipes && entry.matchedRecipes.length < entry.recipes.length && (
+            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
+              🔍 匹配 {entry.matchedRecipes.length}/{entry.recipes.length} 个配方
+            </div>
+          )}
+          {(entry.matchedRecipes || entry.recipes).map(r => {
             const rOn = recipeEnabled[r.id] !== false;
             const imp = Object.entries(r.inputs).map(([k, v]) => `${t(k, translation)}×${isPowerItem(k) ? v : ((60 / r.duration) * v).toFixed(2)}`).join(', ') || '无';
             const oup = Object.entries(r.outputs).map(([k, v]) => `${t(k, translation)}×${isPowerItem(k) ? v : ((60 / r.duration) * v).toFixed(2)}`).join(', ') || '无';
@@ -297,9 +320,26 @@ export const PowerRecipeModal: React.FC<{ open: boolean; onClose: () => void }> 
 
   const filtered = useMemo(() => {
     return entries.filter(e => {
+      // 清除之前的匹配记录
+      e.matchedRecipes = undefined;
       if (e.category !== currentCat) return false;
-      if (search && !t(e.buildingName, translation).toLowerCase().includes(search.toLowerCase())
-        && !e.recipes.some(r => t(r.name, translation).toLowerCase().includes(search.toLowerCase()))) return false;
+      if (search) {
+        const s = search.toLowerCase();
+        const buildingNameMatch = t(e.buildingName, translation).toLowerCase().includes(s);
+        // 匹配配方名、原料、产物
+        const matchingRecipes = e.recipes.filter(r => {
+          if (t(r.name, translation).toLowerCase().includes(s)) return true;
+          if (Object.keys(r.inputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
+          if (Object.keys(r.outputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
+          return false;
+        });
+        if (!buildingNameMatch && matchingRecipes.length === 0) return false;
+        // 仅配方匹配（建筑名未匹配）→ 只显示匹配的配方
+        if (!buildingNameMatch) {
+          e.matchedRecipes = matchingRecipes;
+        }
+        // 建筑名匹配 → matchedRecipes 保持 undefined → 显示全部配方
+      }
       return true;
     });
   }, [entries, currentCat, search, translation]);

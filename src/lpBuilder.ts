@@ -1,4 +1,4 @@
-import { Recipe, Demand } from './types';
+import { Recipe, Demand, RedundancyResource } from './types';
 import { isRaw, isNonScalable } from './utils';
 
 // 全局调试标志
@@ -33,6 +33,11 @@ export interface LpInput {
   relaxLabor?: boolean;
   // 居民模块最小比例（r0 >= value），undefined 表示不加此约束
   minResidentValue?: number;
+  // 资源冗余设置
+  enableRedundancy?: boolean;
+  globalLower?: number;
+  globalUpper?: number;
+  redundancyResources?: Record<string, RedundancyResource>;
 }
 
 export interface LpOutput {
@@ -51,6 +56,10 @@ export function buildLp(input: LpInput): LpOutput {
     fixedMachines = {},
     relaxLabor = false,
     minResidentValue,
+    enableRedundancy = false,
+    globalLower = 100,
+    globalUpper = 100,
+    redundancyResources = {},
   } = input;
   
   const isAllowExternal = allowExternal ?? false;
@@ -238,6 +247,96 @@ export function buildLp(input: LpInput): LpOutput {
     return parts.join(' + ');
   };
 
+  // 仅计算消费项（输入+维护），返回正系数字符串，用于中间产物冗余约束
+  const makeNegExprOnly = (recipes: Recipe[], vars: string[], it: string): string => {
+    let expr = '';
+    recipes.forEach((r, i) => {
+      let c = 0;
+      if (r.module === 'trade') {
+        if (r.inputs[it]) c += r.inputs[it];
+        if (r.upkeep[it]) {
+          const reduction = it.startsWith('maintenance') ? reductionFactor : 0;
+          c += r.upkeep[it] * (1 - reduction);
+        }
+        if (Math.abs(c) > 1e-9) {
+          if (expr) expr += ' ';
+          expr += `${c} ${vars[i]}`;
+        }
+        return;
+      }
+      let scale = 1;
+      if (r.inputs[it]) {
+        if (!isContinuous(it)) scale = 60 / r.duration;
+      }
+      if (r.inputs[it]) c += scale * r.inputs[it];
+      if (r.upkeep[it]) {
+        const reduction = it.startsWith('maintenance') ? reductionFactor : 0;
+        c += r.upkeep[it] * (1 - reduction);
+      }
+      if (Math.abs(c) > 1e-9) {
+        if (expr) expr += ' ';
+        expr += `${c} ${vars[i]}`;
+      }
+    });
+    return expr;
+  };
+
+  const allNegExpr = (it: string) => {
+    const parts = [
+      makeNegExprOnly(mainActive, mainVarNames, it),
+      makeNegExprOnly(powerActive, powerVarNames, it),
+      makeNegExprOnly(residentActive, residentVarNames, it),
+      makeNegExprOnly(stationActive, stationVarNames, it),
+      makeNegExprOnly(specialActive, specialVarNames, it),
+      makeNegExprOnly(tradeActive, tradeVarNames, it),
+    ].filter(Boolean);
+    return parts.join(' + ');
+  };
+
+  // 解析表达式字符串为 {coeff, varName} 数组
+  const parseExpr = (expr: string): { coeff: number; varName: string }[] => {
+    if (!expr.trim()) return [];
+    const terms: { coeff: number; varName: string }[] = [];
+    // 先在 ' + ' 和 ' - ' 处分割，保留分隔符
+    const tokens = expr.split(/( \+ | - )/);
+    let sign = 1;
+    for (const tok of tokens) {
+      if (tok === ' + ') { sign = 1; continue; }
+      if (tok === ' - ') { sign = -1; continue; }
+      const trimmed = tok.trim();
+      if (!trimmed) continue;
+      const m = trimmed.match(/^([\d.]+)\s+(.+)$/);
+      if (m) {
+        terms.push({ coeff: sign * parseFloat(m[1]), varName: m[2] });
+      }
+    }
+    return terms;
+  };
+
+  // 构建合并表达式: netExpr - slack * negExpr
+  const buildSlackExpr = (netExpr: string, negExpr: string, slack: number): string => {
+    if (Math.abs(slack) < 1e-9) return netExpr;
+    // 合并两个表达式中的系数
+    const coeffMap: Record<string, number> = {};
+    for (const { coeff, varName } of parseExpr(netExpr)) {
+      coeffMap[varName] = (coeffMap[varName] || 0) + coeff;
+    }
+    for (const { coeff, varName } of parseExpr(negExpr)) {
+      // negExpr 的系数是正数，减去 slack * coeff
+      coeffMap[varName] = (coeffMap[varName] || 0) - slack * coeff;
+    }
+    const parts: string[] = [];
+    for (const [varName, coeff] of Object.entries(coeffMap)) {
+      if (Math.abs(coeff) < 1e-9) continue;
+      if (parts.length === 0) {
+        parts.push(coeff >= 0 ? `${coeff} ${varName}` : `- ${-coeff} ${varName}`);
+      } else {
+        parts.push(coeff >= 0 ? `+ ${coeff} ${varName}` : `- ${-coeff} ${varName}`);
+      }
+    }
+    return parts.join(' ') || '0';
+  };
+
   const producers = new Set<string>();
   const consumers = new Set<string>();
   allActive.forEach(r => {
@@ -280,7 +379,52 @@ export function buildLp(input: LpInput): LpOutput {
     return exprs.filter(e => e.trim() !== '').join(' + ');
   };
 
+  // ========== 2.5. 冗余因子辅助函数 ==========
+  const getRedundancyFactors = (item: string): { lowerFactor: number; upperFactor: number } | null => {
+    if (!enableRedundancy) return null;
+    const res = redundancyResources[item];
+    // 显式关闭的才退出：res 存在且 enabled 严格为 false
+    // 不在 map 中的物品自动视为启用（{enabled:true, lower:100, upper:100}）
+    // 不在 map 中 → 不参与冗余（opt-in 模式）
+    if (!res) return null;
+    // 显式关闭
+    if (res.enabled === false) return null;
+    const rl = res.lower;
+    const ru = res.upper;
+    // 独立回退：每个值为 100% 时自动使用全局值（各自独立判断，而非绑在一起）
+    const lowerPct = rl === 100 ? globalLower : rl;
+    const upperPct = ru === 100 ? globalUpper : ru;
+    // 连续解模式无上限，下限不得低于 100% 以避免需求不满足
+    // 整数模式有明确上/下限，直接使用用户设定值
+    const clampLower = integerMode === 'continuous';
+    const lowerFactor = clampLower ? Math.max(lowerPct, 100) / 100 : lowerPct / 100;
+    const upperFactor = upperPct / 100;
+    // 优化：因子均为 1.0 时不改变约束（避免非必要的约束收窄）
+    if (lowerFactor === 1.0 && upperFactor === 1.0) return null;
+    return { lowerFactor, upperFactor };
+  };
+
+  // [DIAGNOSTIC] 冗余设置摘要
+  if (enableRedundancy) {
+    const explicitlyConfigured = Object.keys(redundancyResources).filter(k => redundancyResources[k]?.enabled === true);
+    const explicitlyDisabled = Object.keys(redundancyResources).filter(k => redundancyResources[k]?.enabled === false);
+    console.warn('[冗余] buildLp 入参:', {
+      enableRedundancy,
+      globalLower,
+      globalUpper,
+      integerMode,
+      itemsInLoop: [...items].length,
+      explicitlyConfigured: explicitlyConfigured.length,
+      explicitlyDisabled: explicitlyDisabled.length,
+      configuredItems: explicitlyConfigured,
+      disabledItems: explicitlyDisabled,
+      note: '仅显式启用的物品参与冗余（opt-in），未配置物品不受影响',
+    });
+  }
+
   // ========== 3. 为每个物品生成约束 ==========
+  let redundancyAppliedCount = 0;
+  const redundancyAppliedItems: string[] = [];
   for (const it of items) {
     if (it === 'research') continue;
 
@@ -308,11 +452,28 @@ export function buildLp(input: LpInput): LpOutput {
 
     if (demandSet.has(it)) {
       const effectiveDr = Math.max(0, totalDr - supply);
+      const rf = getRedundancyFactors(it);
       if (expr) {
-        lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-        if (integerMode !== 'continuous' && it !== '人力') {
-          const upperBound = effectiveDr * (1 + redundancy);
-          lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
+        if (rf) {
+          // 冗余约束
+          redundancyAppliedCount++;
+          redundancyAppliedItems.push(`${it}(L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
+          const lowerBound = effectiveDr * rf.lowerFactor;
+          if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+            const upperBound = effectiveDr * rf.upperFactor;
+            lp += ` ${rows[it]}: ${expr} >= ${lowerBound}\n`;
+            lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
+          } else {
+            // 连续解模式：仅应用下限
+            lp += ` ${rows[it]}: ${expr} >= ${lowerBound}\n`;
+          }
+        } else {
+          // 无冗余：原有逻辑
+          lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
+          if (integerMode !== 'continuous' && it !== '人力') {
+            const upperBound = effectiveDr * (1 + redundancy);
+            lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
+          }
         }
       } else {
         lp += ` ${rows[it]}: 0 >= ${effectiveDr}\n`;
@@ -322,7 +483,22 @@ export function buildLp(input: LpInput): LpOutput {
         if (!missing.includes(it)) missing.push(it);
         continue;
       }
-      if (expr) lp += ` ${rows[it]}: ${expr} = ${-supply}\n`;
+      const rfSupply = getRedundancyFactors(it);
+      if (rfSupply && expr) {
+        // 供给作为负需求，冗余缩放供给率
+        // lowerFactor: 必须消耗的最低比例 → expr <= -(supply * lowerFactor)
+        // upperFactor: 允许消耗的最高比例 → expr >= -(supply * upperFactor)
+        if (integerMode !== 'continuous' && it !== '人力') {
+          lp += ` ${rows[it]}: ${expr} <= ${-(supply * rfSupply.lowerFactor)}\n`;
+          lp += ` ${rows[it]}_upper: ${expr} >= ${-(supply * rfSupply.upperFactor)}\n`;
+        } else {
+          lp += ` ${rows[it]}: ${expr} <= ${-(supply * rfSupply.lowerFactor)}\n`;
+        }
+        redundancyAppliedCount++;
+        redundancyAppliedItems.push(`${it}(供给 L=${rfSupply.lowerFactor.toFixed(2)} U=${rfSupply.upperFactor.toFixed(2)})`);
+      } else {
+        if (expr) lp += ` ${rows[it]}: ${expr} = ${-supply}\n`;
+      }
     } else {
       const isExcludedOutput = excludedOutputs.has(it);
       const isExcludedInput = excludedInputs.has(it);
@@ -331,14 +507,48 @@ export function buildLp(input: LpInput): LpOutput {
       if (isAllowExternal && !hasProducer && hasConsumer) continue;
       // 同时在排除产出和排除输入 → 不约束
       if (isExcludedOutput && isExcludedInput) continue;
-      // 排除输入：允许净消耗但不允许净产出 → <= 0
+      // 排除输入：允许净消耗但不允许净产出 → <= 0（冗余：允许消耗在范围内浮动）
       if (isExcludedInput && hasConsumer && expr) {
-        lp += ` ${rows[it]}: ${expr} <= 0\n`;
+        const rfExIn = getRedundancyFactors(it);
+        if (rfExIn) {
+          const negExprExIn = allNegExpr(it);
+          const lowerSlackIn = rfExIn.lowerFactor - 1;
+          const lowerExprIn = buildSlackExpr(expr, negExprExIn, lowerSlackIn);
+          if (integerMode !== 'continuous' && it !== '人力' && rfExIn.upperFactor > 1.0) {
+            const upperSlackIn = rfExIn.upperFactor - 1;
+            const upperExprIn = buildSlackExpr(expr, negExprExIn, upperSlackIn);
+            lp += ` ${rows[it]}: ${lowerExprIn} >= 0\n`;
+            lp += ` ${rows[it]}_upper: ${upperExprIn} <= 0\n`;
+          } else {
+            lp += ` ${rows[it]}: ${lowerExprIn} >= 0\n`;
+          }
+          redundancyAppliedCount++;
+          redundancyAppliedItems.push(`${it}(排除输入 L=${rfExIn.lowerFactor.toFixed(2)} U=${rfExIn.upperFactor.toFixed(2)})`);
+        } else {
+          lp += ` ${rows[it]}: ${expr} <= 0\n`;
+        }
         continue;
       }
-      // 排除产出：允许净产出但不允许净消耗 → >= 0
+      // 排除产出：允许净产出但不允许净消耗 → >= 0（冗余：允许产出在范围内浮动）
       if (isExcludedOutput && hasProducer && expr) {
-        lp += ` ${rows[it]}: ${expr} >= 0\n`;
+        const rfExOut = getRedundancyFactors(it);
+        if (rfExOut) {
+          const negExprExOut = allNegExpr(it);
+          const lowerSlackOut = rfExOut.lowerFactor - 1;
+          const lowerExprOut = buildSlackExpr(expr, negExprExOut, lowerSlackOut);
+          if (integerMode !== 'continuous' && it !== '人力' && rfExOut.upperFactor > 1.0) {
+            const upperSlackOut = rfExOut.upperFactor - 1;
+            const upperExprOut = buildSlackExpr(expr, negExprExOut, upperSlackOut);
+            lp += ` ${rows[it]}: ${lowerExprOut} >= 0\n`;
+            lp += ` ${rows[it]}_upper: ${upperExprOut} <= 0\n`;
+          } else {
+            lp += ` ${rows[it]}: ${lowerExprOut} >= 0\n`;
+          }
+          redundancyAppliedCount++;
+          redundancyAppliedItems.push(`${it}(排除产出 L=${rfExOut.lowerFactor.toFixed(2)} U=${rfExOut.upperFactor.toFixed(2)})`);
+        } else {
+          lp += ` ${rows[it]}: ${expr} >= 0\n`;
+        }
         continue;
       }
       const shouldConstrain = (hasProd: boolean, hasCons: boolean): boolean => {
@@ -346,7 +556,34 @@ export function buildLp(input: LpInput): LpOutput {
         return hasProd;
       };
       if (!shouldConstrain(hasProducer, hasConsumer)) continue;
-      if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
+      if (expr) {
+        // 检查中间产物是否配置了冗余
+        const rf = getRedundancyFactors(it);
+        if (rf) {
+          // 消费表达式（正系数）= 所有输入+维护消耗的总和
+          const negExpr = allNegExpr(it);
+          // 约束: netExpr >= (lowerFactor - 1) * negExpr (允许/强制超额生产)
+          const lowerSlack = rf.lowerFactor - 1;
+          const lowerExpr = buildSlackExpr(expr, negExpr, lowerSlack);
+          if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+            const upperSlack = rf.upperFactor - 1;
+            const upperExpr = buildSlackExpr(expr, negExpr, upperSlack);
+            lp += ` ${rows[it]}: ${lowerExpr} >= 0\n`;
+            lp += ` ${rows[it]}_upper: ${upperExpr} <= 0\n`;
+          } else {
+            lp += ` ${rows[it]}: ${lowerExpr} >= 0\n`;
+          }
+          redundancyAppliedCount++;
+          redundancyAppliedItems.push(`${it}(中间产物 L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
+        } else {
+          // 死胡同副产物（有生产无消费）：允许净产出 >= 0，避免联合生产时阻断主产物
+          if (!hasConsumer) {
+            lp += ` ${rows[it]}: ${expr} >= 0\n`;
+          } else {
+            lp += ` ${rows[it]}: ${expr} = 0\n`;
+          }
+        }
+      }
     }
   }
 
@@ -358,6 +595,8 @@ export function buildLp(input: LpInput): LpOutput {
   }
 
   for (const it of allSpecialItems) {
+    const rf = getRedundancyFactors(it);
+
     // 主模块方程：仅使用非电力配方
     const mainExpr = combineExprs(
       makeExpr(mainActive, mainVarNames, it),
@@ -366,14 +605,54 @@ export function buildLp(input: LpInput): LpOutput {
       makeExpr(specialActive, specialVarNames, it),
       makeExpr(tradeActive, tradeVarNames, it)
     );
-    if (mainExpr) {
-      lp += ` ${rows[it]}_main: ${mainExpr} = 0\n`;
-    }
 
     // 电力模块方程：仅使用电力配方
     const powerExpr = makeExpr(powerActive, powerVarNames, it);
-    if (powerExpr) {
-      lp += ` ${rows[it]}_power: ${powerExpr} = 0\n`;
+
+    if (rf) {
+      // 主模块消费（非电力配方）
+      const mainNegExpr = combineExprs(
+        makeNegExprOnly(mainActive, mainVarNames, it),
+        makeNegExprOnly(residentActive, residentVarNames, it),
+        makeNegExprOnly(stationActive, stationVarNames, it),
+        makeNegExprOnly(specialActive, specialVarNames, it),
+        makeNegExprOnly(tradeActive, tradeVarNames, it)
+      );
+      // 电力模块消费
+      const powerNegExpr = makeNegExprOnly(powerActive, powerVarNames, it);
+
+      const lowerSlack = rf.lowerFactor - 1;
+      const upperSlack = rf.upperFactor - 1;
+
+      if (mainExpr) {
+        const mainLowerExpr = buildSlackExpr(mainExpr, mainNegExpr, lowerSlack);
+        if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+          const mainUpperExpr = buildSlackExpr(mainExpr, mainNegExpr, upperSlack);
+          lp += ` ${rows[it]}_main: ${mainLowerExpr} >= 0\n`;
+          lp += ` ${rows[it]}_main_upper: ${mainUpperExpr} <= 0\n`;
+        } else {
+          lp += ` ${rows[it]}_main: ${mainLowerExpr} >= 0\n`;
+        }
+      }
+      if (powerExpr) {
+        const powerLowerExpr = buildSlackExpr(powerExpr, powerNegExpr, lowerSlack);
+        if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+          const powerUpperExpr = buildSlackExpr(powerExpr, powerNegExpr, upperSlack);
+          lp += ` ${rows[it]}_power: ${powerLowerExpr} >= 0\n`;
+          lp += ` ${rows[it]}_power_upper: ${powerUpperExpr} <= 0\n`;
+        } else {
+          lp += ` ${rows[it]}_power: ${powerLowerExpr} >= 0\n`;
+        }
+      }
+      redundancyAppliedCount++;
+      redundancyAppliedItems.push(`${it}(特殊 L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
+    } else {
+      if (mainExpr) {
+        lp += ` ${rows[it]}_main: ${mainExpr} = 0\n`;
+      }
+      if (powerExpr) {
+        lp += ` ${rows[it]}_power: ${powerExpr} = 0\n`;
+      }
     }
   }
 
@@ -395,6 +674,18 @@ export function buildLp(input: LpInput): LpOutput {
     if (integerVars.length) {
       lp += '\nINTEGER\n ' + integerVars.join(' ') + '\n';
     }
+  }
+  // [DIAGNOSTIC] 冗余约束应用摘要
+  if (enableRedundancy) {
+    console.warn('[冗余] 约束生成摘要:', {
+      totalDemandItems: [...demandSet].length,
+      redundancyAppliedCount,
+      redundancyAppliedItems,
+      excludedOutputs: [...excludedOutputs],
+      excludedInputs: [...excludedInputs],
+      ignored: [...ignored],
+      itemsInLoop: [...items],
+    });
   }
   return { lpString: lp + 'END\n', varNames, missing };
 }
