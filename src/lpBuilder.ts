@@ -430,33 +430,7 @@ export function buildLp(input: LpInput): LpOutput {
     });
   }
 
-  // ========== 3. 预扫描：识别与冗余物品联合产出的物品 ==========
-  // 当配方 R 同时产出 A 和 B，B 有冗余（要求超额生产），A 无冗余（严格 = 0）时，
-  // 为了超额生产 B 必须增加 R，A 也会被超额生产 — 违反 A 的严格平衡。
-  // 因此需要标记这些"被联合产出拖累"的物品，将其约束从 = 0 放松为 >= 0。
-  const coProducedWithRedundant = new Set<string>();
-  if (enableRedundancy) {
-    for (const it of items) {
-      const rf = getRedundancyFactors(it);
-      if (rf) {
-        // 该物品有冗余 → 标记其所有联合产出物
-        for (const r of allActive) {
-          if (r.outputs[it]) {
-            for (const co of Object.keys(r.outputs)) {
-              if (co !== it && !ignored.has(co) && !excludedOutputs.has(co) && !excludedInputs.has(co)) {
-                coProducedWithRedundant.add(co);
-              }
-            }
-          }
-        }
-      }
-    }
-    if (coProducedWithRedundant.size > 0) {
-      console.warn('[冗余] 联合产出放松（这些物品与冗余物品共享配方，约束从 = 0 放松为 >= 0）:', [...coProducedWithRedundant]);
-    }
-  }
-
-  // ========== 4. 为每个物品生成约束 ==========
+  // ========== 3. 为每个物品生成约束 ==========
   let redundancyAppliedCount = 0;
   const redundancyAppliedItems: string[] = [];
   for (const it of items) {
@@ -623,8 +597,7 @@ export function buildLp(input: LpInput): LpOutput {
           });
         } else {
           // 死胡同副产物（有生产无消费）：允许净产出 >= 0，避免联合生产时阻断主产物
-          // 与冗余物品联合产出的物品：放松为 >= 0，避免联合生产约束冲突
-          if (!hasConsumer || coProducedWithRedundant.has(it)) {
+          if (!hasConsumer) {
             lp += ` ${rows[it]}: ${expr} >= 0\n`;
           } else {
             lp += ` ${rows[it]}: ${expr} = 0\n`;
@@ -634,7 +607,7 @@ export function buildLp(input: LpInput): LpOutput {
     }
   }
 
-  // ========== 5. 特殊物品的独立方程（电力模块 vs 主模块） ==========
+  // ========== 4. 特殊物品的独立方程（电力模块 vs 主模块） ==========
   // 扩展特殊物品：如果 steamLowMode === 'internal'，把 steam (low) 也加入
   const allSpecialItems = new Set(powerSpecialItems);
   if (steamLowMode === 'internal') {
@@ -694,13 +667,11 @@ export function buildLp(input: LpInput): LpOutput {
       redundancyAppliedCount++;
       redundancyAppliedItems.push(`${it}(特殊 L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
     } else {
-      // 与冗余物品联合产出的物品：放松为 >= 0
-      const relax = coProducedWithRedundant.has(it);
       if (mainExpr) {
-        lp += ` ${rows[it]}_main: ${mainExpr} ${relax ? '>= 0' : '= 0'}\n`;
+        lp += ` ${rows[it]}_main: ${mainExpr} = 0\n`;
       }
       if (powerExpr) {
-        lp += ` ${rows[it]}_power: ${powerExpr} ${relax ? '>= 0' : '= 0'}\n`;
+        lp += ` ${rows[it]}_power: ${powerExpr} = 0\n`;
       }
     }
   }
