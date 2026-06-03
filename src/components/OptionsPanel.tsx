@@ -30,8 +30,6 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
 
   const integerMode = useStore(s => s.integerMode);
   const setIntegerMode = useStore(s => s.setIntegerMode);
-  const redundancyFactor = useStore(s => s.redundancyFactor);
-  const setRedundancyFactor = useStore(s => s.setRedundancyFactor);
   const milpTimeLimit = useStore(s => s.milpTimeLimit);
   const setMilpTimeLimit = useStore(s => s.setMilpTimeLimit);
 
@@ -76,23 +74,6 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
             <option value="milp">混合整数规划 MILP（精确）</option>
           </select>
         </div>
-
-        {integerMode !== 'continuous' && (
-          <div style={{ marginBottom: 8 }}>
-            <label>📈 允许超产冗余: {(redundancyFactor * 100).toFixed(0)}%</label>
-            <input
-              type="range"
-              min={0}
-              max={20}
-              step={1}
-              value={redundancyFactor * 100}
-              onChange={e => setRedundancyFactor(parseInt(e.target.value) / 100)}
-              style={{ marginLeft: 10, width: 200 }}
-              disabled={!dataLoaded}
-            />
-            <span className="hint" style={{ marginLeft: 10 }}>（允许产量超出需求，避免短缺）</span>
-          </div>
-        )}
 
         {integerMode === 'milp' && (
           <div>

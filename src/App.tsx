@@ -216,7 +216,7 @@ export default function App() {
   };
 
   // solveCeilMode：向上取整模式（通过重新构建 LP 并传入 fixedMachines）
-  const solveCeilMode = async (lpString: string, varNames: string[]) => {
+  const solveCeilMode = async (lpString: string, varNames: string[], mainActive: Recipe[]) => {
     try {
       setDiagnostic('🔄 求解中 (取整模式)...');
       // 第一次 LP 求解
@@ -227,8 +227,11 @@ export default function App() {
         return;
       }
 
-      // 提取机器变量并向上取整
-      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t'));
+      // 提取机器变量并向上取整（仅主模块和电力模块的建筑，排除贸易/农业/特殊/居民/空间站）
+      const agriVarsCeil = new Set(
+        mainActive.filter(r => r.category === '农业').map((_, i) => `x${i}`)
+      );
+      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t') && !v.startsWith('tr') && !agriVarsCeil.has(v));
       const fixed: Record<string, number> = {};
       for (const v of machineVars) {
         const val = lpResult.Columns?.[v]?.Primal || lpResult.columns?.[v]?.Primal || 0;
@@ -279,7 +282,6 @@ export default function App() {
         fixedUnityProduction,
         fixedUnityConsumption,
         integerMode: 'continuous', // 取整模式不需要 milp
-        redundancy: 0,
         fixedMachines: fixed, // 传入固定值
         enableRedundancy: state.enableRedundancy,
         globalLower: state.globalLower,
@@ -288,12 +290,34 @@ export default function App() {
       });
 
       const fixedResult = await runLpSolver(newLp, newVarNames);
-      setResult(fixedResult);
-      setIsSolving(false);
       if (fixedResult?.Status === 'Optimal') {
+        setResult(fixedResult);
+        setIsSolving(false);
         setDiagnostic('✅ 取整模式求解完成');
-      } else if (fixedResult?.Status === 'Infeasible') {
-        setDiagnostic('⚠️ 取整后无解，尝试增加冗余...');
+      } else {
+        // 回退：取整后无解，使用连续解兜底
+        setDiagnostic('⚠️ 取整后无解，回退为连续解...');
+        const { lpString: fallbackLp, varNames: fallbackVarNames } = buildLp({
+          mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+          ignored, demands: positiveDemands, externalSupplies: allExternalSupplies,
+          reductionFactor, steamLowMode: state.steamLowMode as 'internal' | 'shared',
+          excludedOutputs, excludedInputs, constraintMode: state.constraintMode,
+          allowExternal: state.allowExternal, optimizationMode: state.optimizationMode,
+          customWeights: state.customWeights,
+          fixedUnityProduction, fixedUnityConsumption,
+          integerMode: 'continuous',
+          enableRedundancy: state.enableRedundancy,
+          globalLower: state.globalLower, globalUpper: state.globalUpper,
+          redundancyResources: state.redundancyResources,
+        });
+        const fallbackResult = await runLpSolver(fallbackLp, fallbackVarNames);
+        setResult(fallbackResult);
+        setIsSolving(false);
+        if (fallbackResult?.Status === 'Optimal') {
+          setDiagnostic('⚠️ 取整后无解，已回退为连续解。');
+        } else {
+          setDiagnostic(`⚠️ 连续解也失败: ${fallbackResult?.Status || '未知'}`);
+        }
       }
     } catch (err: any) {
       setDiagnostic(`取整模式错误: ${err.message}`);
@@ -302,11 +326,14 @@ export default function App() {
   };
 
   // solveHeuristicMode：启发式取整模式（通过重新构建 LP 并传入 fixedMachines）
-  const solveHeuristicMode = async (lpString: string, varNames: string[]) => {
+  const solveHeuristicMode = async (lpString: string, varNames: string[], mainActive: Recipe[]) => {
     try {
       setDiagnostic('🔄 求解中 (启发式模式)...');
       const fixed: Record<string, number> = {};
-      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t'));
+      const agriVarsHeur = new Set(
+        mainActive.filter(r => r.category === '农业').map((_, i) => `x${i}`)
+      );
+      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t') && !v.startsWith('tr') && !agriVarsHeur.has(v));
 
       // 逐步固定变量，每次重新构建 LP
       for (let iter = 0; iter < Math.min(machineVars.length, 20); iter++) {
@@ -346,7 +373,6 @@ export default function App() {
           fixedUnityProduction,
           fixedUnityConsumption,
           integerMode: 'continuous',
-          redundancy: 0,
           fixedMachines: fixed,
           enableRedundancy: state.enableRedundancy,
           globalLower: state.globalLower,
@@ -415,7 +441,6 @@ export default function App() {
           fixedUnityProduction,
           fixedUnityConsumption,
           integerMode: 'continuous',
-          redundancy: 0,
           fixedMachines: fixed,
           enableRedundancy: state.enableRedundancy,
           globalLower: state.globalLower,
@@ -424,12 +449,34 @@ export default function App() {
         });
 
         const finalResult = await runLpSolver(finalLp, finalVarNames);
-        setResult(finalResult);
-        setIsSolving(false);
         if (finalResult?.Status === 'Optimal') {
+          setResult(finalResult);
+          setIsSolving(false);
           setDiagnostic(`✅ 启发式模式求解完成 (固定 ${Object.keys(fixed).length} 个变量)`);
         } else {
-          setDiagnostic(`⚠️ 启发式求解状态: ${finalResult?.Status || '未知'}`);
+          // 回退：取整后无解，使用连续解兜底
+          setDiagnostic(`⚠️ 启发式取整后无解，回退为连续解...`);
+          const { lpString: fallbackLp, varNames: fallbackVarNames } = buildLp({
+            mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+            ignored, demands: positiveDemands, externalSupplies: allExternalSupplies,
+            reductionFactor, steamLowMode: state.steamLowMode as 'internal' | 'shared',
+            excludedOutputs, excludedInputs, constraintMode: state.constraintMode,
+            allowExternal: state.allowExternal, optimizationMode: state.optimizationMode,
+            customWeights: state.customWeights,
+            fixedUnityProduction, fixedUnityConsumption,
+            integerMode: 'continuous',
+            enableRedundancy: state.enableRedundancy,
+            globalLower: state.globalLower, globalUpper: state.globalUpper,
+            redundancyResources: state.redundancyResources,
+          });
+          const fallbackResult = await runLpSolver(fallbackLp, fallbackVarNames);
+          setResult(fallbackResult);
+          setIsSolving(false);
+          if (fallbackResult?.Status === 'Optimal') {
+            setDiagnostic('⚠️ 启发式取整后无解，已回退为连续解。');
+          } else {
+            setDiagnostic(`⚠️ 连续解也失败: ${fallbackResult?.Status || '未知'}`);
+          }
         }
       } else {
         setIsSolving(false);
@@ -530,7 +577,7 @@ export default function App() {
       reductionFactor, steamLowMode: s.steamLowMode as 'internal' | 'shared',
       excludedOutputs, excludedInputs, constraintMode: s.constraintMode,
       allowExternal: effectiveAllowExternal, optimizationMode, customWeights,
-      fixedUnityProduction, fixedUnityConsumption, integerMode, redundancy: s.redundancyFactor,
+      fixedUnityProduction, fixedUnityConsumption, integerMode,
       // 资源冗余设置
       enableRedundancy: s.enableRedundancy,
       globalLower: s.globalLower,
@@ -647,9 +694,9 @@ export default function App() {
           finalizeResult(pass2Result, pass2Lp.varNames, pass2Result?.Status === 'Optimal' ? '⚠️ 人力约束下求得可行解。' : '');
         }
       } else if (integerMode === 'ceil') {
-        await solveCeilMode(pass1Lp.lpString, pass1Lp.varNames);
+        await solveCeilMode(pass1Lp.lpString, pass1Lp.varNames, mainActive);
       } else if (integerMode === 'heuristic') {
-        await solveHeuristicMode(pass1Lp.lpString, pass1Lp.varNames);
+        await solveHeuristicMode(pass1Lp.lpString, pass1Lp.varNames, mainActive);
       }
     } catch (err: any) {
       setIsSolving(false);

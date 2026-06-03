@@ -252,7 +252,6 @@ export interface StoreState {
 
   // 新增字段
   integerMode: IntegerMode;
-  redundancyFactor: number;
   milpTimeLimit: number;
 
   // 资源冗余设置

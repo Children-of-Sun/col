@@ -113,7 +113,6 @@ export async function solveWithFallback(
       fixedUnityProduction: recipeBuild.fixedUnityProduction,
       fixedUnityConsumption: recipeBuild.fixedUnityConsumption,
       integerMode: state.integerMode,
-      redundancy: state.redundancyFactor,
       steamLowMode: state.steamLowMode as any,
       excludedOutputs: new Set(state.excludedOutputs),
       excludedInputs: new Set(state.excludedInputs),

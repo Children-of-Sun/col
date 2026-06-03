@@ -116,7 +116,6 @@ export const useStore = create<StoreState>((set, get) => ({
 
   // 整数模式相关
   integerMode: 'continuous' as 'continuous' | 'ceil' | 'heuristic' | 'milp',
-  redundancyFactor: 0,
   milpTimeLimit: 30,
 
   // 资源冗余设置
@@ -349,7 +348,6 @@ export const useStore = create<StoreState>((set, get) => ({
   setCustomWeights: (weights) => set({ customWeights: { ...get().customWeights, ...weights } }),
 
   setIntegerMode: (mode) => set({ integerMode: mode }),
-  setRedundancyFactor: (v) => set({ redundancyFactor: v }),
   setMilpTimeLimit: (v) => set({ milpTimeLimit: v }),
   setEnableRedundancy: (v) => set({ enableRedundancy: v }),
   setGlobalLower: (v) => set({ globalLower: v }),
@@ -411,12 +409,18 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.officeSelectedLevel !== undefined) state.officeSelectedLevel = s.officeSelectedLevel;
     if (s.officeRecipeEnabled !== undefined) state.officeRecipeEnabled = s.officeRecipeEnabled;
     if (s.integerMode !== undefined) state.integerMode = s.integerMode;
-    if (s.redundancyFactor !== undefined) state.redundancyFactor = s.redundancyFactor;
     if (s.milpTimeLimit !== undefined) state.milpTimeLimit = s.milpTimeLimit;
     if (s.enableRedundancy !== undefined) state.enableRedundancy = s.enableRedundancy;
     if (s.globalLower !== undefined) state.globalLower = s.globalLower;
     if (s.globalUpper !== undefined) state.globalUpper = s.globalUpper;
     if (s.redundancyResources !== undefined) state.redundancyResources = s.redundancyResources;
+    // 生产目标 & 外部供给
+    if (s.demands !== undefined) state.demands = s.demands;
+    if (s.externalSupplies !== undefined) state.externalSupplies = s.externalSupplies;
+    if (s.selectedTradeRecipes !== undefined) state.selectedTradeRecipes = s.selectedTradeRecipes;
+    // 其他 UI 设置
+    if (s.hideStage !== undefined) state.hideStage = s.hideStage;
+    if (s.diagnosticMode !== undefined) state.diagnosticMode = s.diagnosticMode;
     if (s.medicalMultiplier !== undefined) state.medicalMultiplier = s.medicalMultiplier;
     if (s.farms !== undefined) {
       // 深度恢复 farms 结构（确保每个 crop 的 enabled 等字段保留）
@@ -479,12 +483,18 @@ export const useStore = create<StoreState>((set, get) => ({
       officeRecipeEnabled: s.officeRecipeEnabled,
       farms: s.farms,
       integerMode: s.integerMode,
-      redundancyFactor: s.redundancyFactor,
       milpTimeLimit: s.milpTimeLimit,
       enableRedundancy: s.enableRedundancy,
       globalLower: s.globalLower,
       globalUpper: s.globalUpper,
       redundancyResources: s.redundancyResources,
+      // 生产目标 & 外部供给
+      demands: s.demands,
+      externalSupplies: s.externalSupplies,
+      selectedTradeRecipes: s.selectedTradeRecipes,
+      // 其他 UI 设置
+      hideStage: s.hideStage,
+      diagnosticMode: s.diagnosticMode,
     };
   },
 

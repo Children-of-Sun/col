@@ -26,7 +26,6 @@ export interface LpInput {
   fixedUnityConsumption?: number;
   // 新增字段
   integerMode?: 'continuous' | 'ceil' | 'heuristic' | 'milp';
-  redundancy?: number;
   milpTimeLimit?: number;
   fixedMachines?: Record<string, number>;
   // 人力约束：false 时强制人力 <= 人口，true 时跳过人力约束
@@ -52,7 +51,7 @@ export function buildLp(input: LpInput): LpOutput {
     ignored, demands, externalSupplies, reductionFactor, steamLowMode, excludedOutputs, excludedInputs, 
     constraintMode, allowExternal, optimizationMode, customWeights, 
     fixedUnityProduction = 0, fixedUnityConsumption = 0,
-    integerMode = 'continuous', redundancy = 0, milpTimeLimit = 30,
+    integerMode = 'continuous', milpTimeLimit = 30,
     fixedMachines = {},
     relaxLabor = false,
     minResidentValue,
@@ -443,8 +442,15 @@ export function buildLp(input: LpInput): LpOutput {
     if (it === 'steam (low)') {
       // 根据 steamLowMode 决定是内部平衡还是全局平衡（已在全局平衡中）
       if (steamLowMode === 'shared') {
-        const expr = allExpr(it);
-        if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
+        const se = allExpr(it);
+        if (se) {
+          // 宽松模式下无消费者则跳过
+          if (constraintMode === 'noProdOrCons' && !consumers.has(it)) {
+            // 跳过，不生成约束
+          } else {
+            lp += ` ${rows[it]}: ${se} = 0\n`;
+          }
+        }
       } else if (steamLowMode === 'internal') {
         // 内部模式：由电力模块单独处理（已在 powerSpecialItems 中，不会走到这里）
         // 但为了完整性，这里什么都不做（因为 internal 时 steam(low) 会在后面单独处理）
@@ -476,13 +482,7 @@ export function buildLp(input: LpInput): LpOutput {
             lp += ` ${rows[it]}: ${expr} >= ${lowerBound}\n`;
           }
         } else {
-          // 无冗余：原有逻辑
           lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-          // 新冗余系统启用时，跳过旧 redundancy 上限，避免与联合生产的中间产物冗余约束冲突
-          if (it !== '人力' && !enableRedundancy) {
-            const upperBound = effectiveDr * (1 + redundancy);
-            lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
-          }
         }
       } else {
         lp += ` ${rows[it]}: 0 >= ${effectiveDr}\n`;
@@ -513,9 +513,27 @@ export function buildLp(input: LpInput): LpOutput {
       const isExcludedInput = excludedInputs.has(it);
       const hasProducer = producers.has(it);
       const hasConsumer = consumers.has(it);
+
+      // 允许外部供给：无生产者的物品从外部获取（两种模式均适用）
       if (isAllowExternal && !hasProducer && hasConsumer) continue;
+
       // 同时在排除产出和排除输入 → 不约束
       if (isExcludedOutput && isExcludedInput) continue;
+
+      // 约束模式检查（优先于排除列表）
+      const shouldConstrain = (hasProd: boolean, hasCons: boolean): boolean => {
+        if (constraintMode === 'noProdOrCons') return hasProd && hasCons;
+        return hasProd;
+      };
+      if (!shouldConstrain(hasProducer, hasConsumer)) {
+        // 常规模式下，无生产者但有消费者的物品（且不允许外部供给）→ 标记缺失
+        if (constraintMode !== 'noProdOrCons' && !isAllowExternal && !hasProducer && hasConsumer) {
+          if (!missing.includes(it)) missing.push(it);
+          if (expr) lp += ` ${rows[it]}: ${expr} = 0\n`;
+        }
+        continue;
+      }
+
       // 排除输入：允许净消耗但不允许净产出 → <= 0（冗余：允许消耗在范围内浮动）
       if (isExcludedInput && hasConsumer && expr) {
         const rfExIn = getRedundancyFactors(it);
@@ -560,11 +578,6 @@ export function buildLp(input: LpInput): LpOutput {
         }
         continue;
       }
-      const shouldConstrain = (hasProd: boolean, hasCons: boolean): boolean => {
-        if (constraintMode === 'noProdOrCons') return hasProd && hasCons;
-        return hasProd;
-      };
-      if (!shouldConstrain(hasProducer, hasConsumer)) continue;
       if (expr) {
         // 检查中间产物是否配置了冗余
         const rf = getRedundancyFactors(it);
@@ -689,8 +702,15 @@ export function buildLp(input: LpInput): LpOutput {
   }
 
   // 添加整数声明（仅在 milp 模式下）
+  // 只有主模块(非农业)和电力模块的建筑变量需要取整
+  // 贸易、农场、特殊、居民、空间站配方保持连续
   if (integerMode === 'milp') {
-    const integerVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t'));
+    const agriVarNames = new Set(
+      mainActive.filter(r => r.category === '农业').map((_, i) => `x${i}`)
+    );
+    const integerVars = varNames.filter(v =>
+      !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t') && !v.startsWith('tr') && !agriVarNames.has(v)
+    );
     if (integerVars.length) {
       lp += '\nINTEGER\n ' + integerVars.join(' ') + '\n';
     }

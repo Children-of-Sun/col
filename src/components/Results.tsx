@@ -6,7 +6,11 @@ import { Recipe } from '../types';
 import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue } from '../utils/format';
 import { IconWithFallback } from './IconWithFallback';
 
-function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number) {
+function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number, ceilUpkeep: boolean = false) {
+  // 取整模式下，建筑数量向上取整（用于维护/人力/电力/算力计算）
+  // 配方投入产出保持原始（小数）机器数量
+  const upkeepCount = ceilUpkeep ? Math.ceil(machineCount) : machineCount;
+
   // 贸易配方特殊处理（已为每分钟速率）
   if (recipe.module === 'trade') {
     const inputs: Record<string, number> = {};
@@ -20,7 +24,7 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
       outputs[item] = qty * machineCount;
     }
     for (const [item, qty] of Object.entries(recipe.upkeep)) {
-      let reducedQty = qty * machineCount;
+      let reducedQty = qty * upkeepCount;
       if (item.startsWith('maintenance')) {
         reducedQty *= (1 - reductionFactor);
       }
@@ -29,15 +33,15 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
       } else {
         inputs[item] = (inputs[item] || 0) + reducedQty;
       }
-      // 累加人力、电力、算力、维护
-      if (item === '人力') workers = reducedQty;
-      if (item === 'electricity') electricity = reducedQty;
-      if (item === 'computing') computing = reducedQty;
-      if (item === 'maintenance i') maintI = reducedQty;
-      if (item === 'maintenance ii') maintII = reducedQty;
-      if (item === 'maintenance iii') maintIII = reducedQty;
+      // 累加人力、电力、算力、维护（使用取整后的建筑数）
+      if (item === '人力') workers += reducedQty;
+      if (item === 'electricity') electricity += reducedQty;
+      if (item === 'computing') computing += reducedQty;
+      if (item === 'maintenance i') maintI += reducedQty;
+      if (item === 'maintenance ii') maintII += reducedQty;
+      if (item === 'maintenance iii') maintIII += reducedQty;
     }
-    return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount, cohesion };
+    return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount: upkeepCount, cohesion };
   }
 
   // 非贸易配方
@@ -50,7 +54,7 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
     let scale = 1;
     if (!isContinuousItem) scale = 60 / recipe.duration;
     inputs[item] = (inputs[item] || 0) + qty * scale * machineCount;
-    // 如果是电力或算力，同时累加到专门的字段
+    // 配方投入中的电力/算力（使用原始小数）
     if (item === 'electricity') electricity += qty * scale * machineCount;
     if (item === 'computing') computing += qty * scale * machineCount;
   }
@@ -63,12 +67,13 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
     outputs[item] = (outputs[item] || 0) + qty * scale * machineCount;
   }
   for (const [item, qty] of Object.entries(recipe.upkeep)) {
-    // upkeep 永远不缩放
-    let reducedQty = qty * machineCount;
+    // upkeep 使用取整后的建筑数量
+    let reducedQty = qty * upkeepCount;
     if (item.startsWith('maintenance')) {
       reducedQty *= (1 - reductionFactor);
     }
     inputs[item] = (inputs[item] || 0) + reducedQty;
+    // 人力、电力、算力、维护使用取整后的建筑数
     if (item === 'maintenance i') maintI += reducedQty;
     if (item === 'maintenance ii') maintII += reducedQty;
     if (item === 'maintenance iii') maintIII += reducedQty;
@@ -76,7 +81,7 @@ function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFact
     if (item === 'computing') computing += reducedQty;
     if (item === '人力') workers += reducedQty;
   }
-  return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount };
+  return { inputs, outputs, workers, electricity, computing, maintI, maintII, maintIII, machineCount: upkeepCount };
 }
 
 function mergeResources(target: Record<string, number>, source: Record<string, number>) {
@@ -362,6 +367,7 @@ export const Results: React.FC = () => {
   const cohesionTradeDirect = useStore(s => s.cohesionTradeDirect);
   const cohesionTradeMaintenance = useStore(s => s.cohesionTradeMaintenance);
   const cohesionEdict = useStore(s => s.cohesionEdict);
+  const integerMode = useStore(s => s.integerMode);
   const [selectedTab, setSelectedTab] = useState<string>('全厂总览');
   const [recipeSearch, setRecipeSearch] = useState('');
   const handleTabChange = (name: string) => { setSelectedTab(name); };
@@ -404,7 +410,7 @@ export const Results: React.FC = () => {
       const varName = solverVarNames[idx];
       const machineCount = varValues[varName] || 0;
       if (machineCount < 1e-6) return null;
-      const perMin = computeRecipePerMin(recipe, machineCount, reductionFactor);
+      const perMin = computeRecipePerMin(recipe, machineCount, reductionFactor, integerMode === 'ceil' || integerMode === 'heuristic');
       return { recipe, machineCount, perMin, idx, varName };
     }).filter(Boolean) as { recipe: Recipe; machineCount: number; perMin: any; idx: number; varName: string }[];
   }, [solverActive, varValues, reductionFactor]);
