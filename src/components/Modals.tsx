@@ -97,6 +97,10 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
             return;
           }
           setMainBuildingEnabled(b.id, checked);
+          // 单个配方的建筑：开启建筑时自动启用唯一配方
+          if (checked && mainRecipes.length === 1) {
+            setRecipeEnabled(mainRecipes[0].id, true);
+          }
         };
         return {
           buildingId: b.id,
@@ -299,6 +303,10 @@ export const PowerRecipeModal: React.FC<{ open: boolean; onClose: () => void }> 
             if (powerSelectedLevel[sn] !== lv) {
               setPowerLevel(sn, lv);
             }
+          }
+          // 单个配方的建筑：开启建筑时自动启用唯一配方
+          if (checked && recs.length === 1) {
+            setRecipeEnabled(recs[0].id, true);
           }
         };
         return {

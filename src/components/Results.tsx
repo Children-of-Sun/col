@@ -363,6 +363,8 @@ export const Results: React.FC = () => {
   const cohesionTradeMaintenance = useStore(s => s.cohesionTradeMaintenance);
   const cohesionEdict = useStore(s => s.cohesionEdict);
   const [selectedTab, setSelectedTab] = useState<string>('全厂总览');
+  const [recipeSearch, setRecipeSearch] = useState('');
+  const handleTabChange = (name: string) => { setSelectedTab(name); };
 
   const varValues = useMemo(() => {
     const cols = result?.Columns || result?.columns || {};
@@ -406,6 +408,24 @@ export const Results: React.FC = () => {
       return { recipe, machineCount, perMin, idx, varName };
     }).filter(Boolean) as { recipe: Recipe; machineCount: number; perMin: any; idx: number; varName: string }[];
   }, [solverActive, varValues, reductionFactor]);
+
+  const recipeSearchResults = useMemo(() => {
+    if (!recipeSearch) return { producing: [] as typeof recipeData, consuming: [] as typeof recipeData };
+    const s = recipeSearch.toLowerCase();
+    const active = recipeData.filter(d => d.machineCount > 0);
+    const producing = active.filter(d => {
+      if (t(d.recipe.buildingName, translation).toLowerCase().includes(s)) return true;
+      if (Object.keys(d.perMin.outputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
+      return false;
+    });
+    const consuming = active.filter(d => {
+      if (t(d.recipe.buildingName, translation).toLowerCase().includes(s)) return true;
+      if (Object.keys(d.perMin.inputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
+      if (d.perMin.upkeep && Object.keys(d.perMin.upkeep).some(k => t(k, translation).toLowerCase().includes(s))) return true;
+      return false;
+    });
+    return { producing, consuming };
+  }, [recipeSearch, recipeData, translation]);
 
   const labCohesionTotal = useMemo(() => {
     if (!recipeData.length) return 0;
@@ -519,11 +539,12 @@ export const Results: React.FC = () => {
 
   const tabNames = useMemo(() => {
     const mainTabs = Object.keys(categoryData.mainCategories).sort();
-    return ['全厂总览', ...mainTabs, '电力模块', '贸易模块', '农业模块', '特殊模块'];
+    return ['全厂总览','🔍 配方搜索', ...mainTabs, '电力模块', '贸易模块', '农业模块', '特殊模块', ];
   }, [categoryData.mainCategories]);
 
   const currentData = useMemo(() => {
     if (selectedTab === '全厂总览') return { type: 'overview', ...categoryData.all };
+    if (selectedTab === '🔍 配方搜索') return { type: 'recipeSearch', ...recipeSearchResults };
     if (selectedTab === '电力模块') return { type: 'power', ...categoryData.power };
     if (selectedTab === '贸易模块') return { type: 'trade', ...categoryData.trade };
     if (selectedTab === '农业模块') return { type: 'agriculture', ...categoryData.agriculture };
@@ -666,13 +687,161 @@ export const Results: React.FC = () => {
 
           <div className="tab-bar">
             {tabNames.map(name => (
-              <button key={name} onClick={() => setSelectedTab(name)} className={`tab-button ${selectedTab === name ? 'active' : ''}`}>
+              <button key={name} onClick={() => handleTabChange(name)} className={`tab-button ${selectedTab === name ? 'active' : ''}`}>
                 {t(name, translation)}
               </button>
             ))}
           </div>
 
-          {(() => {
+          {selectedTab === '🔍 配方搜索' ? (
+            <div className="recipe-search-panel">
+              <input
+                type="text"
+                placeholder="搜索配方名、建筑名、产出物或消耗物..."
+                value={recipeSearch}
+                onChange={e => setRecipeSearch(e.target.value)}
+                style={{ padding: '10px 16px', fontSize: '1rem', borderRadius: 8, border: '1px solid #ccc', width: '100%', marginBottom: 16 }}
+              />
+              {!recipeSearch ? (
+                <div className="hint">输入关键词搜索当前结果中启用的配方</div>
+              ) : recipeSearchResults.producing.length === 0 && recipeSearchResults.consuming.length === 0 ? (
+                <div className="hint">未找到相关配方</div>
+              ) : (
+                <div style={{ display: 'flex', gap: 16, height: '65vh' }}>
+                  {/* 左栏：产出匹配 */}
+                  <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 8, padding: 12 }}>
+                    <h4 style={{ margin: '0 0 8px 0', color: '#2e7d32' }}>📤 产出匹配 ({recipeSearchResults.producing.length})</h4>
+                    {recipeSearchResults.producing.length === 0 ? (
+                      <div className="hint">无匹配</div>
+                    ) : (
+                      recipeSearchResults.producing.map(d => {
+                        const s = recipeSearch.toLowerCase();
+                        const outEntries = Object.entries(d.perMin.outputs) as [string, number][];
+                        const inEntries = Object.entries(d.perMin.inputs) as [string, number][];
+                        const upEntries = d.perMin.upkeep ? Object.entries(d.perMin.upkeep as Record<string, number>) : [];
+                        return (
+                          <div key={`prod-${d.idx}`} style={{ padding: '10px 12px', marginBottom: 8, background: '#fafafa', borderRadius: 6, border: '1px solid #eee' }}>
+                            <div style={{ fontWeight: 600, marginBottom: 2 }}>{t(d.recipe.name, translation)}</div>
+                            <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: 6 }}>
+                              🏭 {t(d.recipe.buildingName, translation)} · ⚙ {d.machineCount.toFixed(3)} 台
+                              {d.perMin.workers ? <span> · 👷 {d.perMin.workers.toFixed(1)}</span> : null}
+                              {d.perMin.electricity ? <span> · ⚡ {formatPowerSigned(d.perMin.electricity)}</span> : null}
+                              {d.perMin.computing ? <span> · 💻 {d.perMin.computing}</span> : null}
+                            </div>
+                            {outEntries.length > 0 && (
+                              <div style={{ fontSize: '0.8rem', marginBottom: 3 }}>
+                                <span style={{ color: '#2e7d32', fontWeight: 600 }}>📤 产出: </span>
+                                {outEntries.map(([k, v]) => {
+                                  const hl = t(k, translation).toLowerCase().includes(s);
+                                  return <span key={k} style={{
+                                    marginRight: 6, padding: '1px 5px', borderRadius: 3, fontSize: '0.78rem',
+                                    background: hl ? '#a5d6a7' : '#e8f5e9',
+                                    fontWeight: hl ? 700 : 400,
+                                  }}>{t(k, translation)} × {v.toFixed(2)}</span>;
+                                })}
+                              </div>
+                            )}
+                            {inEntries.length > 0 && (
+                              <div style={{ fontSize: '0.8rem', marginBottom: 3 }}>
+                                <span style={{ color: '#c62828', fontWeight: 600 }}>📥 投入: </span>
+                                {inEntries.map(([k, v]) => {
+                                  const hl = t(k, translation).toLowerCase().includes(s);
+                                  return <span key={k} style={{
+                                    marginRight: 6, padding: '1px 5px', borderRadius: 3, fontSize: '0.78rem',
+                                    background: hl ? '#ef9a9a' : '#fce4ec',
+                                    fontWeight: hl ? 700 : 400,
+                                  }}>{t(k, translation)} × {v.toFixed(2)}</span>;
+                                })}
+                              </div>
+                            )}
+                            {upEntries.length > 0 && (
+                              <div style={{ fontSize: '0.8rem' }}>
+                                <span style={{ color: '#e65100', fontWeight: 600 }}>🔧 维护: </span>
+                                {upEntries.map(([k, v]) => {
+                                  const hl = t(k, translation).toLowerCase().includes(s);
+                                  return <span key={k} style={{
+                                    marginRight: 6, padding: '1px 5px', borderRadius: 3, fontSize: '0.78rem',
+                                    background: hl ? '#ffcc80' : '#fff3e0',
+                                    fontWeight: hl ? 700 : 400,
+                                  }}>{t(k, translation)} × {v.toFixed(2)}</span>;
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  {/* 右栏：消耗匹配 */}
+                  <div style={{ flex: 1, overflowY: 'auto', border: '1px solid #e0e0e0', borderRadius: 8, padding: 12 }}>
+                    <h4 style={{ margin: '0 0 8px 0', color: '#c62828' }}>📥 消耗匹配 ({recipeSearchResults.consuming.length})</h4>
+                    {recipeSearchResults.consuming.length === 0 ? (
+                      <div className="hint">无匹配</div>
+                    ) : (
+                      recipeSearchResults.consuming.map(d => {
+                        const s = recipeSearch.toLowerCase();
+                        const isBuildingMatch = t(d.recipe.buildingName, translation).toLowerCase().includes(s);
+                        const outEntries = Object.entries(d.perMin.outputs) as [string, number][];
+                        const inEntries = Object.entries(d.perMin.inputs) as [string, number][];
+                        const upEntries = d.perMin.upkeep ? Object.entries(d.perMin.upkeep as Record<string, number>) : [];
+                        return (
+                          <div key={`cons-${d.idx}`} style={{ padding: '10px 12px', marginBottom: 8, background: '#fafafa', borderRadius: 6, border: '1px solid #eee' }}>
+                            <div style={{ fontWeight: 600, marginBottom: 2 }}>{t(d.recipe.name, translation)}</div>
+                            <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: 6 }}>
+                              🏭 {t(d.recipe.buildingName, translation)} · ⚙ {d.machineCount.toFixed(3)} 台
+                              {d.perMin.workers ? <span> · 👷 {d.perMin.workers.toFixed(1)}</span> : null}
+                              {d.perMin.electricity ? <span> · ⚡ {formatPowerSigned(d.perMin.electricity)}</span> : null}
+                              {d.perMin.computing ? <span> · 💻 {d.perMin.computing}</span> : null}
+                            </div>
+                            {outEntries.length > 0 && (
+                              <div style={{ fontSize: '0.8rem', marginBottom: 3 }}>
+                                <span style={{ color: '#2e7d32', fontWeight: 600 }}>📤 产出: </span>
+                                {outEntries.map(([k, v]) => {
+                                  const hl = t(k, translation).toLowerCase().includes(s);
+                                  return <span key={k} style={{
+                                    marginRight: 6, padding: '1px 5px', borderRadius: 3, fontSize: '0.78rem',
+                                    background: hl ? '#a5d6a7' : '#e8f5e9',
+                                    fontWeight: hl ? 700 : 400,
+                                  }}>{t(k, translation)} × {v.toFixed(2)}</span>;
+                                })}
+                              </div>
+                            )}
+                            {inEntries.length > 0 && (
+                              <div style={{ fontSize: '0.8rem', marginBottom: 3 }}>
+                                <span style={{ color: '#c62828', fontWeight: 600 }}>📥 投入: </span>
+                                {inEntries.map(([k, v]) => {
+                                  const hl = t(k, translation).toLowerCase().includes(s);
+                                  return <span key={k} style={{
+                                    marginRight: 6, padding: '1px 5px', borderRadius: 3, fontSize: '0.78rem',
+                                    background: hl ? '#ef9a9a' : '#fce4ec',
+                                    fontWeight: hl ? 700 : 400,
+                                  }}>{t(k, translation)} × {v.toFixed(2)}</span>;
+                                })}
+                              </div>
+                            )}
+                            {upEntries.length > 0 && (
+                              <div style={{ fontSize: '0.8rem' }}>
+                                <span style={{ color: '#e65100', fontWeight: 600 }}>🔧 维护: </span>
+                                {upEntries.map(([k, v]) => {
+                                  const hl = t(k, translation).toLowerCase().includes(s);
+                                  return <span key={k} style={{
+                                    marginRight: 6, padding: '1px 5px', borderRadius: 3, fontSize: '0.78rem',
+                                    background: hl ? '#ffcc80' : '#fff3e0',
+                                    fontWeight: hl ? 700 : 400,
+                                  }}>{t(k, translation)} × {v.toFixed(2)}</span>;
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+          (() => {
             const isOverview = selectedTab === '全厂总览';
             const officeWorkers = categoryData.officeWorkers || 0;
             const netWorkers = -(categoryData.all.workers - officeWorkers);
@@ -686,7 +855,7 @@ export const Results: React.FC = () => {
               {selectedTab === '全厂总览' ? (
                 <>
                   <h4>{t('全厂模块总览', translation)}</h4>
-                  {moduleRows.map(row => <ModuleRow key={row.name} {...row} onClick={() => setSelectedTab(row.name)} translation={translation} />)}
+                  {moduleRows.map(row => <ModuleRow key={row.name} {...row} onClick={() => handleTabChange(row.name)} translation={translation} />)}
                 </>
               ) : (
                 <>
@@ -698,7 +867,8 @@ export const Results: React.FC = () => {
               )}
             </div>
           </div>
-          ); })()}
+          ); })()
+          )}
         </>
       )}
       {result && resultStatus !== 'Optimal' && <div>❌ 状态: {resultStatus || '未知'}</div>}

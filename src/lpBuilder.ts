@@ -459,7 +459,7 @@ export function buildLp(input: LpInput): LpOutput {
           redundancyAppliedCount++;
           redundancyAppliedItems.push(`${it}(L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
           const lowerBound = effectiveDr * rf.lowerFactor;
-          if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+          if (it !== '人力' && rf.upperFactor > 1.0) {
             const upperBound = effectiveDr * rf.upperFactor;
             lp += ` ${rows[it]}: ${expr} >= ${lowerBound}\n`;
             lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
@@ -470,7 +470,8 @@ export function buildLp(input: LpInput): LpOutput {
         } else {
           // 无冗余：原有逻辑
           lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-          if (integerMode !== 'continuous' && it !== '人力') {
+          // 新冗余系统启用时，跳过旧 redundancy 上限，避免与联合生产的中间产物冗余约束冲突
+          if (it !== '人力' && !enableRedundancy) {
             const upperBound = effectiveDr * (1 + redundancy);
             lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
           }
@@ -488,7 +489,7 @@ export function buildLp(input: LpInput): LpOutput {
         // 供给作为负需求，冗余缩放供给率
         // lowerFactor: 必须消耗的最低比例 → expr <= -(supply * lowerFactor)
         // upperFactor: 允许消耗的最高比例 → expr >= -(supply * upperFactor)
-        if (integerMode !== 'continuous' && it !== '人力') {
+        if (it !== '人力') {
           lp += ` ${rows[it]}: ${expr} <= ${-(supply * rfSupply.lowerFactor)}\n`;
           lp += ` ${rows[it]}_upper: ${expr} >= ${-(supply * rfSupply.upperFactor)}\n`;
         } else {
@@ -514,7 +515,7 @@ export function buildLp(input: LpInput): LpOutput {
           const negExprExIn = allNegExpr(it);
           const lowerSlackIn = rfExIn.lowerFactor - 1;
           const lowerExprIn = buildSlackExpr(expr, negExprExIn, lowerSlackIn);
-          if (integerMode !== 'continuous' && it !== '人力' && rfExIn.upperFactor > 1.0) {
+          if (it !== '人力' && rfExIn.upperFactor > 1.0) {
             const upperSlackIn = rfExIn.upperFactor - 1;
             const upperExprIn = buildSlackExpr(expr, negExprExIn, upperSlackIn);
             lp += ` ${rows[it]}: ${lowerExprIn} >= 0\n`;
@@ -536,7 +537,7 @@ export function buildLp(input: LpInput): LpOutput {
           const negExprExOut = allNegExpr(it);
           const lowerSlackOut = rfExOut.lowerFactor - 1;
           const lowerExprOut = buildSlackExpr(expr, negExprExOut, lowerSlackOut);
-          if (integerMode !== 'continuous' && it !== '人力' && rfExOut.upperFactor > 1.0) {
+          if (it !== '人力' && rfExOut.upperFactor > 1.0) {
             const upperSlackOut = rfExOut.upperFactor - 1;
             const upperExprOut = buildSlackExpr(expr, negExprExOut, upperSlackOut);
             lp += ` ${rows[it]}: ${lowerExprOut} >= 0\n`;
@@ -565,7 +566,7 @@ export function buildLp(input: LpInput): LpOutput {
           // 约束: netExpr >= (lowerFactor - 1) * negExpr (允许/强制超额生产)
           const lowerSlack = rf.lowerFactor - 1;
           const lowerExpr = buildSlackExpr(expr, negExpr, lowerSlack);
-          if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+          if (it !== '人力' && rf.upperFactor > 1.0) {
             const upperSlack = rf.upperFactor - 1;
             const upperExpr = buildSlackExpr(expr, negExpr, upperSlack);
             lp += ` ${rows[it]}: ${lowerExpr} >= 0\n`;
@@ -626,7 +627,7 @@ export function buildLp(input: LpInput): LpOutput {
 
       if (mainExpr) {
         const mainLowerExpr = buildSlackExpr(mainExpr, mainNegExpr, lowerSlack);
-        if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+        if (it !== '人力' && rf.upperFactor > 1.0) {
           const mainUpperExpr = buildSlackExpr(mainExpr, mainNegExpr, upperSlack);
           lp += ` ${rows[it]}_main: ${mainLowerExpr} >= 0\n`;
           lp += ` ${rows[it]}_main_upper: ${mainUpperExpr} <= 0\n`;
@@ -636,7 +637,7 @@ export function buildLp(input: LpInput): LpOutput {
       }
       if (powerExpr) {
         const powerLowerExpr = buildSlackExpr(powerExpr, powerNegExpr, lowerSlack);
-        if (integerMode !== 'continuous' && it !== '人力' && rf.upperFactor > 1.0) {
+        if (it !== '人力' && rf.upperFactor > 1.0) {
           const powerUpperExpr = buildSlackExpr(powerExpr, powerNegExpr, upperSlack);
           lp += ` ${rows[it]}_power: ${powerLowerExpr} >= 0\n`;
           lp += ` ${rows[it]}_power_upper: ${powerUpperExpr} <= 0\n`;
