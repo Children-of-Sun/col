@@ -583,8 +583,10 @@ export function buildActiveRecipes(
   };
 
   if (gameData) {
+    // 配方标准化使用至少1000人口，确保pop=0时也有正确的投入产出
+    const recipePop = state.population > 0 ? state.population : 1000;
     const result = calcResidentDemands(
-      gameData, state.population, state.housingIndex,
+      gameData, recipePop, state.housingIndex,
       state.selectedFoods, state.selectedMedical, state.selectedOthers,
       state.edictLevels, state.officeLevels, state.researchLevels,
       recycleRate, state.stationLevel, state.medicalMultiplier
@@ -608,14 +610,12 @@ export function buildActiveRecipes(
     }
 
     // 将居民模块标准化为"每1000人"单位，LP 可自由缩放
-    if (state.population > 0) {
-      const laborScale = state.population / 1000;
-      for (const k of Object.keys(residentRecipe.inputs)) {
-        residentRecipe.inputs[k] /= laborScale;
-      }
-      for (const k of Object.keys(residentRecipe.outputs)) {
-        residentRecipe.outputs[k] /= laborScale;
-      }
+    const laborScale = recipePop / 1000;
+    for (const k of Object.keys(residentRecipe.inputs)) {
+      residentRecipe.inputs[k] /= laborScale;
+    }
+    for (const k of Object.keys(residentRecipe.outputs)) {
+      residentRecipe.outputs[k] /= laborScale;
     }
     // 每单位（1000人）提供 1000 人力
     residentRecipe.outputs['人力'] = 1000;
@@ -642,39 +642,62 @@ export function buildActiveRecipes(
     module: 'station',
   };
 
+  // 辅助：获取物品的冗余上限因子（用于火箭运力计算）
+  const getCargoFactor = (item: string): number => {
+    if (!state.enableRedundancy) return 1.0;
+    const res = state.redundancyResources?.[item];
+    if (!res || res.enabled === false) return 1.0;
+    const upperPct = res.upper === 100 ? state.globalUpper : res.upper;
+    return Math.max(1.0, upperPct / 100);
+  };
+
+  // 自动计算的太空货物基础速率
+  let stationPartsRate = 0;
+  let crewSuppliesRate = 0;
+  let labCargoRate = 0;
   if (state.stationLevel > 0) {
+    stationPartsRate = state.stationLevel * STATION_PARTS_RATE;
+    crewSuppliesRate = Math.max(0, (state.stationLevel - 1) * CREW_SUPPLIES_RATE);
+    const meta = state.labMeta.find(l => l.buildingId === state.labLevel);
+    if (meta && state.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * state.labCount;
+  }
+
+  // 用户额外请求的太空货物（含冗余上限）
+  const userSpaceCargoRate = state.demands
+    .filter(d => SPACE_CARGO_ITEMS.has(d.item))
+    .reduce((acc, d) => acc + d.rate * getCargoFactor(d.item), 0);
+
+  // 总货物速率（含冗余上限），确保火箭运力足够
+  const totalCargoRate =
+    stationPartsRate * getCargoFactor('station parts') +
+    crewSuppliesRate * getCargoFactor('crew supplies') +
+    labCargoRate * getCargoFactor('electronics iv') +
+    userSpaceCargoRate;
+
+  if (state.stationLevel > 0 || userSpaceCargoRate > 0 || totalCargoRate > 0) {
     const rocket = ROCKET_BASE[state.rocketType];
     const rocketCargoResearch = gameData?.research?.find(r => r.name === '火箭载荷量');
     const rocketCargoLevel = rocketCargoResearch
       ? (state.researchLevels[gameData!.research.indexOf(rocketCargoResearch)] || 0) : 0;
     const cargoBonus = 1 + rocketCargoLevel * 0.05;
-    const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (cargoBonus - 1);
     const cargoCap = rocket.cargoBase + (rocket.cargoMax - rocket.cargoBase) * (cargoBonus - 1);
 
-    const stationPartsRate = state.stationLevel * STATION_PARTS_RATE;
-    const crewSuppliesRate = Math.max(0, (state.stationLevel - 1) * CREW_SUPPLIES_RATE);
-    let labCargoRate = 0;
-    const meta = state.labMeta.find(l => l.buildingId === state.labLevel);
-    if (meta && state.labCount > 0 && meta.isHighestLevel) labCargoRate = 2 * state.labCount;
-    const userSpaceCargoRate = state.demands
-      .filter(d => SPACE_CARGO_ITEMS.has(d.item))
-      .reduce((acc, d) => acc + d.rate, 0);
+    if (state.stationLevel > 0) {
+      if (stationPartsRate > 0) stationRecipe.inputs['station parts'] = stationPartsRate;
+      if (crewSuppliesRate > 0) stationRecipe.inputs['crew supplies'] = crewSuppliesRate;
+      if (labCargoRate > 0) stationRecipe.inputs['electronics iv'] = labCargoRate;
+    }
 
-    const totalCargoRate = stationPartsRate + crewSuppliesRate + labCargoRate + userSpaceCargoRate;
     const cargoRocketRate = cargoCap > 0 ? totalCargoRate / cargoCap : 0;
-
-    const crew = Math.max(0, (state.stationLevel - 1) * 2);
-    const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
-    const crewRocketRate = rocketsPerLaunch / 20;
-
-    if (stationPartsRate > 0) stationRecipe.inputs['station parts'] = stationPartsRate;
-    if (crewSuppliesRate > 0) stationRecipe.inputs['crew supplies'] = crewSuppliesRate;
-    if (labCargoRate > 0) stationRecipe.inputs['electronics iv'] = labCargoRate;
-    state.demands.filter(d => SPACE_CARGO_ITEMS.has(d.item)).forEach(d => {
-      stationRecipe.inputs[d.item] = (stationRecipe.inputs[d.item] || 0) + d.rate;
-    });
-    if (crewRocketRate > 0) stationRecipe.inputs[rocket.crewKey] = crewRocketRate;
     if (cargoRocketRate > 0) stationRecipe.inputs[rocket.cargoKey] = cargoRocketRate;
+
+    if (state.stationLevel > 0) {
+      const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (cargoBonus - 1);
+      const crew = Math.max(0, (state.stationLevel - 1) * 2);
+      const rocketsPerLaunch = crewCap > 0 ? Math.ceil(crew / crewCap) : 0;
+      const crewRocketRate = rocketsPerLaunch / 20;
+      if (crewRocketRate > 0) stationRecipe.inputs[rocket.crewKey] = crewRocketRate;
+    }
   }
 
   const stationActive = [stationRecipe];

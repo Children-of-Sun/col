@@ -214,7 +214,7 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
         {/* ===== 资源卡片网格 ===== */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
+          gridTemplateColumns: 'repeat(6, 1fr)',
           gap: 12,
         }}>
           {currentItems.map(item => {

@@ -69,8 +69,7 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
             disabled={!dataLoaded}
           >
             <option value="continuous">连续解（小数机器）</option>
-            <option value="ceil">向上取整 + 后验（快速）</option>
-            <option value="heuristic">启发式迭代取整（较优）</option>
+            <option value="ceil">向上取整（按整机计算维护）</option>
             <option value="milp">混合整数规划 MILP（精确）</option>
           </select>
         </div>

@@ -25,7 +25,7 @@ export interface LpInput {
   fixedUnityProduction?: number;
   fixedUnityConsumption?: number;
   // 新增字段
-  integerMode?: 'continuous' | 'ceil' | 'heuristic' | 'milp';
+  integerMode?: 'continuous' | 'ceil' | 'milp';
   milpTimeLimit?: number;
   fixedMachines?: Record<string, number>;
   // 人力约束：false 时强制人力 <= 人口，true 时跳过人力约束
@@ -401,10 +401,12 @@ export function buildLp(input: LpInput): LpOutput {
     // 独立回退：每个值为 100% 时自动使用全局值（各自独立判断，而非绑在一起）
     const lowerPct = rl === 100 ? globalLower : rl;
     const upperPct = ru === 100 ? globalUpper : ru;
+    // lower保持默认100%且upper>100%时，lower跟随upper，确保"冗余120%"实际强制120%生产
+    const effectiveLowerPct = (lowerPct === 100 && upperPct > 100) ? upperPct : lowerPct;
     // 连续解模式无上限，下限不得低于 100% 以避免需求不满足
     // 整数模式有明确上/下限，直接使用用户设定值
-    const clampLower = integerMode === 'continuous';
-    const lowerFactor = clampLower ? Math.max(lowerPct, 100) / 100 : lowerPct / 100;
+    const clampLower = integerMode !== 'milp';
+    const lowerFactor = clampLower ? Math.max(effectiveLowerPct, 100) / 100 : effectiveLowerPct / 100;
     const upperFactor = upperPct / 100;
     // 优化：因子均为 1.0 时不改变约束（避免非必要的约束收窄）
     if (lowerFactor === 1.0 && upperFactor === 1.0) return null;
@@ -445,8 +447,8 @@ export function buildLp(input: LpInput): LpOutput {
         const se = allExpr(it);
         if (se) {
           // 宽松模式下无消费者则跳过
-          if (constraintMode === 'noProdOrCons' && !consumers.has(it)) {
-            // 跳过，不生成约束
+          if (!producers.has(it) || !consumers.has(it)) {
+            // 低压蒸汽：有生产者+无消费者 或 无生产者+有消费者 都跳过约束
           } else {
             lp += ` ${rows[it]}: ${se} = 0\n`;
           }
@@ -469,17 +471,24 @@ export function buildLp(input: LpInput): LpOutput {
       const rf = getRedundancyFactors(it);
       if (expr) {
         if (rf) {
-          // 冗余约束
+          // 冗余约束：使用 slack 方式确保 production >= factor * consumption
           redundancyAppliedCount++;
           redundancyAppliedItems.push(`${it}(L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
-          const lowerBound = effectiveDr * rf.lowerFactor;
+          const negExpr = allNegExpr(it);
+          // 基础需求约束
+          lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
+          // 冗余 slack 约束：生产/消耗比率
+          const lowerSlack = rf.lowerFactor - 1;
+          const lowerExpr = buildSlackExpr(expr, negExpr, lowerSlack);
+          // 冗余 slack 约束：(消耗+差额)*下限 ≤ 生产 ≤ (消耗+差额)*上限
+          // lowerExpr >= factor * effectiveDr, upperExpr <= factor * effectiveDr
           if (it !== '人力' && rf.upperFactor > 1.0) {
-            const upperBound = effectiveDr * rf.upperFactor;
-            lp += ` ${rows[it]}: ${expr} >= ${lowerBound}\n`;
-            lp += ` ${rows[it]}_upper: ${expr} <= ${upperBound}\n`;
+            const upperSlack = rf.upperFactor - 1;
+            const upperExpr = buildSlackExpr(expr, negExpr, upperSlack);
+            lp += ` ${rows[it]}_red_lower: ${lowerExpr} >= ${rf.lowerFactor * effectiveDr}\n`;
+            lp += ` ${rows[it]}_red_upper: ${upperExpr} <= ${rf.upperFactor * effectiveDr}\n`;
           } else {
-            // 连续解模式：仅应用下限
-            lp += ` ${rows[it]}: ${expr} >= ${lowerBound}\n`;
+            lp += ` ${rows[it]}_red_lower: ${lowerExpr} >= ${rf.lowerFactor * effectiveDr}\n`;
           }
         } else {
           lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
@@ -487,21 +496,38 @@ export function buildLp(input: LpInput): LpOutput {
       } else {
         lp += ` ${rows[it]}: 0 >= ${effectiveDr}\n`;
       }
-    } else if (supply > 0) {
-      if (!consumers.has(it)) {
+    } else if (Math.abs(supply) > 1e-9) {
+      // 正供给：外部输入；负供给：强制输出（用于取整模式填补差额）
+      if (supply > 0 && !consumers.has(it)) {
         if (!missing.includes(it)) missing.push(it);
         continue;
       }
       const rfSupply = getRedundancyFactors(it);
       if (rfSupply && expr) {
-        // 供给作为负需求，冗余缩放供给率
-        // lowerFactor: 必须消耗的最低比例 → expr <= -(supply * lowerFactor)
-        // upperFactor: 允许消耗的最高比例 → expr >= -(supply * upperFactor)
-        if (it !== '人力') {
-          lp += ` ${rows[it]}: ${expr} <= ${-(supply * rfSupply.lowerFactor)}\n`;
-          lp += ` ${rows[it]}_upper: ${expr} >= ${-(supply * rfSupply.upperFactor)}\n`;
+        if (supply < 0) {
+          // 负供给 = 强制产出（取整模式填补差额）
+          // 基础约束：至少产出差额（确保 ceil 差额被满足）
+          lp += ` ${rows[it]}: ${expr} >= ${-supply}\n`;
+          // 冗余 slack 约束：总生产/消耗比率（非仅差额部分）
+          const negExprSupply = allNegExpr(it);
+          const lowerSlackSupply = rfSupply.lowerFactor - 1;
+          const lowerExprSupply = buildSlackExpr(expr, negExprSupply, lowerSlackSupply);
+          // 冗余 slack 约束：(消耗+差额)*下限 ≤ 生产 ≤ (消耗+差额)*上限
+          // deficit = -supply, lowerExpr >= factor * deficit, upperExpr <= factor * deficit
+          if (it !== '人力' && rfSupply.upperFactor > 1.0) {
+            const upperSlackSupply = rfSupply.upperFactor - 1;
+            const upperExprSupply = buildSlackExpr(expr, negExprSupply, upperSlackSupply);
+            lp += ` ${rows[it]}_red_lower: ${lowerExprSupply} >= ${rfSupply.lowerFactor * (-supply)}\n`;
+            lp += ` ${rows[it]}_red_upper: ${upperExprSupply} <= ${rfSupply.upperFactor * (-supply)}\n`;
+          } else {
+            lp += ` ${rows[it]}_red_lower: ${lowerExprSupply} >= ${rfSupply.lowerFactor * (-supply)}\n`;
+          }
         } else {
+          // 正供给：外部输入，lower=必须消耗的最低比例，upper=允许消耗的最高比例
           lp += ` ${rows[it]}: ${expr} <= ${-(supply * rfSupply.lowerFactor)}\n`;
+          if (it !== '人力') {
+            lp += ` ${rows[it]}_upper: ${expr} >= ${-(supply * rfSupply.upperFactor)}\n`;
+          }
         }
         redundancyAppliedCount++;
         redundancyAppliedItems.push(`${it}(供给 L=${rfSupply.lowerFactor.toFixed(2)} U=${rfSupply.upperFactor.toFixed(2)})`);
@@ -628,6 +654,8 @@ export function buildLp(input: LpInput): LpOutput {
   }
 
   for (const it of allSpecialItems) {
+    // 低压蒸汽：有生产者+无消费者 或 无生产者+有消费者 都跳过约束
+    if (it === 'steam (low)' && (!producers.has(it) || !consumers.has(it))) continue;
     const rf = getRedundancyFactors(it);
 
     // 主模块方程：仅使用非电力配方

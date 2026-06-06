@@ -164,7 +164,7 @@ export interface ParsedData {
 }
 
 // ==================== Store 状态类型 ====================
-export type IntegerMode = 'continuous' | 'ceil' | 'heuristic' | 'milp';
+export type IntegerMode = 'continuous' | 'ceil' | 'milp';
 
 export interface StoreState {
   fullData: DataJson | null;

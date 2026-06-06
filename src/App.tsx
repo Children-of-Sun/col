@@ -14,6 +14,7 @@ import { TradePanel } from './components/TradePanel';
 import { AgriculturePanel } from './components/AgriculturePanel';
 import { buildLp } from './lpBuilder';
 import { t } from './utils';
+import { isContinuous } from './utils/format';
 import { buildActiveRecipes } from './buildActiveRecipes';
 import { Demand, Recipe } from './types';
 import './App.css';
@@ -215,90 +216,195 @@ export default function App() {
     }
   };
 
-  // solveCeilMode：向上取整模式（通过重新构建 LP 并传入 fixedMachines）
+  // solveCeilMode：向上取整模式（迭代填补 ceil 差额直到误差 < 0.1%）
   const solveCeilMode = async (lpString: string, varNames: string[], mainActive: Recipe[]) => {
     try {
       setDiagnostic('🔄 求解中 (取整模式)...');
-      // 第一次 LP 求解
-      const lpResult = await runLpSolver(lpString, varNames);
-      if (lpResult?.Status !== 'Optimal') {
-        setDiagnostic(`连续求解失败: ${lpResult?.Status || '未知'}`);
-        setIsSolving(false);
-        return;
-      }
 
-      // 提取机器变量并向上取整（仅主模块和电力模块的建筑，排除贸易/农业/特殊/居民/空间站）
-      const agriVarsCeil = new Set(
-        mainActive.filter(r => r.category === '农业').map((_, i) => `x${i}`)
-      );
-      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t') && !v.startsWith('tr') && !agriVarsCeil.has(v));
-      const fixed: Record<string, number> = {};
-      for (const v of machineVars) {
-        const val = lpResult.Columns?.[v]?.Primal || lpResult.columns?.[v]?.Primal || 0;
-        fixed[v] = Math.ceil(val);
-      }
-
-      if (DEBUG) {
-        console.log('=== 取整模式 ===');
-        console.log('取整后的机器变量:', fixed);
-      }
-
-      // 重新构建 LP 并传入 fixedMachines
+      // 预构建配方数据（整个迭代过程复用）
       const state = useStore.getState();
-      const result = buildActiveRecipes(
-        state,
-        solarEfficiency,
-        getFixedDemands,
-      );
-
+      const result = buildActiveRecipes(state, solarEfficiency, getFixedDemands);
       if (!result) {
         setDiagnostic('没有启用的配方。');
         setIsSolving(false);
         return;
       }
 
-      const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+      const { mainActive: ma, powerActive, residentActive, stationActive, specialActive, tradeActive,
         ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
         fixedUnityProduction, fixedUnityConsumption, positiveDemands } = result;
 
-      const { lpString: newLp, varNames: newVarNames } = buildLp({
-        mainActive,
-        powerActive,
-        residentActive,
-        stationActive,
-        specialActive,
-        tradeActive,
-        ignored,
-        demands: positiveDemands,
-        externalSupplies: allExternalSupplies,
-        reductionFactor,
-        steamLowMode: state.steamLowMode as 'internal' | 'shared',
-        excludedOutputs,
-        excludedInputs,
-        constraintMode: state.constraintMode,
-        allowExternal: state.allowExternal,
-        optimizationMode: state.optimizationMode,
-        customWeights: state.customWeights,
-        fixedUnityProduction,
-        fixedUnityConsumption,
-        integerMode: 'continuous', // 取整模式不需要 milp
-        fixedMachines: fixed, // 传入固定值
-        enableRedundancy: state.enableRedundancy,
-        globalLower: state.globalLower,
-        globalUpper: state.globalUpper,
-        redundancyResources: state.redundancyResources,
-      });
+      const allRecipes = [...ma, ...powerActive, ...residentActive, ...stationActive, ...specialActive, ...tradeActive];
+      // 排除固定变量：居民(r*)、空间站(s*)、特殊(t* = t+数字)，保留贸易(tr*)参与取整
+      // 使用可变变量以便迭代中更新（LP 重建后 varNames 可能变化）
+      let currentVarNames = varNames;
+      let currentMachineVarNames = currentVarNames.filter(v =>
+        !v.startsWith('r') && !v.startsWith('s') && !/^t\d/.test(v)
+      );
+      // 人口>0时强制居民模块最低值（即使排除人力也要满足人口需求）
+      const pop = state.population;
+      const residentValue = pop > 0 ? pop / 1000 : 0;
 
-      const fixedResult = await runLpSolver(newLp, newVarNames);
-      if (fixedResult?.Status === 'Optimal') {
-        setResult(fixedResult);
+      // 辅助：从 LP 结果计算各资源的总产出和总消耗
+      const computeResourceTotals = (lpResult: any): Record<string, { prod: number; cons: number }> => {
+        const totals: Record<string, { prod: number; cons: number }> = {};
+        for (let i = 0; i < currentVarNames.length; i++) {
+          const val = lpResult.Columns?.[currentVarNames[i]]?.Primal || lpResult.columns?.[currentVarNames[i]]?.Primal || 0;
+          if (val <= 0) continue;
+          const recipe = allRecipes[i];
+          // 产出
+          for (const [item, qty] of Object.entries(recipe.outputs)) {
+            let scale = 1;
+            if (recipe.module !== 'trade' && !isContinuous(item)) scale = 60 / recipe.duration;
+            if (!totals[item]) totals[item] = { prod: 0, cons: 0 };
+            totals[item].prod += qty * scale * val;
+          }
+          // 投入
+          for (const [item, qty] of Object.entries(recipe.inputs)) {
+            let scale = 1;
+            if (recipe.module !== 'trade' && !isContinuous(item)) scale = 60 / recipe.duration;
+            if (!totals[item]) totals[item] = { prod: 0, cons: 0 };
+            totals[item].cons += qty * scale * val;
+          }
+          // 维护
+          for (const [item, qty] of Object.entries(recipe.upkeep)) {
+            if (item === '凝聚力') continue;
+            const reduction = item.startsWith('maintenance') ? reductionFactor : 0;
+            const reducedQty = qty * (1 - reduction);
+            if (!totals[item]) totals[item] = { prod: 0, cons: 0 };
+            totals[item].cons += reducedQty * val;
+          }
+        }
+        return totals;
+      };
+
+      // 辅助：根据 LP 结果计算取整差额
+      const computeDeficits = (lpResult: any): Record<string, number> => {
+        const deficits: Record<string, number> = {};
+        for (const varName of currentMachineVarNames) {
+          const idx = currentVarNames.indexOf(varName);
+          if (idx < 0 || idx >= allRecipes.length) continue;
+          const recipe = allRecipes[idx];
+          const val = lpResult.Columns?.[varName]?.Primal || lpResult.columns?.[varName]?.Primal || 0;
+          if (val <= 0) continue;
+          const ceiled = Math.ceil(val);
+          const extra = ceiled - val;
+          if (extra < 1e-9) continue;
+
+          for (const [resource, qty] of Object.entries(recipe.upkeep)) {
+            if (resource === '凝聚力') continue;
+            const reduction = resource.startsWith('maintenance') ? reductionFactor : 0;
+            const extraQty = extra * qty * (1 - reduction);
+            if (extraQty > 1e-9) {
+              deficits[resource] = (deficits[resource] || 0) + extraQty;
+            }
+          }
+        }
+        return deficits;
+      };
+
+      // 迭代：逐步填补差额直到误差 < 0.01%
+      const MAX_ITER = 10;
+      let currentResult = await runLpSolver(lpString, varNames);
+      if (currentResult?.Status !== 'Optimal') {
+        setDiagnostic(`连续求解失败: ${currentResult?.Status || '未知'}`);
         setIsSolving(false);
-        setDiagnostic('✅ 取整模式求解完成');
+        return;
+      }
+
+      // ceil 差额本质是"额外需求"，统一走需求路径，避免与用户外部供给冲突
+      const extraDemandMap: Record<string, number> = {};
+      let prevDeficits: Record<string, number> = {};
+      let totalIterations = 0;
+
+      for (let iter = 0; iter < MAX_ITER; iter++) {
+        const deficits = computeDeficits(currentResult);
+        const extraEntries = Object.entries(deficits)
+          .filter(([_, rate]) => rate > 1e-9);
+
+        if (extraEntries.length === 0) break; // 完全收敛
+
+        // 六种资源本轮与上一轮差额的绝对值 < 0.0001 即收敛（第一轮跳过，无上一轮数据）
+        const MONITORED_RESOURCES = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii']);
+        if (iter > 0) {
+          let allConverged = true;
+          for (const resource of MONITORED_RESOURCES) {
+            const curr = deficits[resource] || 0;
+            const prev = prevDeficits[resource] || 0;
+            if (Math.abs(curr - prev) > 0.0001) {
+              allConverged = false;
+              break;
+            }
+          }
+          if (allConverged) break;
+        }
+        prevDeficits = { ...deficits };
+
+        // 未收敛：所有差额统一作为额外需求（不区分原需求/中间产物）
+        for (const [item, rate] of extraEntries) {
+          extraDemandMap[item] = rate;
+        }
+        totalIterations = iter + 1;
+
+        if (DEBUG) {
+          console.log(`=== 取整模式 第${iter + 1}轮差额 ===`);
+          for (const [item, rate] of extraEntries) {
+            console.log(`  [需求] ${item}: +${rate.toFixed(4)}`);
+          }
+        }
+
+        // 用累加 map 构建单一条目列表（每个 item 只有一条）
+        const augmentedDemands = [
+          ...positiveDemands,
+          ...Object.entries(extraDemandMap).map(([item, rate]) => ({ item, rate }))
+        ];
+        const augmentedSupplies = [...allExternalSupplies];
+        const { lpString: newLp, varNames: newVarNames } = buildLp({
+          mainActive: ma, powerActive, residentActive, stationActive, specialActive, tradeActive,
+          ignored, demands: augmentedDemands, externalSupplies: augmentedSupplies,
+          reductionFactor, steamLowMode: state.steamLowMode as 'internal' | 'shared',
+          excludedOutputs, excludedInputs, constraintMode: state.constraintMode,
+          allowExternal: state.allowExternal, optimizationMode: state.optimizationMode,
+          customWeights: state.customWeights,
+          fixedUnityProduction, fixedUnityConsumption,
+          integerMode: 'continuous',
+          relaxLabor: true,
+          minResidentValue: residentValue > 0 ? residentValue : undefined,
+          enableRedundancy: state.enableRedundancy,
+          globalLower: state.globalLower, globalUpper: state.globalUpper,
+          redundancyResources: state.redundancyResources,
+        });
+
+        // 更新当前变量名和机器变量名（LP 重建后可能变化）
+        currentVarNames = newVarNames;
+        currentMachineVarNames = currentVarNames.filter(v =>
+          !v.startsWith('r') && !v.startsWith('s') && !/^t\d/.test(v)
+        );
+
+        const newResult = await runLpSolver(newLp, newVarNames);
+        if (newResult?.Status !== 'Optimal') {
+          // 本轮无解，回退到上一轮结果
+          if (DEBUG) console.log(`第${iter + 1}轮无解，回退到上一轮`);
+          break;
+        }
+        currentResult = newResult;
+      }
+
+      // 输出最终结果
+      if (currentResult?.Status === 'Optimal') {
+        setResult(currentResult);
+        setIsSolving(false);
+        const totalExtraDemands = Object.values(extraDemandMap).reduce((a, b) => a + b, 0);
+        if (totalIterations > 0) {
+          setDiagnostic(`✅ 取整模式求解完成 (迭代${totalIterations}轮，额外需求${totalExtraDemands.toFixed(1)})`);
+        } else {
+          setDiagnostic('✅ 取整模式求解完成（无需额外补充）');
+        }
       } else {
-        // 回退：取整后无解，使用连续解兜底
-        setDiagnostic('⚠️ 取整后无解，回退为连续解...');
+        // 完全不可行则回退连续解
+        setDiagnostic('⚠️ 取整迭代后仍无解，回退为连续解...');
         const { lpString: fallbackLp, varNames: fallbackVarNames } = buildLp({
-          mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
+          mainActive: ma, powerActive, residentActive, stationActive, specialActive, tradeActive,
           ignored, demands: positiveDemands, externalSupplies: allExternalSupplies,
           reductionFactor, steamLowMode: state.steamLowMode as 'internal' | 'shared',
           excludedOutputs, excludedInputs, constraintMode: state.constraintMode,
@@ -321,168 +427,6 @@ export default function App() {
       }
     } catch (err: any) {
       setDiagnostic(`取整模式错误: ${err.message}`);
-      setIsSolving(false);
-    }
-  };
-
-  // solveHeuristicMode：启发式取整模式（通过重新构建 LP 并传入 fixedMachines）
-  const solveHeuristicMode = async (lpString: string, varNames: string[], mainActive: Recipe[]) => {
-    try {
-      setDiagnostic('🔄 求解中 (启发式模式)...');
-      const fixed: Record<string, number> = {};
-      const agriVarsHeur = new Set(
-        mainActive.filter(r => r.category === '农业').map((_, i) => `x${i}`)
-      );
-      const machineVars = varNames.filter(v => !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t') && !v.startsWith('tr') && !agriVarsHeur.has(v));
-
-      // 逐步固定变量，每次重新构建 LP
-      for (let iter = 0; iter < Math.min(machineVars.length, 20); iter++) {
-        const state = useStore.getState();
-
-        // 重新构建 LP
-        const result = buildActiveRecipes(
-          state,
-          solarEfficiency,
-          getFixedDemands,
-        );
-
-        if (!result) break;
-
-        const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
-          ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
-          fixedUnityProduction, fixedUnityConsumption, positiveDemands } = result;
-
-        const { lpString: newLp, varNames: newVarNames } = buildLp({
-          mainActive,
-          powerActive,
-          residentActive,
-          stationActive,
-          specialActive,
-          tradeActive,
-          ignored,
-          demands: positiveDemands,
-          externalSupplies: allExternalSupplies,
-          reductionFactor,
-          steamLowMode: state.steamLowMode as 'internal' | 'shared',
-          excludedOutputs,
-          excludedInputs,
-          constraintMode: state.constraintMode,
-          allowExternal: state.allowExternal,
-          optimizationMode: state.optimizationMode,
-          customWeights: state.customWeights,
-          fixedUnityProduction,
-          fixedUnityConsumption,
-          integerMode: 'continuous',
-          fixedMachines: fixed,
-          enableRedundancy: state.enableRedundancy,
-          globalLower: state.globalLower,
-          globalUpper: state.globalUpper,
-          redundancyResources: state.redundancyResources,
-        });
-
-        const lpResult = await runLpSolver(newLp, newVarNames);
-        if (lpResult?.Status !== 'Optimal') break;
-
-        // 找到最接近整数的变量（小数部分最大）
-        let bestVar = '';
-        let bestFraction = 0;
-        for (const v of machineVars) {
-          if (fixed[v] !== undefined) continue;
-          const val = lpResult.Columns?.[v]?.Primal || lpResult.columns?.[v]?.Primal || 0;
-          const frac = val - Math.floor(val);
-          if (frac > bestFraction && frac < 0.999) {
-            bestFraction = frac;
-            bestVar = v;
-          }
-        }
-
-        if (bestVar === '') break;
-
-        // 固定该变量为向上取整的值
-        const ceiled = Math.ceil(lpResult.Columns?.[bestVar]?.Primal || lpResult.columns?.[bestVar]?.Primal || 0);
-        fixed[bestVar] = ceiled;
-
-        if (DEBUG) {
-          console.log(`启发式迭代 ${iter + 1}: 固定 ${bestVar} = ${ceiled}`);
-        }
-      }
-
-      // 最终结果
-      const state = useStore.getState();
-      const finalResultData = buildActiveRecipes(
-        state,
-        solarEfficiency,
-        getFixedDemands,
-      );
-
-      if (finalResultData) {
-        const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
-          ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
-          fixedUnityProduction, fixedUnityConsumption, positiveDemands } = finalResultData;
-
-        const { lpString: finalLp, varNames: finalVarNames } = buildLp({
-          mainActive,
-          powerActive,
-          residentActive,
-          stationActive,
-          specialActive,
-          tradeActive,
-          ignored,
-          demands: positiveDemands,
-          externalSupplies: allExternalSupplies,
-          reductionFactor,
-          steamLowMode: state.steamLowMode as 'internal' | 'shared',
-          excludedOutputs,
-          excludedInputs,
-          constraintMode: state.constraintMode,
-          allowExternal: state.allowExternal,
-          optimizationMode: state.optimizationMode,
-          customWeights: state.customWeights,
-          fixedUnityProduction,
-          fixedUnityConsumption,
-          integerMode: 'continuous',
-          fixedMachines: fixed,
-          enableRedundancy: state.enableRedundancy,
-          globalLower: state.globalLower,
-          globalUpper: state.globalUpper,
-          redundancyResources: state.redundancyResources,
-        });
-
-        const finalResult = await runLpSolver(finalLp, finalVarNames);
-        if (finalResult?.Status === 'Optimal') {
-          setResult(finalResult);
-          setIsSolving(false);
-          setDiagnostic(`✅ 启发式模式求解完成 (固定 ${Object.keys(fixed).length} 个变量)`);
-        } else {
-          // 回退：取整后无解，使用连续解兜底
-          setDiagnostic(`⚠️ 启发式取整后无解，回退为连续解...`);
-          const { lpString: fallbackLp, varNames: fallbackVarNames } = buildLp({
-            mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
-            ignored, demands: positiveDemands, externalSupplies: allExternalSupplies,
-            reductionFactor, steamLowMode: state.steamLowMode as 'internal' | 'shared',
-            excludedOutputs, excludedInputs, constraintMode: state.constraintMode,
-            allowExternal: state.allowExternal, optimizationMode: state.optimizationMode,
-            customWeights: state.customWeights,
-            fixedUnityProduction, fixedUnityConsumption,
-            integerMode: 'continuous',
-            enableRedundancy: state.enableRedundancy,
-            globalLower: state.globalLower, globalUpper: state.globalUpper,
-            redundancyResources: state.redundancyResources,
-          });
-          const fallbackResult = await runLpSolver(fallbackLp, fallbackVarNames);
-          setResult(fallbackResult);
-          setIsSolving(false);
-          if (fallbackResult?.Status === 'Optimal') {
-            setDiagnostic('⚠️ 启发式取整后无解，已回退为连续解。');
-          } else {
-            setDiagnostic(`⚠️ 连续解也失败: ${fallbackResult?.Status || '未知'}`);
-          }
-        }
-      } else {
-        setIsSolving(false);
-      }
-    } catch (err: any) {
-      setDiagnostic(`启发式模式错误: ${err.message}`);
       setIsSolving(false);
     }
   };
@@ -695,14 +639,12 @@ export default function App() {
         }
       } else if (integerMode === 'ceil') {
         await solveCeilMode(pass1Lp.lpString, pass1Lp.varNames, mainActive);
-      } else if (integerMode === 'heuristic') {
-        await solveHeuristicMode(pass1Lp.lpString, pass1Lp.varNames, mainActive);
       }
     } catch (err: any) {
       setIsSolving(false);
       setDiagnostic(`求解器错误: ${err.message}`);
     }
-  }, [getFixedDemands, solarEfficiency, solveCeilMode, solveHeuristicMode]);
+  }, [getFixedDemands, solarEfficiency, solveCeilMode]);
 
   return (
     <>

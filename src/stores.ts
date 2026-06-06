@@ -115,7 +115,7 @@ export const useStore = create<StoreState>((set, get) => ({
   customWeights: { machines: 100, labor: 0, cohesion: 0, area: 0, raw: 0 },
 
   // 整数模式相关
-  integerMode: 'continuous' as 'continuous' | 'ceil' | 'heuristic' | 'milp',
+  integerMode: 'continuous' as 'continuous' | 'ceil' | 'milp',
   milpTimeLimit: 30,
 
   // 资源冗余设置
