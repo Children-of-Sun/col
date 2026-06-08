@@ -95,16 +95,24 @@
   { "name": "火车载货量", "effectPerLevel": 0.025, "maxLevel": 40, "targetCategory": [], "costBase": 40, "costIncrement": 30 }
 ],
   "research": [
-    { "name": "作物产量", "effectPerLevel": [0.01, 0.0025], "maxLevel": 250, "targetCategory": ["food", "Water"] },
-    { "name": "定居点用水", "effectPerLevel": [-0.02], "maxLevel": 40, "targetCategory": "Water" },
-    { "name": "住房容量", "effectPerLevel": [0.05], "maxLevel": 40, "targetCategory": [] },
-    { "name": "专注点", "effectPerLevel": [0.04], "maxLevel": 25, "targetCategory": [] },
-    { "name": "车辆燃料消耗", "effectPerLevel": [-0.01], "maxLevel": 35, "targetCategory": "fuel" },
-    { "name": "火车燃料消耗", "effectPerLevel": [-0.01], "maxLevel": 35, "targetCategory": "fuel" },
-    { "name": "船舰燃料消耗", "effectPerLevel": [-0.01], "maxLevel": 35, "targetCategory": "fuel" },
-    { "name": "火箭载荷量", "effectPerLevel": [0.05], "maxLevel": 20, "targetCategory": [] },
-    { "name": "维修产量", "effectPerLevel": [0.01], "maxLevel": 50, "targetCategory": [] },
-    { "name": "太阳能发电", "effectPerLevel": [0.02], "maxLevel": 200, "targetCategory": [] }
+    { "name": "车辆污染", "effectPerLevel": [0.04], "maxLevel": 20, "targetCategory": [],                "costFormula": "1152 * (1 + 1*x + 1.4^x) / 2" },
+    { "name": "船舶污染", "effectPerLevel": [0.04], "maxLevel": 20, "targetCategory": [],                "costFormula": "1152 * (1 + 1*x + 1.4^x) / 2" },
+    { "name": "列车污染", "effectPerLevel": [0.04], "maxLevel": 20, "targetCategory": [],                "costFormula": "1152 * (1 + 1*x + 1.4^x) / 2" },
+    { "name": "作物产量", "effectPerLevel": [0.01, 0.0025], "maxLevel": 250, "targetCategory": ["food", "Water"],"costFormula": "19200 * (1 + 0.2*x + 1.03^x) / 2" },
+    { "name": "树木生长速度", "effectPerLevel": [0.01], "maxLevel": 50, "targetCategory": [],            "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2" },
+    { "name": "雨水产量", "effectPerLevel": [0.05], "maxLevel": 40, "targetCategory": [],                "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2" },
+    { "name": "定居点用水", "effectPerLevel": [-0.02], "maxLevel": 40, "targetCategory": "Water" ,       "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2" },
+    { "name": "凝聚力容量", "effectPerLevel": [0.05], "maxLevel": 40, "targetCategory": [],              "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "住房容量", "effectPerLevel": [0.05], "maxLevel": 60, "targetCategory": [],                "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "专注点", "effectPerLevel": [0.04], "maxLevel": 25, "targetCategory": [],                  "costFormula": "19200 * (1 + 1*x + 1.4^x) / 2"  },
+    { "name": "车辆限制", "effectPerLevel": [5], "maxLevel": 60, "targetCategory": [],                   "costFormula": "19200 * (1 + 0.3*x + 1.07^x) / 2"  },
+    { "name": "车辆燃料消耗", "effectPerLevel": [-0.01], "maxLevel": 35, "targetCategory": "fuel",       "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "火车燃料消耗", "effectPerLevel": [-0.01], "maxLevel": 35, "targetCategory": "fuel",       "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "船舰燃料消耗", "effectPerLevel": [-0.01], "maxLevel": 35, "targetCategory": "fuel",       "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "火箭载荷量", "effectPerLevel": [0.05], "maxLevel": 20, "targetCategory": [],              "costFormula": "27840 * (1 + 1*x + 1.4^x) / 2"  },
+    { "name": "维修产量", "effectPerLevel": [0.01], "maxLevel": 50, "targetCategory": [],                "costFormula": "23040 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "世界矿产", "effectPerLevel": [0.02], "maxLevel": 50, "targetCategory": [],                "costFormula": "23040 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "太阳能发电", "effectPerLevel": [0.02], "maxLevel": 200, "targetCategory": [],             "costFormula": "19200 * (1 + 0.2*x + 1.03^x) / 2"  }
   ],
   "ship_fuel_configs": {
     "dock_2": {

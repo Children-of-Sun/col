@@ -36,6 +36,7 @@ export interface Research {
   effectPerLevel: number[];
   maxLevel: number;
   targetCategory: string | string[];
+  costFormula?: string;
 }
 
 export interface MaintenanceWaste {

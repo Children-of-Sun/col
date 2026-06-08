@@ -371,6 +371,9 @@ export const Results: React.FC = () => {
   const showTinyErrors = useStore(s => s.showTinyErrors);
   const setShowTinyErrors = useStore(s => s.setShowTinyErrors);
   const unityProduction = useStore(s => s.unityProduction);
+  const stationLevel = useStore(s => s.stationLevel);
+  const stationUnity = stationLevel * 0.05;
+  const residentUnity = unityProduction - stationUnity;
   const cohesionTradeDirect = useStore(s => s.cohesionTradeDirect);
   const cohesionTradeMaintenance = useStore(s => s.cohesionTradeMaintenance);
   const cohesionEdict = useStore(s => s.cohesionEdict);
@@ -720,7 +723,7 @@ export const Results: React.FC = () => {
           </div>
           <div className="stat">
             ✅ 理论总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 实际总机器数: <b>{categoryData.all.actualMachineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{formatPowerSigned((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0))}</b><br/>
-            🎯 凝聚力产量: <b>{unityProduction.toFixed(2)}</b><br/>
+            🎯 凝聚力产量: 居民 <b>{residentUnity.toFixed(2)}</b> | 空间站 <b>{stationUnity.toFixed(2)}</b>  | 总计 <b>{unityProduction.toFixed(2)}</b><br/>
             📉 凝聚力消耗: 贸易直接: <b>{cohesionTradeDirect.toFixed(2)}</b> | 贸易维持: <b>{cohesionTradeMaintenance.toFixed(2)}</b> | 法令: <b>{cohesionEdict.toFixed(2)}</b> | 研究: <b>{labCohesionTotal.toFixed(2)}</b> | 总计: <b>{(cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal).toFixed(2)}</b><br/>
             净凝聚力: <b>{(unityProduction - (cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal)).toFixed(2)}</b>
           </div>
