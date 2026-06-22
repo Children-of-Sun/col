@@ -1334,14 +1334,27 @@
   "enableTradeModule": false,
   "showIcons": true,
   "ignoredItems": [],
-  "enableAgriculture": false,
+  "enableAgriculture": true,
   "cropRotation": true,
   "globalFertilizerType": "II",
   "targetFertility": 140,
-  "enableFocusConsumption": false,
-  "officeBuildingEnabled": {},
+  "enableFocusConsumption": true,
+  "officeBuildingEnabled": {
+    "OfficeI": false,
+    "OfficeII": false
+  },
   "officeSelectedLevel": {},
-  "officeRecipeEnabled": {},
+  "officeRecipeEnabled": {
+    "OfficeI": false,
+    "OfficeIAccel": false,
+    "OfficeIGAcc": false,
+    "OfficeII": false,
+    "OfficeIIAccel": false,
+    "OfficeIIGAcc": false,
+    "OfficeIII": true,
+    "OfficeIAcceIIIAccel": true,
+    "OfficeIIIGAcc": true
+  },
   "farms": [
     {
       "buildingId": "FarmT4",
@@ -1453,7 +1466,7 @@
     {
       "buildingId": "FarmT3",
       "buildingName": "Greenhouse",
-      "enabled": true,
+      "enabled": false,
       "level": 1,
       "crops": [
         {
@@ -1560,7 +1573,7 @@
     {
       "buildingId": "FarmT2",
       "buildingName": "Irrigated Farm",
-      "enabled": true,
+      "enabled": false,
       "level": 1,
       "crops": [
         {
@@ -1631,10 +1644,16 @@
   ],
   "integerMode": "continuous",
   "milpTimeLimit": 30,
+  "recipeIntegerEnabled": {},
+  "tradeVoyageTime": 0,
   "enableRedundancy": false,
   "globalLower": 100,
-  "globalUpper": 100,
+  "globalUpper": 150,
   "redundancyResources": {},
+  "redundancyAutoItems": {},
+  "redundancyMilpDisabled": {},
+  "officeCollapsed": {},
+  "farmCollapsed": {},
   "demands": [],
   "externalSupplies": [],
   "selectedTradeRecipes": [],
