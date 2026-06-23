@@ -231,13 +231,17 @@ const BuildingBlock: React.FC<{
     if (newVal) {
       if (currentIntegerMode === 'milp') {
         // 仅在混合整数模式下联动冗余
-        if (!currentResources[targetItem]) {
+        const alreadyExisted = !!currentResources[targetItem];
+        if (!alreadyExisted) {
           store.setRedundancyResources({
             ...currentResources,
             [targetItem]: { enabled: true, lower: 100, upper: 100 },
           });
         }
-        store.setRedundancyAutoItems({ ...currentAutoItems, [targetItem]: true });
+        // 仅当物品是自动新增的才标记 auto；手动配置的物品保留其手动状态
+        if (!alreadyExisted) {
+          store.setRedundancyAutoItems({ ...currentAutoItems, [targetItem]: true });
+        }
         if (!store.enableRedundancy) {
           store.setEnableRedundancy(true);
         }

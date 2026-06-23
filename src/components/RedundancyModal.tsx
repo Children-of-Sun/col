@@ -29,6 +29,8 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
   const [tempResources, setTempResources] = useState<Record<string, RedundancyResource>>({});
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState('');
+  // 跟踪用户在模态框中手动修改过的物品（用于保存时清除 auto 标记）
+  const [touchedItems] = useState<Set<string>>(() => new Set());
 
   // Initialize temp state when modal opens
   useEffect(() => {
@@ -43,6 +45,7 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
       }
       setTempResources(copy);
       setSearch('');
+      touchedItems.clear();
     }
   }, [open, storeEnable, storeGlobalLower, storeGlobalUpper, storeResources]);
 
@@ -82,6 +85,7 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
   };
 
   const updateResource = (item: string, patch: Partial<RedundancyResource>) => {
+    touchedItems.add(item);
     setTempResources(prev => {
       const current = prev[item] || { enabled: false, lower: 100, upper: 100 };
       return { ...prev, [item]: { ...current, ...patch } };
@@ -89,6 +93,7 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
   };
 
   const toggleEnabled = (item: string) => {
+    touchedItems.add(item);
     if (!isExplicit(item)) {
       // 第一次点击：显式启用（opt-in），使用全局默认值 100%
       updateResource(item, { enabled: true, lower: 100, upper: 100 });
@@ -110,12 +115,31 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
       explicitCount: explicitItems.length,
       disabledCount: disabledItems.length,
       disabledItems: disabledItems.map(([k]) => k),
+      touchedCount: touchedItems.size,
+      clearedAuto: [...touchedItems].filter(k => storeAutoItems[k]),
       note: '未在列表中的资源自动使用全局值',
     });
     setEnableRedundancy(tempEnable);
     setGlobalLower(tempGlobalLower);
     setGlobalUpper(tempGlobalUpper);
     setRedundancyResources(tempResources);
+
+    // 清除被用户手动修改过的物品的 auto 标记，防止退出 MILP 模式时被误删
+    if (touchedItems.size > 0) {
+      const store = useStore.getState();
+      const newAutoItems = { ...store.redundancyAutoItems };
+      let autoChanged = false;
+      for (const item of touchedItems) {
+        if (newAutoItems[item]) {
+          delete newAutoItems[item];
+          autoChanged = true;
+        }
+      }
+      if (autoChanged) {
+        store.setRedundancyAutoItems(newAutoItems);
+      }
+    }
+
     onClose();
   };
 

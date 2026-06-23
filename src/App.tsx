@@ -13,7 +13,6 @@ import OfficePanel from './components/OfficePanel';
 import { TradePanel } from './components/TradePanel';
 import { AgriculturePanel } from './components/AgriculturePanel';
 import { buildLp } from './lpBuilder';
-import { solveMip } from './mipSolver';
 import { t } from './utils';
 import { isContinuous } from './utils/format';
 import { buildActiveRecipes } from './buildActiveRecipes';
@@ -195,8 +194,8 @@ export default function App() {
         worker.terminate();
         reject(new Error(err.message));
       };
-      // 在 milp 模式下传入 MIP 选项
-      const options = integerMode === 'milp' ? { time_limit: 30, mip_rel_gap: 0.03 } : undefined;
+      // 在 milp 模式下传入原生 HiGHS MIP 选项
+      const options = integerMode === 'milp' ? { time_limit: 60, presolve: 'on' } : undefined;
       worker.postMessage({ lpString, requestId: Date.now(), options });
     });
   };
@@ -788,60 +787,39 @@ export default function App() {
         };
 
         if (integerMode === 'milp') {
-          // ====== MILP: JS B&B + HiGHS LP ======
+          // ====== MILP: Native HiGHS MIP ======
+          const milpLp = buildLp({ ...lpBaseParams });
           const intVarMap = getIntegerVarMap();
-          const intVarNames = Array.from(intVarMap.keys());
-          if (intVarNames.length === 0) {
+          if (intVarMap.size === 0) {
             setDiagnostic('MILP: no integer vars enabled');
             setIsSolving(false);
             return;
           }
-          setDiagnostic(`MILP B&B (${intVarNames.length} vars): branch and bound...`);
-
-          const baseLp = buildLp({ ...lpBaseParams });
-          const safeLpString = stripIntegerSection(baseLp.lpString);
-
+          setDiagnostic(`MILP (${intVarMap.size} vars): solving with HiGHS MIP...`);
           try {
-            const mipSolution = await solveMip(
-              safeLpString, baseLp.varNames, intVarNames,
-              (lpStr, varNames) => runLpSolver(lpStr, varNames, 'continuous'),
-              {
-                gapTolerance: 0.05, maxNodes: 500, timeLimitMs: 58000,
-                onProgress: (msg) => setDiagnostic(msg),
-              },
-            );
-
-            if (mipSolution.Status === 'Optimal' || mipSolution.Status === 'Feasible') {
-              const actualLabor = computeTotalLabor(mipSolution, baseLp.varNames);
+            const mipResult = await runLpSolver(milpLp.lpString, milpLp.varNames, 'milp');
+            if (isMipSuccess(mipResult?.Status)) {
+              const actualLabor = computeTotalLabor(mipResult, milpLp.varNames);
               const laborIgnored = s.ignoredItems.includes('人力');
               if (actualLabor <= pop + 1e-9 || laborIgnored) {
-                finalizeResult(mipSolution, baseLp.varNames, mipSolution.message);
+                finalizeResult(mipResult, milpLp.varNames, `MILP done (${intVarMap.size} int vars)`);
                 return;
               }
-              setDiagnostic('Labor exceeds population, re-solving with labor constraint...');
+              setDiagnostic('Labor exceeds pop, re-solving...');
               const p2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
-              const p2Safe = stripIntegerSection(p2Lp.lpString);
-              const p2Solution = await solveMip(
-                p2Safe, p2Lp.varNames, intVarNames,
-                (lpStr, varNames) => runLpSolver(lpStr, varNames, 'continuous'),
-                {
-                  gapTolerance: 0.05, maxNodes: 500, timeLimitMs: 58000,
-                  onProgress: (msg) => setDiagnostic(msg),
-                },
-              );
-              if (p2Solution.Status === 'Optimal' || p2Solution.Status === 'Feasible') {
-                finalizeResult(p2Solution, p2Lp.varNames, 'MILP B&B + labor: ' + p2Solution.message);
+              const p2Result = await runLpSolver(p2Lp.lpString, p2Lp.varNames, 'milp');
+              if (isMipSuccess(p2Result?.Status)) {
+                finalizeResult(p2Result, p2Lp.varNames, 'MILP + labor constraint done.');
               } else {
-                finalizeResult(p2Solution, p2Lp.varNames, 'MILP: infeasible under labor constraint.');
+                finalizeResult(p2Result, p2Lp.varNames, 'MILP: infeasible under labor constraint.');
               }
               return;
             }
-
-            setDiagnostic(mipSolution.message);
+            setDiagnostic('MILP returned no feasible solution.');
             setIsSolving(false);
           } catch (err: any) {
-            console.warn('[handleSolve] MILP B&B error:', err.message);
-            setDiagnostic('MILP B&B error: ' + err.message);
+            console.warn('[handleSolve] MILP error:', err.message);
+            setDiagnostic('MILP solver error: ' + err.message);
             setIsSolving(false);
           }
         } else {

@@ -773,10 +773,26 @@ export function buildLp(input: LpInput): LpOutput {
   }
   // [DIAGNOSTIC] 冗余约束应用摘要
   if (enableRedundancy) {
+    const maintenanceItems = ['maintenance i', 'maintenance ii', 'maintenance iii'];
+    const maintenanceStatus = maintenanceItems.map(mi => {
+      const rf = getRedundancyFactors(mi);
+      const hasProd = producers.has(mi);
+      const hasCons = consumers.has(mi);
+      return {
+        item: mi,
+        hasProducer: hasProd,
+        hasConsumer: hasCons,
+        redundancyFactor: rf ? `L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)}` : '未应用',
+        constraintType: rf
+          ? (rf.lowerFactor === rf.upperFactor ? '精确等式(=0)' : '范围约束(>=0, <=0)')
+          : (hasCons ? '精确平衡(=0)' : (hasProd ? '允许盈余(>=0)' : '无约束')),
+      };
+    });
     console.warn('[冗余] 约束生成摘要:', {
       totalDemandItems: [...demandSet].length,
       redundancyAppliedCount,
       redundancyAppliedItems,
+      maintenanceStatus,
       excludedOutputs: [...excludedOutputs],
       excludedInputs: [...excludedInputs],
       ignored: [...ignored],
