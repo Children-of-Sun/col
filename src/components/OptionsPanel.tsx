@@ -30,8 +30,91 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
 
   const integerMode = useStore(s => s.integerMode);
   const setIntegerMode = useStore(s => s.setIntegerMode);
+  const recipes = useStore(s => s.recipes);
+  const recipeIntegerEnabled = useStore(s => s.recipeIntegerEnabled);
   const milpTimeLimit = useStore(s => s.milpTimeLimit);
   const setMilpTimeLimit = useStore(s => s.setMilpTimeLimit);
+
+  const isIntegerMode = (mode: string) => mode === 'milp' || mode === 'rounding';
+
+  // 切换整数模式时联动冗余
+  const handleModeSwitch = (newMode: string) => {
+    const s = useStore.getState();
+    const oldMode = s.integerMode;
+    if (newMode === oldMode) return;
+
+    if (isIntegerMode(newMode)) {
+      // ========== 进入 MILP 或圆整模式 ==========
+      // Step 1: 扫描所有取整配方，自动启用对应产物冗余（仅新增，不动已有手动配置）
+      const newResources = { ...s.redundancyResources };
+      const newAutoItems = { ...s.redundancyAutoItems };
+      let changed = false;
+
+      for (const recipe of s.recipes) {
+        if (s.recipeIntegerEnabled[recipe.id] !== true) continue;
+        const outputItems = Object.keys(recipe.outputs).filter(k => {
+          const kl = k.toLowerCase();
+          if (kl === 'recyclables' || kl.includes('waste')) return false;
+          return true;
+        });
+        if (outputItems.length === 0) continue;
+        const targetItem = outputItems[0];
+        if (!newResources[targetItem]) {
+          newResources[targetItem] = { enabled: true, lower: 100, upper: 100 };
+          newAutoItems[targetItem] = true;
+          changed = true;
+        }
+      }
+
+      // Step 2: 应用之前记下的"混合模式下关闭"的自动项
+      const milpDisabled = s.redundancyMilpDisabled || {};
+      for (const item of Object.keys(milpDisabled)) {
+        if (milpDisabled[item] && newAutoItems[item]) {
+          newResources[item] = { ...newResources[item], enabled: false };
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        s.setRedundancyResources(newResources);
+        s.setRedundancyAutoItems(newAutoItems);
+      }
+      if (!s.enableRedundancy) {
+        s.setEnableRedundancy(true);
+      }
+    } else if (isIntegerMode(oldMode)) {
+      // ========== 退出整数模式：记下关闭项，清空所有自动冗余 ==========
+      const newDisabled: Record<string, boolean> = { ...s.redundancyMilpDisabled };
+      const newResources = { ...s.redundancyResources };
+      const newAutoItems = { ...s.redundancyAutoItems };
+      let changed = false;
+
+      for (const item of Object.keys(s.redundancyAutoItems)) {
+        if (s.redundancyAutoItems[item]) {
+          const res = newResources[item];
+          if (res && res.enabled === false) {
+            newDisabled[item] = true;
+          } else if (res && res.enabled === true) {
+            delete newDisabled[item];
+          }
+          if (item in newResources) {
+            delete newResources[item];
+            changed = true;
+          }
+          delete newAutoItems[item];
+          changed = true;
+        }
+      }
+
+      s.setRedundancyMilpDisabled(newDisabled);
+      if (changed) {
+        s.setRedundancyResources(newResources);
+        s.setRedundancyAutoItems(newAutoItems);
+      }
+    }
+
+    s.setIntegerMode(newMode as any);
+  };
 
   const showIcons = useStore(s => s.showIcons);
   const setShowIcons = useStore(s => s.setShowIcons);
@@ -64,30 +147,24 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
           <label style={{ fontWeight: 'bold' }}>🔢 整数模式: </label>
           <select
             value={integerMode}
-            onChange={e => setIntegerMode(e.target.value as any)}
+            onChange={e => handleModeSwitch(e.target.value)}
             style={{ marginLeft: 8, padding: 4 }}
             disabled={!dataLoaded}
           >
             <option value="continuous">连续解（小数机器）</option>
             <option value="ceil">向上取整（按整机计算维护）</option>
-            <option value="milp">混合整数规划 MILP（精确）</option>
+            <option value="rounding">圆整模式（连续解+迭代取整）</option>
+            <option value="milp">混合整数规划 MILP（真MIP）</option>
           </select>
         </div>
 
-        {integerMode === 'milp' && (
-          <div>
-            <label>⏱️ MILP 时间限制（秒）: </label>
-            <input
-              type="number"
-              min={1}
-              max={300}
-              step={5}
-              value={milpTimeLimit}
-              onChange={e => setMilpTimeLimit(parseInt(e.target.value) || 30)}
-              style={{ width: 70, marginLeft: 8 }}
-              disabled={!dataLoaded}
-            />
-            <span className="hint" style={{ marginLeft: 8 }}>（超时后返回当前最好解）</span>
+        {(integerMode === 'milp' || integerMode === 'rounding') && (
+          <div style={{ marginTop: 6 }}>
+            <span className="hint" style={{ marginLeft: 0 }}>
+              {integerMode === 'rounding'
+                ? '💡 圆整模式：连续求解后逐个圆整取整变量，速度快、支持任意数量。'
+                : '⚠️ MILP 模式：调用 HiGHS 原生 MIP 求解器（如崩溃自动回退圆整模式）。'}
+            </span>
           </div>
         )}
       </div>

@@ -92,17 +92,27 @@ export function buildTradeRecipe(params: {
   travelMode: 'normal' | 'special';
   profitBonusPercent: number;      // 利润加成百分比（例如 20 → 20%）
   unityDiscountPercent: number;    // 凝聚力减免百分比（例如 10 → -10%）
+  tradeVoyageTime?: number;        // 用户输入的标准普通航行总时间（秒，地图+海外普通模式），0=使用旧逻辑
   gameData: any;
   fullData: any;
   translation: Record<string, string>;
   edictLevels: Record<number, number>;
   researchLevels: number[];
 }): { recipe: Recipe | null; displayData: any } {
-  const { contract, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusPercent, unityDiscountPercent, gameData, fullData, translation, edictLevels, researchLevels } = params;
+  const { contract, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusPercent, unityDiscountPercent, tradeVoyageTime, gameData, fullData, translation, edictLevels, researchLevels } = params;
 
   const moduleSpeed = { S: 125, M: 250, L: 500 }[moduleSize];
   const moduleCapacity = baySlots <= 4 ? 800 : 1200;
-  const { travelTime, fuelPerTrip } = getTravelInfo(baySlots, fuelTypeRaw, travelMode, gameData);
+  const { travelTime: overseasTime, fuelPerTrip } = getTravelInfo(baySlots, fuelTypeRaw, travelMode, gameData);
+
+  // 计算地图行进时间：用户输入总普通航行时间（秒）- 海外普通模式航行时间（分钟）
+  let actualTravelTime = overseasTime;
+  if (tradeVoyageTime && tradeVoyageTime > 0) {
+    const { travelTime: overseasNormalTime } = getTravelInfo(baySlots, fuelTypeRaw, 'normal', gameData);
+    const voyageTimeMinutes = tradeVoyageTime / 60; // 秒转分钟
+    const mapTravelTime = Math.max(0, voyageTimeMinutes - overseasNormalTime);
+    actualTravelTime = mapTravelTime + overseasTime;
+  }
 
   // 计算燃料减免系数（相乘）
   let fuelMultiplier = 1;
@@ -142,7 +152,7 @@ export function buildTradeRecipe(params: {
   const { buy, sell, m, n, loadTime } = computeBestTrade(adjustedContract, baySlots, moduleSpeed, moduleCapacity);
   if (buy === 0) return { recipe: null, displayData: null };
 
-  const totalTime = travelTime + loadTime;
+  const totalTime = actualTravelTime + loadTime;
   const totalModules = m + n;
 
   const { workers, electricity, maintI, maintII, maintIII } = getDockAndModuleConsumption(baySlots, moduleSize, totalModules, gameData, fullData);
@@ -196,7 +206,7 @@ const perMinMaintIII = maintIII;
     buyAmount: buy,
     sellAmount: sell,
     loadTime,
-    travelTime,
+    travelTime: actualTravelTime,
     totalTime,
     buyPerMin: perMinBuy,
     sellPerMin: perMinSell,

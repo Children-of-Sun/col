@@ -13,6 +13,7 @@ import OfficePanel from './components/OfficePanel';
 import { TradePanel } from './components/TradePanel';
 import { AgriculturePanel } from './components/AgriculturePanel';
 import { buildLp } from './lpBuilder';
+import { solveMip } from './mipSolver';
 import { t } from './utils';
 import { isContinuous } from './utils/format';
 import { buildActiveRecipes } from './buildActiveRecipes';
@@ -175,7 +176,19 @@ export default function App() {
       worker.onmessage = (e) => {
         clearTimeout(timeoutId);
         worker.terminate();
-        resolve(e.data.result);
+        // Worker 可能返回 {error: "..."}（求解器崩溃）而非 {result: {...}}
+        if (e.data.error) {
+          console.warn('[runLpSolver] Worker 返回错误:', e.data.error);
+          reject(new Error(e.data.error));
+          return;
+        }
+        const result = e.data.result;
+        if (result) {
+          console.log('[runLpSolver] 求解器返回状态:', result.Status, '| 变量数:', Object.keys(result.Columns || result.columns || {}).length);
+        } else {
+          console.log('[runLpSolver] 求解器返回空结果, e.data:', JSON.stringify(e.data).slice(0, 500));
+        }
+        resolve(result);
       };
       worker.onerror = (err) => {
         clearTimeout(timeoutId);
@@ -183,7 +196,7 @@ export default function App() {
         reject(new Error(err.message));
       };
       // 在 milp 模式下传入 MIP 选项
-      const options = integerMode === 'milp' ? { presolve: 'on', mip_max_nodes: 10000 } : undefined;
+      const options = integerMode === 'milp' ? { time_limit: 30, mip_rel_gap: 0.03 } : undefined;
       worker.postMessage({ lpString, requestId: Date.now(), options });
     });
   };
@@ -194,8 +207,9 @@ export default function App() {
     console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
     setResult(result);
     setIsSolving(false);
-    if (result?.Status === 'Optimal') {
-      setDiagnostic('');
+    const st = result?.Status;
+    if (st === 'Optimal' || st === 'Feasible' || st === 'NodeLimit' || st === 'TimeLimit' || st === 'SolutionLimit') {
+      setDiagnostic(st === 'Optimal' ? '' : `⚠️ 求解完成 (状态: ${st}，已得可行解但未证最优)`);
       // 计算实际贸易消耗
       if (tradeActive && tradeActive.length) {
         let actualDirect = 0;
@@ -210,7 +224,7 @@ export default function App() {
         setCohesionTradeMaintenance(actualMaintenance);
         setUnityConsumption(actualDirect + actualMaintenance + (fixedUnityConsumption || 0) + (researchCohesionTotal || 0));
       }
-    } else if (result?.Status === 'Infeasible') {
+    } else if (st === 'Infeasible') {
       const prev = useStore.getState().diagnostic;
       setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
     }
@@ -373,6 +387,7 @@ export default function App() {
           enableRedundancy: state.enableRedundancy,
           globalLower: state.globalLower, globalUpper: state.globalUpper,
           redundancyResources: state.redundancyResources,
+          recipeIntegerEnabled: state.recipeIntegerEnabled,
         });
 
         // 更新当前变量名和机器变量名（LP 重建后可能变化）
@@ -412,9 +427,11 @@ export default function App() {
           customWeights: state.customWeights,
           fixedUnityProduction, fixedUnityConsumption,
           integerMode: 'continuous',
+          minResidentValue: residentValue > 0 ? residentValue : undefined,
           enableRedundancy: state.enableRedundancy,
           globalLower: state.globalLower, globalUpper: state.globalUpper,
           redundancyResources: state.redundancyResources,
+          recipeIntegerEnabled: state.recipeIntegerEnabled,
         });
         const fallbackResult = await runLpSolver(fallbackLp, fallbackVarNames);
         setResult(fallbackResult);
@@ -490,11 +507,27 @@ export default function App() {
     const customWeights = s.customWeights;
     const integerMode = s.integerMode;
 
+    // 混合整数模式：自动开启冗余系统，并为取整配方的产出物自动加入冗余
+    let effectiveEnableRedundancy = s.enableRedundancy;
+    let effectiveRedundancyResources = { ...s.redundancyResources };
+
+    if (integerMode === 'milp') {
+      // 混合整数模式强制开启冗余（自动冗余项已在模式切换时加入）
+      effectiveEnableRedundancy = true;
+    } else {
+      // 非 MILP 模式：过滤掉自动冗余项，仅保留用户手动配置的
+      for (const key of Object.keys(s.redundancyAutoItems)) {
+        delete effectiveRedundancyResources[key];
+      }
+    }
+
     // 将结果后处理抽取为公共函数
     const finalizeResult = (lpResult: any, usedVarNames: string[], diagnosticExtra: string) => {
       setResult(lpResult);
       setIsSolving(false);
-      if (lpResult?.Status === 'Optimal') {
+      // MIP 求解器可能返回 NodeLimit/TimeLimit/Feasible 等"有解但未证最优"状态
+      const st = lpResult?.Status;
+      if (st === 'Optimal' || st === 'Feasible' || st === 'NodeLimit' || st === 'TimeLimit' || st === 'SolutionLimit') {
         setDiagnostic(diagnosticExtra || '');
         if (tradeActive && tradeActive.length) {
           let actualDirect = 0;
@@ -509,12 +542,15 @@ export default function App() {
           setCohesionTradeMaintenance(actualMaintenance);
           setUnityConsumption(actualDirect + actualMaintenance + fixedUnityConsumption + researchCohesionTotal);
         }
-      } else if (lpResult?.Status === 'Infeasible') {
+      } else if (st === 'Infeasible') {
         setDiagnostic((diagnosticExtra || '') + '<br>💡 当前设置无法平衡所有中间产物。');
       }
     };
 
     // 构建 LP 基础参数
+    const pop = s.population;
+    const residentFixed = pop > 0 ? pop / 1000 : 0;
+
     const lpBaseParams = {
       mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
       ignored, demands: positiveDemands, externalSupplies: allExternalSupplies,
@@ -523,10 +559,13 @@ export default function App() {
       allowExternal: effectiveAllowExternal, optimizationMode, customWeights,
       fixedUnityProduction, fixedUnityConsumption, integerMode,
       // 资源冗余设置
-      enableRedundancy: s.enableRedundancy,
+      enableRedundancy: effectiveEnableRedundancy,
       globalLower: s.globalLower,
       globalUpper: s.globalUpper,
-      redundancyResources: s.redundancyResources,
+      redundancyResources: effectiveRedundancyResources,
+      recipeIntegerEnabled: s.recipeIntegerEnabled,
+      // 人口 > 0 时强制居民模块最低值，防止被归零
+      minResidentValue: residentFixed > 0 ? residentFixed : undefined,
     };
 
     // 计算总人力消耗（从 LP 结果）
@@ -543,14 +582,10 @@ export default function App() {
       return total;
     };
 
-    const pop = s.population;
-    const residentFixed = pop > 0 ? pop / 1000 : 0;
-
     // ========== 第一趟：居民自由但 >= 人口/1000，人力平衡约束 ==========
     const pass1Lp = buildLp({
       ...lpBaseParams,
       relaxLabor: false,
-      minResidentValue: residentFixed > 0 ? residentFixed : undefined,
     });
 
     if (integerMode === 'milp') {
@@ -589,17 +624,53 @@ export default function App() {
 
     // 根据整数模式选择求解方式
     setIsSolving(true);
+    // MIP 求解器可能返回多种"有解"状态（NodeLimit=达到节点上限，TimeLimit=超时，Feasible=可行未证最优）
+    const MIP_SUCCESS = new Set(['Optimal', 'Feasible', 'NodeLimit', 'TimeLimit', 'SolutionLimit']);
+    const isMipSuccess = (st: string | undefined): boolean => !!st && MIP_SUCCESS.has(st);
+
+    // MILP 模式下：收集需要取整的配方→变量映射，用于后处理圆整
+    const getIntegerVarMap = (): Map<string, { recipe: Recipe; varName: string }> => {
+      const map = new Map<string, { recipe: Recipe; varName: string }>();
+      for (let i = 0; i < mainActive.length; i++) {
+        const r = mainActive[i];
+        if (s.recipeIntegerEnabled[r.id] === true) {
+          map.set(`x${i}`, { recipe: r, varName: `x${i}` });
+        }
+      }
+      for (let i = 0; i < powerActive.length; i++) {
+        const r = powerActive[i];
+        if (s.recipeIntegerEnabled[r.id] === true) {
+          map.set(`p${i}`, { recipe: r, varName: `p${i}` });
+        }
+      }
+      return map;
+    };
+
+    // 将 LP 结果中整数变量的值圆整，生成 fixedMachines
+    const roundIntegerVars = (lpResult: any, varNames: string[], intVarMap: Map<string, any>, method: 'nearest' | 'ceil' = 'nearest'): Record<string, number> => {
+      const fixed: Record<string, number> = {};
+      const cols = lpResult?.Columns || lpResult?.columns || {};
+      for (const [varName] of intVarMap) {
+        const col = cols[varName];
+        const val = col?.Primal ?? col?.primal ?? 0;
+        if (val <= 1e-9) continue;
+        const rounded = method === 'ceil' ? Math.ceil(val) : Math.round(val);
+        if (rounded > 0) fixed[varName] = rounded;
+      }
+      return fixed;
+    };
+
     try {
-      if (integerMode === 'continuous' || integerMode === 'milp') {
-        // 第一趟求解
+      if (integerMode === 'continuous') {
+        // 连续模式：直接求解
         let diagHeader = '🔍 第一趟：按设定人口求解...';
         if (rdEnabled) {
           diagHeader += `<br>📊 <b>冗余已启用</b>: 全局 ${s.globalLower}%~${s.globalUpper}%, 显式配置=${rdExplicitlyConfigured.length}个, 禁用=${rdExplicitlyDisabled.length}个，其余自动启用`;
         }
         setDiagnostic(diagHeader);
-        const pass1Result = await runLpSolver(pass1Lp.lpString, pass1Lp.varNames, integerMode);
+        const pass1Result = await runLpSolver(pass1Lp.lpString, pass1Lp.varNames, 'continuous');
 
-        if (pass1Result?.Status === 'Optimal') {
+        if (isMipSuccess(pass1Result?.Status)) {
           const actualLabor = computeTotalLabor(pass1Result, pass1Lp.varNames);
           const laborIgnored = s.ignoredItems.includes('人力');
           if (actualLabor <= pop + 1e-9 || laborIgnored) {
@@ -607,42 +678,202 @@ export default function App() {
             finalizeResult(pass1Result, pass1Lp.varNames, msg);
             return;
           }
-          // 人力超人口 → 第二趟
+          // 人力超 → 第二趟
           setDiagnostic(`⚠️ 实际人力(${Math.ceil(actualLabor)})超人口(${pop})，第二趟：加入人力约束...`);
           const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
           useStore.getState().setSolverVarNames(pass2Lp.varNames);
           setSolverMissing(pass2Lp.missing);
-          const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, integerMode);
-          if (pass2Result?.Status === 'Optimal') {
+          const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, 'continuous');
+          if (isMipSuccess(pass2Result?.Status)) {
             finalizeResult(pass2Result, pass2Lp.varNames, `⚠️ 人力不足（需${Math.ceil(actualLabor)}，人口${pop}），已加入人力约束。`);
           } else {
             finalizeResult(pass2Result, pass2Lp.varNames, `⚠️ 人力约束下不可行。`);
           }
-          if (DEBUG) {
-            console.log('=== 求解结果 - 贸易变量值 ===');
-            const result = useStore.getState().result;
-            if (result?.Status === 'Optimal') {
-              tradeActive.forEach((recipe, idx) => {
-                const val = (result.Columns || result.columns || {})[`tr${idx}`]?.Primal ?? (result.Columns || result.columns || {})[`tr${idx}`]?.primal ?? 0;
-                console.log(`${recipe.name}: ${val}`);
-              });
-            }
-          }
         } else {
-          // 第一趟不可行 → 尝试人力约束版
           setDiagnostic('⚠️ 第一趟不可行，尝试加入人力约束...');
           const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
           useStore.getState().setSolverVarNames(pass2Lp.varNames);
           setSolverMissing(pass2Lp.missing);
-          const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, integerMode);
-          finalizeResult(pass2Result, pass2Lp.varNames, pass2Result?.Status === 'Optimal' ? '⚠️ 人力约束下求得可行解。' : '');
+          const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, 'continuous');
+          finalizeResult(pass2Result, pass2Lp.varNames, isMipSuccess(pass2Result?.Status) ? '⚠️ 人力约束下求得可行解。' : '');
+        }
+      } else if (integerMode === 'rounding' || integerMode === 'milp') {
+        // 去除 LP 中的 Bounds+Integer 段（HiGHS WASM 解析会崩溃）
+        const stripIntegerSection = (lp: string) => lp.replace(/\nBounds\n[\s\S]*?\nEND/, '\nEND');
+
+        // 圆整/MILP 模式共用的"连续解+迭代圆整"核心逻辑
+        const runRoundingSolver = async (diagPrefix: string, fallbackMsg: string) => {
+          const intVarMap = getIntegerVarMap();
+          const strippedLp = buildLp({ ...lpBaseParams }); // MILP 约束语义（如 integerMode='milp' 影响 lowerFactor）
+          const safeLpString = stripIntegerSection(strippedLp.lpString);
+
+          let diagHeader = `🔍 ${diagPrefix}...`;
+          if (rdEnabled) {
+            diagHeader += `<br>📊 <b>冗余已启用</b>: 全局 ${s.globalLower}%~${s.globalUpper}%, 显式配置=${rdExplicitlyConfigured.length}个, 禁用=${rdExplicitlyDisabled.length}个，其余自动启用`;
+          }
+          setDiagnostic(diagHeader);
+          const result1 = await runLpSolver(safeLpString, strippedLp.varNames, 'continuous');
+
+          if (!isMipSuccess(result1?.Status)) {
+            setDiagnostic('⚠️ 第一趟不可行，尝试加入人力约束...');
+            const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+            const safe2 = stripIntegerSection(pass2Lp.lpString);
+            useStore.getState().setSolverVarNames(pass2Lp.varNames);
+            setSolverMissing(pass2Lp.missing);
+            const pass2Result = await runLpSolver(safe2, pass2Lp.varNames, 'continuous');
+            finalizeResult(pass2Result, pass2Lp.varNames, isMipSuccess(pass2Result?.Status) ? '⚠️ 人力约束下求得可行解。' : '');
+            return;
+          }
+
+          // 连续解成功 → 逐个迭代圆整
+          const cols = result1?.Columns || result1?.columns || {};
+          const intEntries: { varName: string; continuousVal: number; nearest: number; ceil: number; distance: number }[] = [];
+          for (const [varName] of intVarMap) {
+            const val = cols[varName]?.Primal ?? cols[varName]?.primal ?? 0;
+            if (val <= 1e-9) continue;
+            const nearest = Math.round(val);
+            const ceil = Math.ceil(val);
+            intEntries.push({ varName, continuousVal: val, nearest, ceil, distance: Math.abs(val - nearest) });
+          }
+          if (intEntries.length === 0) {
+            finalizeResult(result1, strippedLp.varNames, `${diagPrefix} 完成（无整数变量需圆整）。`);
+            return;
+          }
+          intEntries.sort((a, b) => a.distance - b.distance);
+
+          const baseVarNames = strippedLp.varNames;
+          const fixedSoFar: Record<string, number> = {};
+          let fixedCount = 0;
+          let skippedCount = 0;
+
+          for (const entry of intEntries) {
+            for (const roundVal of [entry.nearest, entry.ceil]) {
+              if (roundVal <= 0) continue;
+              if (entry.nearest === entry.ceil && roundVal === entry.ceil) continue;
+              const testFixed = { ...fixedSoFar, [entry.varName]: roundVal };
+              const testLp = buildLp({ ...lpBaseParams, fixedMachines: testFixed });
+              const safeTestLp = stripIntegerSection(testLp.lpString);
+              try {
+                const testResult = await runLpSolver(safeTestLp, testLp.varNames, 'continuous');
+                if (isMipSuccess(testResult?.Status)) {
+                  fixedSoFar[entry.varName] = roundVal;
+                  fixedCount++;
+                  if (DEBUG) console.log(`[${diagPrefix}] 固定 ${entry.varName} = ${roundVal} (连续=${entry.continuousVal.toFixed(3)}) 成功, 已固定=${fixedCount}`);
+                  break;
+                }
+              } catch (_) { /* skip */ }
+            }
+            if (!fixedSoFar[entry.varName]) skippedCount++;
+            if ((fixedCount + skippedCount) % 5 === 0 || fixedCount + skippedCount === intEntries.length) {
+              setDiagnostic(`🔍 ${diagPrefix}: ${fixedCount} 已取整, ${skippedCount} 跳过, ${intEntries.length - fixedCount - skippedCount} 待处理...`);
+            }
+          }
+
+          if (fixedCount > 0) {
+            const finalLp = buildLp({ ...lpBaseParams, fixedMachines: fixedSoFar });
+            const safeFinal = stripIntegerSection(finalLp.lpString);
+            useStore.getState().setSolverVarNames(finalLp.varNames);
+            setSolverMissing(finalLp.missing);
+            const finalResult = await runLpSolver(safeFinal, finalLp.varNames, 'continuous');
+            if (isMipSuccess(finalResult?.Status)) {
+              const msg = skippedCount > 0
+                ? `${diagPrefix} 完成：${fixedCount} 个配方取整，${skippedCount} 个无法圆整保留连续值。`
+                : `${diagPrefix} 完成：${fixedCount} 个配方全部取整成功。`;
+              finalizeResult(finalResult, finalLp.varNames, msg);
+              return;
+            }
+          }
+          setDiagnostic(`⚠️ ${fallbackMsg}`);
+          finalizeResult(result1, baseVarNames, `⚠️ ${fallbackMsg}，展示连续解（配方<b>未取整</b>）。`);
+        };
+
+        if (integerMode === 'milp') {
+          // ====== MILP: JS B&B + HiGHS LP ======
+          const intVarMap = getIntegerVarMap();
+          const intVarNames = Array.from(intVarMap.keys());
+          if (intVarNames.length === 0) {
+            setDiagnostic('MILP: no integer vars enabled');
+            setIsSolving(false);
+            return;
+          }
+          setDiagnostic(`MILP B&B (${intVarNames.length} vars): branch and bound...`);
+
+          const baseLp = buildLp({ ...lpBaseParams });
+          const safeLpString = stripIntegerSection(baseLp.lpString);
+
+          try {
+            const mipSolution = await solveMip(
+              safeLpString, baseLp.varNames, intVarNames,
+              (lpStr, varNames) => runLpSolver(lpStr, varNames, 'continuous'),
+              {
+                gapTolerance: 0.05, maxNodes: 500, timeLimitMs: 58000,
+                onProgress: (msg) => setDiagnostic(msg),
+              },
+            );
+
+            if (mipSolution.Status === 'Optimal' || mipSolution.Status === 'Feasible') {
+              const actualLabor = computeTotalLabor(mipSolution, baseLp.varNames);
+              const laborIgnored = s.ignoredItems.includes('人力');
+              if (actualLabor <= pop + 1e-9 || laborIgnored) {
+                finalizeResult(mipSolution, baseLp.varNames, mipSolution.message);
+                return;
+              }
+              setDiagnostic('Labor exceeds population, re-solving with labor constraint...');
+              const p2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+              const p2Safe = stripIntegerSection(p2Lp.lpString);
+              const p2Solution = await solveMip(
+                p2Safe, p2Lp.varNames, intVarNames,
+                (lpStr, varNames) => runLpSolver(lpStr, varNames, 'continuous'),
+                {
+                  gapTolerance: 0.05, maxNodes: 500, timeLimitMs: 58000,
+                  onProgress: (msg) => setDiagnostic(msg),
+                },
+              );
+              if (p2Solution.Status === 'Optimal' || p2Solution.Status === 'Feasible') {
+                finalizeResult(p2Solution, p2Lp.varNames, 'MILP B&B + labor: ' + p2Solution.message);
+              } else {
+                finalizeResult(p2Solution, p2Lp.varNames, 'MILP: infeasible under labor constraint.');
+              }
+              return;
+            }
+
+            setDiagnostic(mipSolution.message);
+            setIsSolving(false);
+          } catch (err: any) {
+            console.warn('[handleSolve] MILP B&B error:', err.message);
+            setDiagnostic('MILP B&B error: ' + err.message);
+            setIsSolving(false);
+          }
+        } else {
+          // ====== 圆整模式：直接使用连续解+迭代圆整 ======
+          await runRoundingSolver('圆整模式', '圆整失败');
         }
       } else if (integerMode === 'ceil') {
         await solveCeilMode(pass1Lp.lpString, pass1Lp.varNames, mainActive);
       }
     } catch (err: any) {
-      setIsSolving(false);
-      setDiagnostic(`求解器错误: ${err.message}`);
+      // 整数模式下的最终回退
+      if (integerMode === 'milp' || integerMode === 'rounding') {
+        console.warn(`[handleSolve] ${integerMode} 崩溃，回退连续模式:`, err.message);
+        try {
+          const fallbackLp = buildLp({ ...lpBaseParams, integerMode: 'continuous' });
+          useStore.getState().setSolverVarNames(fallbackLp.varNames);
+          setSolverMissing(fallbackLp.missing);
+          const fbResult = await runLpSolver(fallbackLp.lpString, fallbackLp.varNames, 'continuous');
+          const fbSt = fbResult?.Status;
+          if (fbSt === 'Optimal' || fbSt === 'Feasible' || fbSt === 'NodeLimit' || fbSt === 'TimeLimit' || fbSt === 'SolutionLimit') {
+            finalizeResult(fbResult, fallbackLp.varNames, '⚠️ 求解器不可用，已回退为连续解。');
+          } else {
+            finalizeResult(fbResult, fallbackLp.varNames, '⚠️ 连续回退也失败。');
+          }
+        } catch (err2: any) {
+          setIsSolving(false);
+          setDiagnostic(`求解器错误: ${err2.message}`);
+        }
+      } else {
+        setIsSolving(false);
+        setDiagnostic(`求解器错误: ${err.message}`);
+      }
     }
   }, [getFixedDemands, solarEfficiency, solveCeilMode]);
 

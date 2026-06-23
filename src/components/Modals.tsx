@@ -197,6 +197,63 @@ const BuildingBlock: React.FC<{
   const buildingIcon = useStore(s => s.buildingIcons[entry.buildingId]);
   const showIcons = useStore(s => s.showIcons);
   const buildingEnabled = entry.buildingEnabled;
+  const integerMode = useStore(s => s.integerMode);
+  const recipeIntegerEnabled = useStore(s => s.recipeIntegerEnabled);
+  const setRecipeIntegerEnabled = useStore(s => s.setRecipeIntegerEnabled);
+  const redundancyResources = useStore(s => s.redundancyResources);
+  const setRedundancyResources = useStore(s => s.setRedundancyResources);
+  const redundancyAutoItems = useStore(s => s.redundancyAutoItems);
+  const setRedundancyAutoItems = useStore(s => s.setRedundancyAutoItems);
+
+  // 取整开关联动冗余：获取配方的第一个有效产出物
+  const getFirstOutputItem = (r: any): string | null => {
+    const outputs = Object.keys(r.outputs).filter(k => {
+      const kl = k.toLowerCase();
+      if (kl === 'recyclables' || kl.includes('waste')) return false;
+      return true;
+    });
+    return outputs[0] || null;
+  };
+
+  // 处理取整开关变化（联动冗余自动启用/关闭）
+  const handleIntegerToggle = (recipe: any) => {
+    const store = useStore.getState();
+    const newVal = !(store.recipeIntegerEnabled[recipe.id] === true);
+    store.setRecipeIntegerEnabled(recipe.id, newVal);
+
+    const targetItem = getFirstOutputItem(recipe);
+    if (!targetItem) return;
+
+    const currentResources = store.redundancyResources;
+    const currentAutoItems = store.redundancyAutoItems;
+    const currentIntegerMode = store.integerMode; // 用 getState 取最新值，避免闭包过期
+
+    if (newVal) {
+      if (currentIntegerMode === 'milp') {
+        // 仅在混合整数模式下联动冗余
+        if (!currentResources[targetItem]) {
+          store.setRedundancyResources({
+            ...currentResources,
+            [targetItem]: { enabled: true, lower: 100, upper: 100 },
+          });
+        }
+        store.setRedundancyAutoItems({ ...currentAutoItems, [targetItem]: true });
+        if (!store.enableRedundancy) {
+          store.setEnableRedundancy(true);
+        }
+      }
+    } else {
+      // 关闭取整 → 仅自动设置的冗余项才关闭（自动关不记入 milpDisabled）
+      if (currentAutoItems[targetItem]) {
+        const newResources = { ...currentResources };
+        delete newResources[targetItem];
+        store.setRedundancyResources(newResources);
+        const newAuto = { ...currentAutoItems };
+        delete newAuto[targetItem];
+        store.setRedundancyAutoItems(newAuto);
+      }
+    }
+  };
 
   return (
     <div
@@ -237,6 +294,8 @@ const BuildingBlock: React.FC<{
             const rOn = recipeEnabled[r.id] !== false;
             const imp = Object.entries(r.inputs).map(([k, v]) => `${t(k, translation)}×${isPowerItem(k) ? v : ((60 / r.duration) * v).toFixed(2)}`).join(', ') || '无';
             const oup = Object.entries(r.outputs).map(([k, v]) => `${t(k, translation)}×${isPowerItem(k) ? v : ((60 / r.duration) * v).toFixed(2)}`).join(', ') || '无';
+            const showToggle = r.module === 'power' || (r.module === 'main' && r.category !== '农业');
+            const intOn = recipeIntegerEnabled[r.id] === true;
             return (
               <div
                 key={r.id}
@@ -248,12 +307,42 @@ const BuildingBlock: React.FC<{
                   padding: '4px 6px',
                   borderRadius: '4px',
                   marginBottom: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
                 }}
               >
-                <span>{t(r.name, translation)}</span>
-                <span className="recipe-info" style={{ marginLeft: '10px', fontSize: '0.8rem' }}>
-                  投入: {imp} → 产出: {oup}
+                <span style={{ flex: 1, minWidth: 0 }}>
+                  <span>{t(r.name, translation)}</span>
+                  <span className="recipe-info" style={{ marginLeft: '10px', fontSize: '0.8rem' }}>
+                    投入: {imp} → 产出: {oup}
+                  </span>
                 </span>
+                {showToggle && (
+                  <span
+                    onClick={e => { e.stopPropagation(); handleIntegerToggle(r); }}
+                    title={intOn ? '取整：开' : '取整：关'}
+                    style={{
+                      display: 'inline-block',
+                      width: 36, height: 20, borderRadius: 10,
+                      background: intOn ? '#4caf50' : '#ccc',
+                      position: 'relative',
+                      cursor: 'pointer',
+                      flexShrink: 0,
+                      marginLeft: 8,
+                      transition: 'background 0.2s',
+                    }}
+                  >
+                    <span style={{
+                      position: 'absolute', top: 2,
+                      left: intOn ? 18 : 2,
+                      width: 16, height: 16, borderRadius: '50%',
+                      background: '#fff',
+                      transition: 'left 0.2s',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                    }} />
+                  </span>
+                )}
               </div>
             );
           })}

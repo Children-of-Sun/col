@@ -15,6 +15,8 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
   const storeGlobalLower = useStore(s => s.globalLower);
   const storeGlobalUpper = useStore(s => s.globalUpper);
   const storeResources = useStore(s => s.redundancyResources);
+  const storeAutoItems = useStore(s => s.redundancyAutoItems);
+  const integerMode = useStore(s => s.integerMode);
   const setEnableRedundancy = useStore(s => s.setEnableRedundancy);
   const setGlobalLower = useStore(s => s.setGlobalLower);
   const setGlobalUpper = useStore(s => s.setGlobalUpper);
@@ -223,6 +225,7 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
             const isNotEnrolled = !isExplicit(item); // 未启用（不在 map 中）
             const isDisabled = isExplicit(item) && !res.enabled; // 显式关闭
             const isEnrolled = isExplicit(item) && res.enabled;  // 显式启用
+            const isAuto = storeAutoItems[item] === true; // 由取整开关自动设置
 
             return (
               <div
@@ -247,7 +250,8 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
                   )}
                   <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>{t(item, translation)}</span>
                   {isDisabled && <span style={{ fontSize: 10, color: '#999', background: '#f0f0f0', padding: '1px 5px', borderRadius: 3 }}>已关闭</span>}
-                  {isEnrolled && <span style={{ fontSize: 10, color: '#166534', background: '#dcfce7', padding: '1px 5px', borderRadius: 3 }}>已启用</span>}
+                  {isEnrolled && isAuto && integerMode === 'milp' && <span style={{ fontSize: 10, color: '#1e40af', background: '#dbeafe', padding: '1px 5px', borderRadius: 3 }}>自动</span>}
+                  {isEnrolled && !isAuto && <span style={{ fontSize: 10, color: '#166534', background: '#dcfce7', padding: '1px 5px', borderRadius: 3 }}>已启用</span>}
                 </div>
 
                 {/* 第二行：上限 */}

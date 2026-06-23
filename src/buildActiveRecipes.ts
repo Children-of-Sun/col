@@ -80,6 +80,7 @@ export function buildActiveRecipes(
         travelMode: tradeParams.travelMode,
         profitBonusPercent: profitBonusFromOffice,
         unityDiscountPercent: unityDiscountFromOffice,
+        tradeVoyageTime: state.tradeVoyageTime,
         gameData,
         fullData: state.fullData,
         translation,

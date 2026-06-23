@@ -45,6 +45,7 @@ export const TradePanel: React.FC = () => {
   const officeLevels = useStore(s => s.officeLevels);
   const edictLevels = useStore(s => s.edictLevels);
   const researchLevels = useStore(s => s.researchLevels);
+  const tradeVoyageTime = useStore(s => s.tradeVoyageTime);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<Set<string>>(new Set(selectedTradeContractIds));
@@ -104,6 +105,7 @@ export const TradePanel: React.FC = () => {
         travelMode,
         profitBonusPercent: profitBonusFromOffice,
         unityDiscountPercent: unityDiscountFromOffice,
+        tradeVoyageTime,
         gameData,
         fullData,
         translation,
@@ -121,7 +123,7 @@ export const TradePanel: React.FC = () => {
       });
     }
     return results;
-  }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusFromOffice, unityDiscountFromOffice, gameData, fullData, translation, edictLevels, researchLevels]);
+  }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusFromOffice, unityDiscountFromOffice, tradeVoyageTime, gameData, fullData, translation, edictLevels, researchLevels]);
 
   const openModal = () => {
     setTempSelectedIds(new Set(selectedTradeContractIds));
@@ -142,6 +144,7 @@ export const TradePanel: React.FC = () => {
           travelMode,
           profitBonusPercent: profitBonusFromOffice,
           unityDiscountPercent: unityDiscountFromOffice,
+          tradeVoyageTime,
           gameData,
           fullData,
           translation,
@@ -196,6 +199,22 @@ export const TradePanel: React.FC = () => {
             <option value="normal">{t('普通', translation)}</option>
             <option value="special">{t('特殊', translation)}</option>
           </select>
+        </div>
+        <div>
+          <label>标准普通航行总时间（秒）: </label>
+          <input
+            type="number"
+            value={tradeVoyageTime || ''}
+            onChange={e => {
+              const val = parseFloat(e.target.value);
+              useStore.setState({ tradeVoyageTime: isNaN(val) ? 0 : val });
+            }}
+            placeholder="0=使用旧逻辑"
+            step="1"
+            min="0"
+            style={{ width: 80, padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc' }}
+          />
+          <span style={{ fontSize: 11, color: '#888', marginLeft: 4 }}>地图+海外(普通模式)</span>
         </div>
         <span style={{ display: 'inline-flex', gap: '15px' }}>
           <span>📈 合同利润率: +{profitBonusFromOffice.toFixed(0)}%</span>

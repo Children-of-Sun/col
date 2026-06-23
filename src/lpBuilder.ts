@@ -25,8 +25,9 @@ export interface LpInput {
   fixedUnityProduction?: number;
   fixedUnityConsumption?: number;
   // 新增字段
-  integerMode?: 'continuous' | 'ceil' | 'milp';
+  integerMode?: 'continuous' | 'ceil' | 'rounding' | 'milp';
   milpTimeLimit?: number;
+  recipeIntegerEnabled?: Record<string, boolean>;
   fixedMachines?: Record<string, number>;
   // 人力约束：false 时强制人力 <= 人口，true 时跳过人力约束
   relaxLabor?: boolean;
@@ -59,6 +60,7 @@ export function buildLp(input: LpInput): LpOutput {
     globalLower = 100,
     globalUpper = 100,
     redundancyResources = {},
+    recipeIntegerEnabled = {},
   } = input;
   
   const isAllowExternal = allowExternal ?? false;
@@ -182,7 +184,7 @@ export function buildLp(input: LpInput): LpOutput {
 
   if (!objExpr) objExpr = '0';
 
-  let lp = `MIN\nOBJ: ${objExpr}\nST\n`;
+  let lp = `Minimize\n obj: ${objExpr}\nSubject To\n`;
 
   // 固定空间站、特殊模块数量为 1（居民模块自由缩放，不再固定）
   stationVarNames.forEach(v => { lp += ` ${v} = 1\n`; });
@@ -243,7 +245,7 @@ export function buildLp(input: LpInput): LpOutput {
     const e5 = makeExpr(specialActive, specialVarNames, it);
     const e6 = makeExpr(tradeActive, tradeVarNames, it);
     const parts = [e1, e2, e3, e4, e5, e6].filter(Boolean);
-    return parts.join(' + ');
+    return parts.join(' + ').replace(/\+\s*-/g, '- ');
   };
 
   // 仅计算消费项（输入+维护），返回正系数字符串，用于中间产物冗余约束
@@ -383,7 +385,7 @@ export function buildLp(input: LpInput): LpOutput {
 
   // ========== 2. 辅助函数：合并多个表达式 ==========
   const combineExprs = (...exprs: string[]): string => {
-    return exprs.filter(e => e.trim() !== '').join(' + ');
+    return exprs.filter(e => e.trim() !== '').join(' + ').replace(/\+\s*-/g, '- ');
   };
 
   // ========== 2.5. 冗余因子辅助函数 ==========
@@ -401,15 +403,14 @@ export function buildLp(input: LpInput): LpOutput {
     // 独立回退：每个值为 100% 时自动使用全局值（各自独立判断，而非绑在一起）
     const lowerPct = rl === 100 ? globalLower : rl;
     const upperPct = ru === 100 ? globalUpper : ru;
-    // lower保持默认100%且upper>100%时，lower跟随upper，确保"冗余120%"实际强制120%生产
-    const effectiveLowerPct = (lowerPct === 100 && upperPct > 100) ? upperPct : lowerPct;
-    // 连续解模式无上限，下限不得低于 100% 以避免需求不满足
-    // 整数模式有明确上/下限，直接使用用户设定值
-    const clampLower = integerMode !== 'milp';
+    // lower 和 upper 各自独立：用户可设 lower=100% + upper=120% 得到范围 [100%,120%]，
+    // 也可设 lower=120% + upper=120% 强制精确 120% 生产
+    const effectiveLowerPct = lowerPct;
+    // 连续解模式下限不得低于 100%（避免需求不满足）
+    // 整数/圆整模式有明确上/下限，直接使用用户设定值
+    const clampLower = integerMode !== 'milp' && integerMode !== 'rounding';
     const lowerFactor = clampLower ? Math.max(effectiveLowerPct, 100) / 100 : effectiveLowerPct / 100;
     const upperFactor = upperPct / 100;
-    // 优化：因子均为 1.0 时不改变约束（避免非必要的约束收窄）
-    if (lowerFactor === 1.0 && upperFactor === 1.0) return null;
     return { lowerFactor, upperFactor };
   };
 
@@ -471,24 +472,23 @@ export function buildLp(input: LpInput): LpOutput {
       const rf = getRedundancyFactors(it);
       if (expr) {
         if (rf) {
-          // 冗余约束：使用 slack 方式确保 production >= factor * consumption
           redundancyAppliedCount++;
           redundancyAppliedItems.push(`${it}(L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
           const negExpr = allNegExpr(it);
           // 基础需求约束
           lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
-          // 冗余 slack 约束：生产/消耗比率
+          // 冗余下限：production >= lowerFactor * (consumption + demand)
           const lowerSlack = rf.lowerFactor - 1;
           const lowerExpr = buildSlackExpr(expr, negExpr, lowerSlack);
-          // 冗余 slack 约束：(消耗+差额)*下限 ≤ 生产 ≤ (消耗+差额)*上限
-          // lowerExpr >= factor * effectiveDr, upperExpr <= factor * effectiveDr
+          if (Math.abs(lowerSlack) > 1e-9) {
+            // 下限 != 1.0 时才添加额外约束（=1.0 时与基础约束完全重复）
+            lp += ` ${rows[it]}_red_lower: ${lowerExpr} >= ${rf.lowerFactor * effectiveDr}\n`;
+          }
+          // 冗余上限：production <= upperFactor * (consumption + demand)
           if (it !== '人力' && rf.upperFactor > 1.0) {
             const upperSlack = rf.upperFactor - 1;
             const upperExpr = buildSlackExpr(expr, negExpr, upperSlack);
-            lp += ` ${rows[it]}_red_lower: ${lowerExpr} >= ${rf.lowerFactor * effectiveDr}\n`;
             lp += ` ${rows[it]}_red_upper: ${upperExpr} <= ${rf.upperFactor * effectiveDr}\n`;
-          } else {
-            lp += ` ${rows[it]}_red_lower: ${lowerExpr} >= ${rf.lowerFactor * effectiveDr}\n`;
           }
         } else {
           lp += ` ${rows[it]}: ${expr} >= ${effectiveDr}\n`;
@@ -506,26 +506,28 @@ export function buildLp(input: LpInput): LpOutput {
       if (rfSupply && expr) {
         if (supply < 0) {
           // 负供给 = 强制产出（取整模式填补差额）
-          // 基础约束：至少产出差额（确保 ceil 差额被满足）
           lp += ` ${rows[it]}: ${expr} >= ${-supply}\n`;
-          // 冗余 slack 约束：总生产/消耗比率（非仅差额部分）
           const negExprSupply = allNegExpr(it);
-          const lowerSlackSupply = rfSupply.lowerFactor - 1;
-          const lowerExprSupply = buildSlackExpr(expr, negExprSupply, lowerSlackSupply);
-          // 冗余 slack 约束：(消耗+差额)*下限 ≤ 生产 ≤ (消耗+差额)*上限
-          // deficit = -supply, lowerExpr >= factor * deficit, upperExpr <= factor * deficit
-          if (it !== '人力' && rfSupply.upperFactor > 1.0) {
-            const upperSlackSupply = rfSupply.upperFactor - 1;
-            const upperExprSupply = buildSlackExpr(expr, negExprSupply, upperSlackSupply);
-            lp += ` ${rows[it]}_red_lower: ${lowerExprSupply} >= ${rfSupply.lowerFactor * (-supply)}\n`;
-            lp += ` ${rows[it]}_red_upper: ${upperExprSupply} <= ${rfSupply.upperFactor * (-supply)}\n`;
+          if (rfSupply.lowerFactor === rfSupply.upperFactor) {
+            // 最小值 = 最大值：精确等式
+            const slack = rfSupply.lowerFactor - 1;
+            const slackExpr = buildSlackExpr(expr, negExprSupply, slack);
+            lp += ` ${rows[it]}_red_eq: ${slackExpr} = ${rfSupply.lowerFactor * (-supply)}\n`;
           } else {
+            // 范围约束
+            const lowerSlackSupply = rfSupply.lowerFactor - 1;
+            const lowerExprSupply = buildSlackExpr(expr, negExprSupply, lowerSlackSupply);
             lp += ` ${rows[it]}_red_lower: ${lowerExprSupply} >= ${rfSupply.lowerFactor * (-supply)}\n`;
+            if (it !== '人力' && rfSupply.upperFactor > 1.0) {
+              const upperSlackSupply = rfSupply.upperFactor - 1;
+              const upperExprSupply = buildSlackExpr(expr, negExprSupply, upperSlackSupply);
+              lp += ` ${rows[it]}_red_upper: ${upperExprSupply} <= ${rfSupply.upperFactor * (-supply)}\n`;
+            }
           }
         } else {
-          // 正供给：外部输入，lower=必须消耗的最低比例，upper=允许消耗的最高比例
+          // 正供给：外部输入
           lp += ` ${rows[it]}: ${expr} <= ${-(supply * rfSupply.lowerFactor)}\n`;
-          if (it !== '人力') {
+          if (it !== '人力' && rfSupply.upperFactor > 1.0) {
             lp += ` ${rows[it]}_upper: ${expr} >= ${-(supply * rfSupply.upperFactor)}\n`;
           }
         }
@@ -565,15 +567,20 @@ export function buildLp(input: LpInput): LpOutput {
         const rfExIn = getRedundancyFactors(it);
         if (rfExIn) {
           const negExprExIn = allNegExpr(it);
-          const lowerSlackIn = rfExIn.lowerFactor - 1;
-          const lowerExprIn = buildSlackExpr(expr, negExprExIn, lowerSlackIn);
-          if (it !== '人力' && rfExIn.upperFactor > 1.0) {
-            const upperSlackIn = rfExIn.upperFactor - 1;
-            const upperExprIn = buildSlackExpr(expr, negExprExIn, upperSlackIn);
-            lp += ` ${rows[it]}: ${lowerExprIn} >= 0\n`;
-            lp += ` ${rows[it]}_upper: ${upperExprIn} <= 0\n`;
+          if (rfExIn.lowerFactor === rfExIn.upperFactor) {
+            // 最小值 = 最大值：精确等式
+            const slack = rfExIn.lowerFactor - 1;
+            const slackExpr = buildSlackExpr(expr, negExprExIn, slack);
+            lp += ` ${rows[it]}: ${slackExpr} = 0\n`;
           } else {
+            const lowerSlackIn = rfExIn.lowerFactor - 1;
+            const lowerExprIn = buildSlackExpr(expr, negExprExIn, lowerSlackIn);
             lp += ` ${rows[it]}: ${lowerExprIn} >= 0\n`;
+            if (it !== '人力' && rfExIn.upperFactor > 1.0) {
+              const upperSlackIn = rfExIn.upperFactor - 1;
+              const upperExprIn = buildSlackExpr(expr, negExprExIn, upperSlackIn);
+              lp += ` ${rows[it]}_upper: ${upperExprIn} <= 0\n`;
+            }
           }
           redundancyAppliedCount++;
           redundancyAppliedItems.push(`${it}(排除输入 L=${rfExIn.lowerFactor.toFixed(2)} U=${rfExIn.upperFactor.toFixed(2)})`);
@@ -587,15 +594,20 @@ export function buildLp(input: LpInput): LpOutput {
         const rfExOut = getRedundancyFactors(it);
         if (rfExOut) {
           const negExprExOut = allNegExpr(it);
-          const lowerSlackOut = rfExOut.lowerFactor - 1;
-          const lowerExprOut = buildSlackExpr(expr, negExprExOut, lowerSlackOut);
-          if (it !== '人力' && rfExOut.upperFactor > 1.0) {
-            const upperSlackOut = rfExOut.upperFactor - 1;
-            const upperExprOut = buildSlackExpr(expr, negExprExOut, upperSlackOut);
-            lp += ` ${rows[it]}: ${lowerExprOut} >= 0\n`;
-            lp += ` ${rows[it]}_upper: ${upperExprOut} <= 0\n`;
+          if (rfExOut.lowerFactor === rfExOut.upperFactor) {
+            // 最小值 = 最大值：精确等式
+            const slack = rfExOut.lowerFactor - 1;
+            const slackExpr = buildSlackExpr(expr, negExprExOut, slack);
+            lp += ` ${rows[it]}: ${slackExpr} = 0\n`;
           } else {
+            const lowerSlackOut = rfExOut.lowerFactor - 1;
+            const lowerExprOut = buildSlackExpr(expr, negExprExOut, lowerSlackOut);
             lp += ` ${rows[it]}: ${lowerExprOut} >= 0\n`;
+            if (it !== '人力' && rfExOut.upperFactor > 1.0) {
+              const upperSlackOut = rfExOut.upperFactor - 1;
+              const upperExprOut = buildSlackExpr(expr, negExprExOut, upperSlackOut);
+              lp += ` ${rows[it]}_upper: ${upperExprOut} <= 0\n`;
+            }
           }
           redundancyAppliedCount++;
           redundancyAppliedItems.push(`${it}(排除产出 L=${rfExOut.lowerFactor.toFixed(2)} U=${rfExOut.upperFactor.toFixed(2)})`);
@@ -605,37 +617,28 @@ export function buildLp(input: LpInput): LpOutput {
         continue;
       }
       if (expr) {
-        // 检查中间产物是否配置了冗余
         const rf = getRedundancyFactors(it);
         if (rf) {
-          // 消费表达式（正系数）= 所有输入+维护消耗的总和
           const negExpr = allNegExpr(it);
-          // 约束: netExpr >= (lowerFactor - 1) * negExpr (允许/强制超额生产)
-          const lowerSlack = rf.lowerFactor - 1;
-          const lowerExpr = buildSlackExpr(expr, negExpr, lowerSlack);
-          if (it !== '人力' && rf.upperFactor > 1.0) {
-            const upperSlack = rf.upperFactor - 1;
-            const upperExpr = buildSlackExpr(expr, negExpr, upperSlack);
-            lp += ` ${rows[it]}: ${lowerExpr} >= 0\n`;
-            lp += ` ${rows[it]}_upper: ${upperExpr} <= 0\n`;
+          if (rf.lowerFactor === rf.upperFactor) {
+            // 最小值 = 最大值：精确约束 production = factor * consumption
+            const slack = rf.lowerFactor - 1;
+            const slackExpr = buildSlackExpr(expr, negExpr, slack);
+            lp += ` ${rows[it]}: ${slackExpr} = 0\n`;
           } else {
+            // 范围约束：下限 ≥ 允许超产，上限 ≤ 封顶
+            const lowerSlack = rf.lowerFactor - 1;
+            const lowerExpr = buildSlackExpr(expr, negExpr, lowerSlack);
             lp += ` ${rows[it]}: ${lowerExpr} >= 0\n`;
+            if (it !== '人力' && rf.upperFactor > 1.0) {
+              const upperSlack = rf.upperFactor - 1;
+              const upperExpr = buildSlackExpr(expr, negExpr, upperSlack);
+              lp += ` ${rows[it]}_upper: ${upperExpr} <= 0\n`;
+            }
           }
           redundancyAppliedCount++;
           redundancyAppliedItems.push(`${it}(中间产物 L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
-          // [诊断] 输出详细约束信息以便调试
-          console.warn(`[冗余诊断] 中间产物: ${it}`, {
-            lowerFactor: rf.lowerFactor,
-            upperFactor: rf.upperFactor,
-            netExpr: expr,
-            negExpr,
-            lowerSlack,
-            lowerExpr,
-            constraint: `${lowerExpr} >= 0`,
-            含义: `生产量 >= ${rf.lowerFactor.toFixed(2)} × 消耗量`,
-          });
         } else {
-          // 死胡同副产物（有生产无消费）：允许净产出 >= 0，避免联合生产时阻断主产物
           if (!hasConsumer) {
             lp += ` ${rows[it]}: ${expr} >= 0\n`;
           } else {
@@ -671,7 +674,6 @@ export function buildLp(input: LpInput): LpOutput {
     const powerExpr = makeExpr(powerActive, powerVarNames, it);
 
     if (rf) {
-      // 主模块消费（非电力配方）
       const mainNegExpr = combineExprs(
         makeNegExprOnly(mainActive, mainVarNames, it),
         makeNegExprOnly(residentActive, residentVarNames, it),
@@ -679,30 +681,40 @@ export function buildLp(input: LpInput): LpOutput {
         makeNegExprOnly(specialActive, specialVarNames, it),
         makeNegExprOnly(tradeActive, tradeVarNames, it)
       );
-      // 电力模块消费
       const powerNegExpr = makeNegExprOnly(powerActive, powerVarNames, it);
 
-      const lowerSlack = rf.lowerFactor - 1;
-      const upperSlack = rf.upperFactor - 1;
+      const useEqual = rf.lowerFactor === rf.upperFactor;
 
       if (mainExpr) {
-        const mainLowerExpr = buildSlackExpr(mainExpr, mainNegExpr, lowerSlack);
-        if (it !== '人力' && rf.upperFactor > 1.0) {
-          const mainUpperExpr = buildSlackExpr(mainExpr, mainNegExpr, upperSlack);
-          lp += ` ${rows[it]}_main: ${mainLowerExpr} >= 0\n`;
-          lp += ` ${rows[it]}_main_upper: ${mainUpperExpr} <= 0\n`;
+        if (useEqual) {
+          const slack = rf.lowerFactor - 1;
+          const slackExpr = buildSlackExpr(mainExpr, mainNegExpr, slack);
+          lp += ` ${rows[it]}_main: ${slackExpr} = 0\n`;
         } else {
+          const lowerSlack = rf.lowerFactor - 1;
+          const mainLowerExpr = buildSlackExpr(mainExpr, mainNegExpr, lowerSlack);
           lp += ` ${rows[it]}_main: ${mainLowerExpr} >= 0\n`;
+          if (it !== '人力' && rf.upperFactor > 1.0) {
+            const upperSlack = rf.upperFactor - 1;
+            const mainUpperExpr = buildSlackExpr(mainExpr, mainNegExpr, upperSlack);
+            lp += ` ${rows[it]}_main_upper: ${mainUpperExpr} <= 0\n`;
+          }
         }
       }
       if (powerExpr) {
-        const powerLowerExpr = buildSlackExpr(powerExpr, powerNegExpr, lowerSlack);
-        if (it !== '人力' && rf.upperFactor > 1.0) {
-          const powerUpperExpr = buildSlackExpr(powerExpr, powerNegExpr, upperSlack);
-          lp += ` ${rows[it]}_power: ${powerLowerExpr} >= 0\n`;
-          lp += ` ${rows[it]}_power_upper: ${powerUpperExpr} <= 0\n`;
+        if (useEqual) {
+          const slack = rf.lowerFactor - 1;
+          const slackExpr = buildSlackExpr(powerExpr, powerNegExpr, slack);
+          lp += ` ${rows[it]}_power: ${slackExpr} = 0\n`;
         } else {
+          const lowerSlack = rf.lowerFactor - 1;
+          const powerLowerExpr = buildSlackExpr(powerExpr, powerNegExpr, lowerSlack);
           lp += ` ${rows[it]}_power: ${powerLowerExpr} >= 0\n`;
+          if (it !== '人力' && rf.upperFactor > 1.0) {
+            const upperSlack = rf.upperFactor - 1;
+            const powerUpperExpr = buildSlackExpr(powerExpr, powerNegExpr, upperSlack);
+            lp += ` ${rows[it]}_power_upper: ${powerUpperExpr} <= 0\n`;
+          }
         }
       }
       redundancyAppliedCount++;
@@ -720,27 +732,43 @@ export function buildLp(input: LpInput): LpOutput {
   // 添加固定变量等式约束（在 INTEGER 声明之前）
   if (Object.keys(fixedMachines).length > 0) {
     for (const [varName, value] of Object.entries(fixedMachines)) {
-      lp += ` ${varName} = ${value}\n`;
+      lp += ` c_fix_${varName}: ${varName} = ${value}\n`;
     }
   }
 
   // 居民模块最小比例（r0 >= minResidentValue）
   if (minResidentValue !== undefined && residentVarNames.length > 0) {
-    lp += ` ${residentVarNames[0]} >= ${minResidentValue}\n`;
+    lp += ` c_res_min: ${residentVarNames[0]} >= ${minResidentValue}\n`;
   }
 
   // 添加整数声明（仅在 milp 模式下）
-  // 只有主模块(非农业)和电力模块的建筑变量需要取整
+  // 仅对用户开启了"取整"开关的配方变量标记 INTEGER
   // 贸易、农场、特殊、居民、空间站配方保持连续
   if (integerMode === 'milp') {
+    const hasAnyIntegerEnabled = Object.values(recipeIntegerEnabled).some(v => v === true);
     const agriVarNames = new Set(
       mainActive.filter(r => r.category === '农业').map((_, i) => `x${i}`)
     );
-    const integerVars = varNames.filter(v =>
-      !v.startsWith('r') && !v.startsWith('s') && !v.startsWith('t') && !v.startsWith('tr') && !agriVarNames.has(v)
-    );
+    const integerVars = varNames.filter(v => {
+      if (v.startsWith('r') || v.startsWith('s') || v.startsWith('t') || v.startsWith('tr')) return false;
+      if (agriVarNames.has(v)) return false;
+      // x prefix = mainActive, p prefix = powerActive
+      if (v.startsWith('x')) {
+        const idx = parseInt(v.slice(1), 10);
+        const recipe = mainActive[idx];
+        return recipe ? recipeIntegerEnabled[recipe.id] === true : false;
+      }
+      if (v.startsWith('p')) {
+        const idx = parseInt(v.slice(1), 10);
+        const recipe = powerActive[idx];
+        return recipe ? recipeIntegerEnabled[recipe.id] === true : false;
+      }
+      return false;
+    });
     if (integerVars.length) {
-      lp += '\nINTEGER\n ' + integerVars.join(' ') + '\n';
+      lp += '\nBounds\n';
+      lp += '\nInteger\n';
+      for (const v of integerVars) lp += ` ${v}\n`;
     }
   }
   // [DIAGNOSTIC] 冗余约束应用摘要

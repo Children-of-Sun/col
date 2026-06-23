@@ -165,7 +165,7 @@ export interface ParsedData {
 }
 
 // ==================== Store 状态类型 ====================
-export type IntegerMode = 'continuous' | 'ceil' | 'milp';
+export type IntegerMode = 'continuous' | 'ceil' | 'rounding' | 'milp';
 
 export interface StoreState {
   fullData: DataJson | null;
@@ -229,6 +229,7 @@ export interface StoreState {
   tradeContracts: TradeContract[];
   tradeSetup: TradeSetup;
   tradeParams: TradeParams;
+  tradeVoyageTime: number;
   selectedTradeContractIds: string[];
   selectedTradeRecipes: Recipe[];
   enableTradeModule: boolean;
@@ -254,19 +255,24 @@ export interface StoreState {
   // 新增字段
   integerMode: IntegerMode;
   milpTimeLimit: number;
+  recipeIntegerEnabled: Record<string, boolean>;
 
   // 资源冗余设置
   enableRedundancy: boolean;
   globalLower: number;
   globalUpper: number;
   redundancyResources: Record<string, RedundancyResource>;
+  redundancyAutoItems: Record<string, boolean>;  // 由取整开关自动设置的冗余项
+  redundancyMilpDisabled: Record<string, boolean>;  // 混合模式下用户手动关闭的自动冗余项（跨模式记忆）
 
   // 凝聚力消耗细分
   cohesionTradeDirect: number;
   cohesionTradeMaintenance: number;
   cohesionEdict: number;
 
-  // 图标显示
+  // 面板折叠状态（持久化）
+  officeCollapsed: Record<string, boolean>;
+  farmCollapsed: Record<string, boolean>;
   buildingIcons: Record<string, string>;
   productIcons: Record<string, string>;
   productCategories: Record<string, string>;  // 物品名(lowercase) -> type
@@ -331,6 +337,7 @@ export interface StoreState {
   setCropRotation: (value: boolean) => void;
   setGlobalFertilizerType: (value: string) => void;
   setTargetFertility: (value: number) => void;
+  toggleFarm: (buildingId: string) => void;
   toggleCrop: (buildingId: string, cropName: string, enabled: boolean) => void;
   loadAgricultureBuildings: () => void;
   setEnableFocusConsumption: (value: boolean) => void;
@@ -355,10 +362,14 @@ export interface StoreState {
   setProductIcons: (icons: Record<string, string>) => void;
   setProductCategories: (categories: Record<string, string>) => void;
   setShowIcons: (show: boolean) => void;
+  setOfficeCollapsed: (v: Record<string, boolean>) => void;
+  setFarmCollapsed: (v: Record<string, boolean>) => void;
   setEnableRedundancy: (v: boolean) => void;
   setGlobalLower: (v: number) => void;
   setGlobalUpper: (v: number) => void;
   setRedundancyResources: (r: Record<string, RedundancyResource>) => void;
+  setRedundancyAutoItems: (items: Record<string, boolean>) => void;
+  setRedundancyMilpDisabled: (items: Record<string, boolean>) => void;
 }
 
 export interface SolverResult {

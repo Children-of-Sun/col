@@ -93,6 +93,7 @@ export const useStore = create<StoreState>((set, get) => ({
     profitBonus: 0,
     unityDiscount: 0,
   },
+  tradeVoyageTime: 0,
   selectedTradeContractIds: [],
   enableTradeModule: true,
 
@@ -115,14 +116,17 @@ export const useStore = create<StoreState>((set, get) => ({
   customWeights: { machines: 100, labor: 0, cohesion: 0, area: 0, raw: 0 },
 
   // 整数模式相关
-  integerMode: 'continuous' as 'continuous' | 'ceil' | 'milp',
+  integerMode: 'continuous' as 'continuous' | 'ceil' | 'rounding' | 'milp',
   milpTimeLimit: 30,
+  recipeIntegerEnabled: {},
 
   // 资源冗余设置
   enableRedundancy: false,
   globalLower: 100,
   globalUpper: 100,
   redundancyResources: {},
+  redundancyAutoItems: {},
+  redundancyMilpDisabled: {},
 
   // 凝聚力消耗细分
   cohesionTradeDirect: 0,
@@ -134,6 +138,8 @@ export const useStore = create<StoreState>((set, get) => ({
   productIcons: {},
   productCategories: {},
   showIcons: true,
+  officeCollapsed: {},
+  farmCollapsed: {},
 
   loadData: (json: DataJson) => {
     const p = parseData(json);
@@ -275,6 +281,12 @@ export const useStore = create<StoreState>((set, get) => ({
     });
   },
   setTargetFertility: (value: number) => set({ targetFertility: value }),
+  toggleFarm: (buildingId: string) => set(state => {
+    const farms = state.farms.map(f =>
+      f.buildingId === buildingId ? { ...f, enabled: !f.enabled } : f
+    );
+    return { farms };
+  }),
   toggleCrop: (buildingId: string, cropName: string, enabled: boolean) => set(state => {
     const farms = state.farms.map(f => {
       if (f.buildingId !== buildingId) return f;
@@ -353,6 +365,9 @@ export const useStore = create<StoreState>((set, get) => ({
   setGlobalLower: (v) => set({ globalLower: v }),
   setGlobalUpper: (v) => set({ globalUpper: v }),
   setRedundancyResources: (r) => set({ redundancyResources: r }),
+  setRedundancyAutoItems: (items) => set({ redundancyAutoItems: items }),
+  setRedundancyMilpDisabled: (items) => set({ redundancyMilpDisabled: items }),
+  setRecipeIntegerEnabled: (id, enabled) => set((s: any) => ({ recipeIntegerEnabled: { ...s.recipeIntegerEnabled, [id]: enabled } })),
   setCohesionTradeDirect: (value: number) => set({ cohesionTradeDirect: value }),
   setCohesionTradeMaintenance: (value: number) => set({ cohesionTradeMaintenance: value }),
   setCohesionEdict: (value: number) => set({ cohesionEdict: value }),
@@ -360,6 +375,8 @@ export const useStore = create<StoreState>((set, get) => ({
   setProductIcons: (icons) => set({ productIcons: icons }),
   setProductCategories: (categories) => set({ productCategories: categories }),
   setShowIcons: (show) => set({ showIcons: show }),
+  setOfficeCollapsed: (v) => set({ officeCollapsed: v }),
+  setFarmCollapsed: (v) => set({ farmCollapsed: v }),
 
   importSettings: (s) => {
     const state: Partial<StoreState> = {};
@@ -410,10 +427,16 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.officeRecipeEnabled !== undefined) state.officeRecipeEnabled = s.officeRecipeEnabled;
     if (s.integerMode !== undefined) state.integerMode = s.integerMode;
     if (s.milpTimeLimit !== undefined) state.milpTimeLimit = s.milpTimeLimit;
+    if (s.recipeIntegerEnabled !== undefined) state.recipeIntegerEnabled = s.recipeIntegerEnabled;
+    if (s.tradeVoyageTime !== undefined) state.tradeVoyageTime = s.tradeVoyageTime;
     if (s.enableRedundancy !== undefined) state.enableRedundancy = s.enableRedundancy;
     if (s.globalLower !== undefined) state.globalLower = s.globalLower;
     if (s.globalUpper !== undefined) state.globalUpper = s.globalUpper;
     if (s.redundancyResources !== undefined) state.redundancyResources = s.redundancyResources;
+    if (s.redundancyAutoItems !== undefined) state.redundancyAutoItems = s.redundancyAutoItems;
+    if (s.redundancyMilpDisabled !== undefined) state.redundancyMilpDisabled = s.redundancyMilpDisabled;
+    if (s.officeCollapsed !== undefined) state.officeCollapsed = s.officeCollapsed;
+    if (s.farmCollapsed !== undefined) state.farmCollapsed = s.farmCollapsed;
     // 生产目标 & 外部供给
     if (s.demands !== undefined) state.demands = s.demands;
     if (s.externalSupplies !== undefined) state.externalSupplies = s.externalSupplies;
@@ -484,10 +507,16 @@ export const useStore = create<StoreState>((set, get) => ({
       farms: s.farms,
       integerMode: s.integerMode,
       milpTimeLimit: s.milpTimeLimit,
+      recipeIntegerEnabled: s.recipeIntegerEnabled,
+      tradeVoyageTime: s.tradeVoyageTime,
       enableRedundancy: s.enableRedundancy,
       globalLower: s.globalLower,
       globalUpper: s.globalUpper,
       redundancyResources: s.redundancyResources,
+      redundancyAutoItems: s.redundancyAutoItems,
+      redundancyMilpDisabled: s.redundancyMilpDisabled,
+      officeCollapsed: s.officeCollapsed,
+      farmCollapsed: s.farmCollapsed,
       // 生产目标 & 外部供给
       demands: s.demands,
       externalSupplies: s.externalSupplies,

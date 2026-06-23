@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useStore } from '../stores';
 import { Select } from './UI';
 import { t } from '../utils';
@@ -14,6 +14,7 @@ export const AgriculturePanel: React.FC = () => {
   const targetFertility = useStore(s => s.targetFertility);
   const setTargetFertility = useStore(s => s.setTargetFertility);
   const farms = useStore(s => s.farms);
+  const toggleFarm = useStore(s => s.toggleFarm);
   const toggleCrop = useStore(s => s.toggleCrop);
   const loadAgricultureBuildings = useStore(s => s.loadAgricultureBuildings);
   const recipes = useStore(s => s.recipes);
@@ -23,7 +24,8 @@ export const AgriculturePanel: React.FC = () => {
   const officeLevels = useStore(s => s.officeLevels);
   const researchLevels = useStore(s => s.researchLevels);
 
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const farmCollapsed = useStore(s => s.farmCollapsed);
+  const setFarmCollapsed = useStore(s => s.setFarmCollapsed);
 
   useEffect(() => {
     // 只在 farms 为空且 recipes 已加载时初始化一次
@@ -110,16 +112,34 @@ export const AgriculturePanel: React.FC = () => {
       {enableAgriculture && (
         <div style={{ marginTop: 15 }}>
           {farms.map(farm => {
-            const isCollapsed = collapsed[farm.buildingId] || false;
+            const isCollapsed = farmCollapsed[farm.buildingId] ?? true; // 默认折叠
+            const fEnabled = farm.enabled !== false;
             return (
-              <div key={farm.buildingId} className="building-block" style={{ marginBottom: 20 }}>
+              <div key={farm.buildingId} className="building-block" style={{ marginBottom: 20, opacity: fEnabled ? 1 : 0.5 }}>
                 <div
                   className="building-header"
-                  onClick={() => setCollapsed(prev => ({ ...prev, [farm.buildingId]: !isCollapsed }))}
-                  style={{ cursor: 'pointer', fontWeight: 'bold', fontSize: '1.1rem', padding: '8px 0' }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '8px 0',
+                    backgroundColor: fEnabled ? 'transparent' : '#f5f5f5',
+                  }}
                 >
-                  <span>{t(farm.buildingName, translation)}</span>
-                  <span style={{ marginLeft: 10, fontSize: '0.8rem' }}>{isCollapsed ? '▶ 展开' : '▼ 收起'}</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 'bold', fontSize: '1.1rem' }} onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={fEnabled}
+                      onChange={() => toggleFarm(farm.buildingId)}
+                    />
+                    <span>{t(farm.buildingName, translation)}</span>
+                  </label>
+                  <span
+                    onClick={() => setFarmCollapsed({ ...farmCollapsed, [farm.buildingId]: !isCollapsed })}
+                    style={{ marginLeft: 10, fontSize: '0.8rem', cursor: 'pointer' }}
+                  >
+                    {isCollapsed ? '▶ 展开' : '▼ 收起'}
+                  </span>
                 </div>
                 {!isCollapsed && (
                   <div style={{ marginTop: 8, overflowX: 'auto' }}>
@@ -136,18 +156,18 @@ export const AgriculturePanel: React.FC = () => {
                       <tbody>
                         {farm.crops.map(crop => {
                           const { waterPerMin, fertilizerPerMin, requiredFertility, cropPerMin } = computeCrop(crop);
-                          const isEnabled = crop.enabled;
+                          const isEnabled = fEnabled && crop.enabled;
                           return (
                             <tr
                               key={crop.cropName}
-                              onClick={() => toggleCrop(farm.buildingId, crop.cropName, !isEnabled)}
+                              onClick={() => { if (fEnabled) toggleCrop(farm.buildingId, crop.cropName, !isEnabled); }}
                               style={{
-                                cursor: 'pointer',
+                                cursor: fEnabled ? 'pointer' : 'not-allowed',
                                 backgroundColor: isEnabled ? '#d4edda' : 'transparent',
                                 borderBottom: '1px solid #eee',
                               }}
-                              onMouseEnter={(e) => e.currentTarget.style.backgroundColor = isEnabled ? '#c3e6cb' : '#f8f9fa'}
-                              onMouseLeave={(e) => e.currentTarget.style.backgroundColor = isEnabled ? '#d4edda' : 'transparent'}
+                              onMouseEnter={(e) => { if (fEnabled) e.currentTarget.style.backgroundColor = isEnabled ? '#c3e6cb' : '#f8f9fa'; }}
+                              onMouseLeave={(e) => { if (fEnabled) e.currentTarget.style.backgroundColor = isEnabled ? '#d4edda' : 'transparent'; }}
                             >
                               <td style={{ padding: 6 }}>{t(crop.cropName, translation)}</td>
                               <td style={{ padding: 6, textAlign: 'right' }}>{cropPerMin.toFixed(2)}</td>

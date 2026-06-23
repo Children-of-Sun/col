@@ -5,6 +5,7 @@ import { t, getMaintenanceReduction, SPACE_CARGO_ITEMS } from '../utils';
 import { Recipe } from '../types';
 import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue } from '../utils/format';
 import { IconWithFallback } from './IconWithFallback';
+import { computeEmbeddedValues } from '../embeddedValues';
 
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number, ceilUpkeep: boolean = false) {
   // 取整模式下，建筑数量向上取整（用于维护/人力/电力/算力计算）
@@ -470,6 +471,11 @@ export const Results: React.FC = () => {
       .reduce((sum, item) => sum + (item.recipe.researchCohesion || 0) * item.machineCount, 0);
   }, [recipeData]);
 
+  const embeddedValues = useMemo(() => {
+    if (!recipeData.length) return null;
+    return computeEmbeddedValues(recipeData);
+  }, [recipeData]);
+
   const categoryData = useMemo(() => {
     const mainCategories: Record<string, { recipes: typeof recipeData; prod: Record<string, number>; cons: Record<string, number>; workers: number; electricity: number; computing: number; maintI: number; maintII: number; maintIII: number; machineCount: number; actualMachineCount: number }> = {};
     const powerRecipes: typeof recipeData = [];
@@ -579,9 +585,40 @@ export const Results: React.FC = () => {
     };
   }, [recipeData]);
 
+  // 搜索匹配的物品在全厂的总产出/总消耗
+  const searchItemTotals = useMemo(() => {
+    if (!recipeSearch || !categoryData.all) return [];
+    const s = recipeSearch.toLowerCase();
+    const matchedItems = new Set<string>();
+    const active = recipeData.filter(d => d.machineCount > 0);
+    for (const d of active) {
+      for (const k of Object.keys(d.perMin.outputs)) {
+        if (t(k, translation).toLowerCase().includes(s)) matchedItems.add(k);
+      }
+      for (const k of Object.keys(d.perMin.inputs)) {
+        if (t(k, translation).toLowerCase().includes(s)) matchedItems.add(k);
+      }
+      if (d.perMin.upkeep) {
+        for (const k of Object.keys(d.perMin.upkeep as Record<string, number>)) {
+          if (t(k, translation).toLowerCase().includes(s)) matchedItems.add(k);
+        }
+      }
+    }
+    const result: { item: string; prod: number; cons: number }[] = [];
+    for (const item of matchedItems) {
+      const prod = categoryData.all.prod[item] || 0;
+      const cons = categoryData.all.cons[item] || 0;
+      if (Math.abs(prod) > 1e-9 || Math.abs(cons) > 1e-9) {
+        result.push({ item, prod, cons });
+      }
+    }
+    result.sort((a, b) => (b.prod - b.cons) - (a.prod - a.cons));
+    return result;
+  }, [recipeSearch, recipeData, categoryData.all, translation]);
+
   const tabNames = useMemo(() => {
     const mainTabs = Object.keys(categoryData.mainCategories).sort();
-    return ['全厂总览','🔍 配方搜索', ...mainTabs, '电力模块', '贸易模块', '农业模块', '特殊模块', ];
+    return ['全厂总览','🔍 配方搜索', ...mainTabs, '电力模块', '贸易模块', '农业模块', '特殊模块', '💰 潜在价值'];
   }, [categoryData.mainCategories]);
 
   const currentData = useMemo(() => {
@@ -591,6 +628,7 @@ export const Results: React.FC = () => {
     if (selectedTab === '贸易模块') return { type: 'trade', ...categoryData.trade };
     if (selectedTab === '农业模块') return { type: 'agriculture', ...categoryData.agriculture };
     if (selectedTab === '特殊模块') return { type: 'special', ...categoryData.special };
+    if (selectedTab === '💰 潜在价值') return { type: 'embeddedValues' };
     const cat = categoryData.mainCategories[selectedTab];
     return cat ? { type: 'category', ...cat } : null;
   }, [selectedTab, categoryData]);
@@ -745,6 +783,30 @@ export const Results: React.FC = () => {
                 onChange={e => setRecipeSearch(e.target.value)}
                 style={{ padding: '10px 16px', fontSize: '1rem', borderRadius: 8, border: '1px solid #ccc', width: '100%', marginBottom: 16 }}
               />
+              {recipeSearch && searchItemTotals.length > 0 && (
+                <div style={{ marginBottom: 12, padding: '10px 14px', background: '#f0f4ff', borderRadius: 8, border: '1px solid #c8d6e5' }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6, fontSize: '0.95rem' }}>
+                    📊 匹配物品的全厂总计
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', fontSize: '0.85rem' }}>
+                    {searchItemTotals.map(e => {
+                      const net = e.prod - e.cons;
+                      return (
+                        <span key={e.item} style={{ whiteSpace: 'nowrap' }}>
+                          {t(e.item, translation)}:
+                          <span style={{ color: '#2e7d32', fontWeight: 600 }}> +{e.prod.toFixed(4)}</span>
+                          {' / '}
+                          <span style={{ color: '#c62828', fontWeight: 600 }}> {(-e.cons).toFixed(4)}</span>
+                          {' → 净额 '}
+                          <span style={{ fontWeight: 600, color: net >= 0 ? '#2e7d32' : '#c62828' }}>
+                            {net >= 0 ? '+' : ''}{net.toFixed(4)}
+                          </span>
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {!recipeSearch ? (
                 <div className="hint">输入关键词搜索当前结果中启用的配方</div>
               ) : recipeSearchResults.producing.length === 0 && recipeSearchResults.consuming.length === 0 ? (
@@ -881,6 +943,57 @@ export const Results: React.FC = () => {
                     )}
                   </div>
                 </div>
+              )}
+            </div>
+          ) : selectedTab === '💰 潜在价值' ? (
+            <div className="embedded-values-panel">
+              <h4>💰 {t('潜在价值', translation)}</h4>
+              <p className="hint" style={{ marginBottom: 16 }}>
+                {t('人力潜在价值', translation)} = 每生产1单位该物品所需的总人力（人力=1.0为计价单位）<br/>
+                {t('凝聚力潜在价值', translation)} = 每生产1单位该物品在贸易中消耗的总凝聚力（负值=消耗，已×1000）
+              </p>
+              {embeddedValues && embeddedValues.labor.size > 0 ? (
+                <div className="table-wrapper">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>{t('物品', translation)}</th>
+                        <th>{t('人力潜在价值/单位', translation)}</th>
+                        <th>{t('凝聚力潜在价值/单位', translation)}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(() => {
+                        // Collect and sort: items with non-trivial embedded values
+                        const allItems = new Set<string>();
+                        for (const k of embeddedValues.labor.keys()) allItems.add(k);
+                        for (const k of embeddedValues.cohesion.keys()) allItems.add(k);
+                        const entries = Array.from(allItems)
+                          .map(item => ({
+                            item,
+                            labor: embeddedValues.labor.get(item) || 0,
+                            cohesion: embeddedValues.cohesion.get(item) || 0,
+                          }))
+                          .filter(e => Math.abs(e.labor) > 1e-9 || Math.abs(e.cohesion) > 1e-9)
+                          .sort((a, b) => b.labor - a.labor);
+                        if (entries.length === 0) {
+                          return <tr><td colSpan={3} className="hint">{t('无数据（请先求解）', translation)}</td></tr>;
+                        }
+                        return entries.map(e => (
+                          <tr key={e.item}>
+                            <td>{t(e.item, translation)}</td>
+                            <td>{e.labor.toFixed(4)}</td>
+                            <td className={e.cohesion < -1e-9 ? 'negative-value' : (e.cohesion > 1e-9 ? 'positive-value' : '')}>
+                              {(e.cohesion * 1000).toFixed(4)}
+                            </td>
+                          </tr>
+                        ));
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="hint">{t('无数据（请先求解）', translation)}</div>
               )}
             </div>
           ) : (

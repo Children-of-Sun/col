@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo } from 'react';
 import { useStore } from '../stores';
 import { t } from '../utils';
-import { Btn, Checkbox, ModalShell } from './UI';
+import { Checkbox } from './UI';
 
 const OfficePanel: React.FC = () => {
   const gameData = useStore(s => s.gameData);
@@ -11,14 +11,20 @@ const OfficePanel: React.FC = () => {
   const enableFocusConsumption = useStore(s => s.enableFocusConsumption);
   const setEnableFocusConsumption = useStore(s => s.setEnableFocusConsumption);
   const officeBuildingEnabled = useStore(s => s.officeBuildingEnabled);
-  const officeRecipeEnabled = useStore(s => s.officeRecipeEnabled);
   const setOfficeBuildingEnabled = useStore(s => s.setOfficeBuildingEnabled);
+  const officeRecipeEnabled = useStore(s => s.officeRecipeEnabled);
   const setOfficeRecipeEnabled = useStore(s => s.setOfficeRecipeEnabled);
+  const integerMode = useStore(s => s.integerMode);
+  const recipeIntegerEnabled = useStore(s => s.recipeIntegerEnabled);
+  const redundancyResources = useStore(s => s.redundancyResources);
+  const setRedundancyResources = useStore(s => s.setRedundancyResources);
+  const redundancyAutoItems = useStore(s => s.redundancyAutoItems);
+  const setRedundancyAutoItems = useStore(s => s.setRedundancyAutoItems);
   const researchLevels = useStore(s => s.researchLevels);
   const translation = useStore(s => s.translation);
 
-  const [recipeModalOpen, setRecipeModalOpen] = useState(false);
-  const [currentBuilding, setCurrentBuilding] = useState<string | null>(null);
+  const officeCollapsed = useStore(s => s.officeCollapsed);
+  const setOfficeCollapsed = useStore(s => s.setOfficeCollapsed);
 
   // 获取办公室建筑列表（优先从 gameData，否则从 fullData）
   const buildingsSource = gameData?.machines_and_buildings || fullData?.machines_and_buildings;
@@ -36,11 +42,6 @@ const OfficePanel: React.FC = () => {
     return sum + getTotalFocusCost(off, level);
   }, 0) || 0;
 
-  const openRecipeModal = (buildingId: string) => {
-    setCurrentBuilding(buildingId);
-    setRecipeModalOpen(true);
-  };
-
   // 获取专注点科技加成
   const focusBonusPerWorker = useMemo(() => {
     if (!gameData) return 0;
@@ -56,21 +57,85 @@ const OfficePanel: React.FC = () => {
     return 0;
   }, [gameData, researchLevels]);
 
-  const formatRecipeInputsOutputs = (recipe: any, workers: number) => {
+  // 格式化配方投入/产出（每分钟）
+  const formatRecipeIO = (recipe: any, workers: number) => {
     const durationMin = (recipe.duration || 60) / 60;
-    const inputParts = recipe.inputs?.map((i: any) => `${t(i.name, translation)}×${(i.quantity / durationMin).toFixed(2)}`) || ['无'];
-    const inputs = inputParts.join(', ') || '无';
-    const outputParts = recipe.outputs?.map((o: any) => {
-      const baseQty = o.quantity / durationMin;
-      let qty = baseQty;
-      // 专注点产出附加科技加成
+    const inputEntries = recipe.inputs?.map((i: any) => ({
+      name: t(i.name, translation),
+      rate: (i.quantity / durationMin).toFixed(2),
+    })) || [];
+    const outputEntries = recipe.outputs?.map((o: any) => {
+      let rate = o.quantity / durationMin;
       if (o.name.toLowerCase() === 'focus' && focusBonusPerWorker > 0) {
-        qty = baseQty + focusBonusPerWorker * workers;
+        rate += focusBonusPerWorker * workers;
       }
-      return `${t(o.name, translation)}×${qty.toFixed(2)}`;
-    }) || ['无'];
-    const outputs = outputParts.join(', ') || '无';
-    return { inputs, outputs };
+      return { name: t(o.name, translation), rate: rate.toFixed(2) };
+    }) || [];
+    return { inputEntries, outputEntries };
+  };
+
+  // 格式化维护消耗
+  const formatUpkeep = (building: any) => {
+    const parts: string[] = [];
+    if (building.workers) parts.push(`👷 ${building.workers}`);
+    if (building.electricity_consumed) parts.push(`⚡ ${building.electricity_consumed}`);
+    if (building.computing_consumed) parts.push(`💻 ${building.computing_consumed}`);
+    if (building.maintenance_cost_units && building.maintenance_cost_quantity) {
+      parts.push(`🔧 ${t(building.maintenance_cost_units, translation)}×${building.maintenance_cost_quantity}`);
+    }
+    return parts.join(' | ') || '无';
+  };
+
+  // 获取配方的第一个有效产出物名（办公配方 outputs 是数组格式）
+  const getFirstOutputName = (recipe: any): string | null => {
+    const outputs: any[] = recipe.outputs || [];
+    const filtered = outputs.filter((o: any) => {
+      const name = (o.name || '').toLowerCase();
+      if (name === 'recyclables' || name.includes('waste')) return false;
+      return true;
+    });
+    return filtered[0]?.name?.toLowerCase() || null;
+  };
+
+  // 处理取整开关变化（联动冗余自动启用/关闭）
+  const handleIntegerToggle = (recipe: any) => {
+    const currentVal = recipeIntegerEnabled[recipe.id] === true;
+    const newVal = !currentVal;
+    const s = useStore.getState();
+    s.setRecipeIntegerEnabled(recipe.id, newVal);
+
+    const targetItem = getFirstOutputName(recipe);
+    if (!targetItem) return;
+
+    const currentResources = s.redundancyResources;
+    const currentAutoItems = s.redundancyAutoItems;
+    const currentIntegerMode = s.integerMode; // 用 getState 取最新值，避免闭包过期
+
+    if (newVal) {
+      if (currentIntegerMode === 'milp') {
+        // 仅在混合整数模式下联动冗余
+        if (!currentResources[targetItem]) {
+          s.setRedundancyResources({
+            ...currentResources,
+            [targetItem]: { enabled: true, lower: 100, upper: 100 },
+          });
+        }
+        s.setRedundancyAutoItems({ ...currentAutoItems, [targetItem]: true });
+        if (!s.enableRedundancy) {
+          s.setEnableRedundancy(true);
+        }
+      }
+    } else {
+      // 关闭取整 → 仅自动设置的冗余项才关闭（自动关不记入 milpDisabled）
+      if (currentAutoItems[targetItem]) {
+        const newResources = { ...currentResources };
+        delete newResources[targetItem];
+        s.setRedundancyResources(newResources);
+        const newAuto = { ...currentAutoItems };
+        delete newAuto[targetItem];
+        s.setRedundancyAutoItems(newAuto);
+      }
+    }
   };
 
   return (
@@ -87,52 +152,126 @@ const OfficePanel: React.FC = () => {
         />
       </div>
 
-      <h4>🏢 办公室建筑</h4>
+      <h4>🏢 办公室建筑与配方</h4>
       {officeBuildings.length === 0 && <div className="hint">未检测到办公室建筑，请确保 GameData.json 中包含 Office 建筑数据。</div>}
-      {officeBuildings.map((b: any) => (
-        <div key={b.id} className="building-block" style={{ marginBottom: 10 }}>
-          <div className="building-header">
-            <input
-              type="checkbox"
-              checked={officeBuildingEnabled[b.id] !== false}
-              onChange={e => setOfficeBuildingEnabled(b.id, e.target.checked)}
-            />
-            <span>{t(b.name, translation)}</span>
-            <Btn onClick={() => openRecipeModal(b.id)}>🧪 配方选择</Btn>
-          </div>
-        </div>
-      ))}
-      <ModalShell open={recipeModalOpen} onClose={() => setRecipeModalOpen(false)} title="办公室配方选择" maxWidth="700px">
-        {currentBuilding && (
-          <div>
-            {(() => {
-                const building = officeBuildings.find((b: any) => b.id === currentBuilding);
-                if (!building) return null;
-                return building.recipes.map((r: any) => {
-                  const { inputs, outputs } = formatRecipeInputsOutputs(r, building.workers || 0);
-                return (
-                  <div key={r.id} className="recipe-entry" style={{ marginBottom: 8, borderBottom: '1px solid #eee', padding: 6 }}>
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={officeRecipeEnabled[r.id] !== false}
-                        onChange={e => setOfficeRecipeEnabled(r.id, e.target.checked)}
-                      />
-                      {' '}{t(r.name, translation)}
-                    </label>
-                    <div className="recipe-info" style={{ fontSize: '0.8rem', marginLeft: 20 }}>
-                      投入: {inputs} → 产出: {outputs}
-                    </div>
-                  </div>
-                );
-              });
-            })()}
-          </div>
-        )}
-        <Btn onClick={() => setRecipeModalOpen(false)}>关闭</Btn>
-      </ModalShell>
 
-      <h4>🏢 办公升级</h4>
+      {officeBuildings.map((building: any) => {
+        const isCollapsed = officeCollapsed[building.id] ?? true; // 默认折叠
+        const bEnabled = officeBuildingEnabled[building.id] !== false;
+        const recipes = building.recipes || [];
+
+        return (
+          <div key={building.id} className="building-block" style={{ marginBottom: 16, opacity: bEnabled ? 1 : 0.5 }}>
+            <div
+              className="building-header"
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '8px 10px',
+                backgroundColor: bEnabled ? '#f0f4ff' : '#f5f5f5',
+                border: bEnabled ? '1px solid #b8c8e8' : '1px solid #ddd',
+                borderRadius: '6px 6px 0 0',
+              }}
+            >
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }} onClick={e => e.stopPropagation()}>
+                <input
+                  type="checkbox"
+                  checked={bEnabled}
+                  onChange={e => setOfficeBuildingEnabled(building.id, e.target.checked)}
+                />
+                <span style={{ fontWeight: 'bold' }}>{t(building.name, translation)}</span>
+              </label>
+              <span style={{ fontSize: 11, color: '#888' }}>
+                ({recipes.length} 配方 | {formatUpkeep(building)})
+              </span>
+              <span
+                onClick={() => setOfficeCollapsed({ ...officeCollapsed, [building.id]: !isCollapsed })}
+                style={{ marginLeft: 12, fontSize: '0.85rem', userSelect: 'none', cursor: 'pointer' }}
+              >
+                {isCollapsed ? '▶ 展开' : '▼ 收起'}
+              </span>
+            </div>
+
+            {!isCollapsed && recipes.length > 0 && (
+              <div style={{ border: '1px solid #ddd', borderTop: 'none', borderRadius: '0 0 6px 6px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                  <thead>
+                    <tr style={{ background: '#f0f0f0' }}>
+                      <th style={{ padding: 8, textAlign: 'left' }}>{t('配方', translation)}</th>
+                      <th style={{ padding: 8, textAlign: 'left' }}>{t('投入/min', translation)}</th>
+                      <th style={{ padding: 8, textAlign: 'left' }}>{t('产出/min', translation)}</th>
+                      <th style={{ padding: 8, textAlign: 'center', width: 60 }}>{t('取整', translation)}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {recipes.map((recipe: any) => {
+                      const rEnabled = bEnabled && officeRecipeEnabled[recipe.id] !== false;
+                      const intOn = recipeIntegerEnabled[recipe.id] === true;
+                      const { inputEntries, outputEntries } = formatRecipeIO(recipe, building.workers || 0);
+
+                      return (
+                        <tr
+                          key={recipe.id}
+                          onClick={() => { if (bEnabled) setOfficeRecipeEnabled(recipe.id, !rEnabled); }}
+                          style={{
+                            cursor: bEnabled ? 'pointer' : 'not-allowed',
+                            backgroundColor: rEnabled ? '#d4edda' : 'transparent',
+                            borderBottom: '1px solid #eee',
+                          }}
+                          onMouseEnter={(e) => { if (bEnabled) e.currentTarget.style.backgroundColor = rEnabled ? '#c3e6cb' : '#f8f9fa'; }}
+                          onMouseLeave={(e) => { if (bEnabled) e.currentTarget.style.backgroundColor = rEnabled ? '#d4edda' : 'transparent'; }}
+                        >
+                          <td style={{ padding: 6 }}>
+                            {t(recipe.name, translation)}
+                          </td>
+                          <td style={{ padding: 6, fontSize: '0.8rem' }}>
+                            {inputEntries.length ? inputEntries.map(e => `${e.name}×${e.rate}`).join(', ') : '无'}
+                          </td>
+                          <td style={{ padding: 6, fontSize: '0.8rem' }}>
+                            {outputEntries.length ? outputEntries.map(e => `${e.name}×${e.rate}`).join(', ') : '无'}
+                          </td>
+                          <td style={{ padding: 6, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                            <span
+                              onClick={() => { if (bEnabled) handleIntegerToggle(recipe); }}
+                              title={intOn ? '取整：开' : '取整：关'}
+                              style={{
+                                display: 'inline-block',
+                                width: 36, height: 20, borderRadius: 10,
+                                background: intOn ? '#4caf50' : '#ccc',
+                                position: 'relative',
+                                cursor: bEnabled ? 'pointer' : 'not-allowed',
+                                opacity: bEnabled ? 1 : 0.5,
+                                transition: 'background 0.2s',
+                              }}
+                            >
+                              <span style={{
+                                position: 'absolute', top: 2,
+                                left: intOn ? 18 : 2,
+                                width: 16, height: 16, borderRadius: '50%',
+                                background: '#fff',
+                                transition: 'left 0.2s',
+                                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                              }} />
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {!isCollapsed && recipes.length === 0 && (
+              <div style={{ padding: 10, border: '1px solid #ddd', borderTop: 'none', borderRadius: '0 0 6px 6px', color: '#888' }}>
+                该建筑无配方数据
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      <h4 style={{ marginTop: 20 }}>📈 办公升级</h4>
       {gameData?.office?.map((off: any, idx: number) => {
         const currentLevel = officeLevels[idx] || 0;
         const cost = getTotalFocusCost(off, currentLevel);
