@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useStore } from './stores';
 import { MainLevelPanel, PowerPanel, SpaceStationPanel, StatuePanel, DemandPanel } from './components/Panels';
 import { LabPanel } from './components/LabPanel';
@@ -40,6 +40,8 @@ export default function App() {
   const loadTranslation = useStore(s => s.loadTranslation);
   const setResult = useStore(s => s.setResult);
   const setIsSolving = useStore(s => s.setIsSolving);
+  const isSolving = useStore(s => s.isSolving);
+  const workerStatus = useStore(s => s.workerStatus);
   const setDiagnostic = useStore(s => s.setDiagnostic);
   const dataLoaded = useStore(s => s.dataLoaded);
   const importSettings = useStore(s => s.importSettings);
@@ -62,6 +64,11 @@ export default function App() {
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [excludeModalOpen, setExcludeModalOpen] = useState(false);
   const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'agriculture' | 'resident' | 'edict' | 'office' | 'tech'>('main');
+
+  // Worker 复用：避免每次求解创建新 Worker（2GB WASM）
+  const workerRef = useRef<Worker | null>(null);
+  const solveGenerationRef = useRef<number>(0);
+  const workerCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     window.__store = useStore;
@@ -116,6 +123,24 @@ export default function App() {
         }
       } catch (e) { /* ignore */ }
       try {
+        const resp = await fetch('./building_sizes.json');
+        if (resp.ok) {
+          const json = await resp.json();
+          const theoretical: Record<string, { width: number; height: number }> = {};
+          const reference: Record<string, { width: number; height: number }> = {};
+          for (const entry of json) {
+            const key = entry.id.toLowerCase();
+            theoretical[key] = { width: entry.width, height: entry.height };
+            reference[key] = {
+              width: entry.refWidth ?? entry.width,
+              height: entry.refHeight ?? entry.height,
+            };
+          }
+          useStore.getState().setBuildingSizesRaw({ theoretical, reference });
+          useStore.getState().setBuildingSizes(theoretical);
+        }
+      } catch (e) { /* ignore */ }
+      try {
         const resp = await fetch('./products.json');
         if (resp.ok) {
           const productsData = await resp.json();
@@ -163,69 +188,139 @@ export default function App() {
     return [];
   }, []);
 
-  // 基础 LP 求解函数
+  // Worker 获取/创建（复用单例，避免 2GB WASM 重复分配）
+  const getOrCreateWorker = (): Worker => {
+    if (workerRef.current) return workerRef.current;
+    const worker = new Worker('solver.worker.js');
+    workerRef.current = worker;
+    return worker;
+  };
+
+  // 空闲冷却：求解完成后 30 秒无新求解则释放 2GB WASM 内存
+  const scheduleWorkerCooldown = () => {
+    if (workerCooldownRef.current) clearTimeout(workerCooldownRef.current);
+    workerCooldownRef.current = setTimeout(() => {
+      if (workerRef.current) {
+        console.log('[Worker] 空闲冷却，释放 WASM 内存');
+        workerRef.current.terminate();
+        workerRef.current = null;
+        useStore.getState().setWorkerStatus?.('idle');
+      }
+    }, 30000); // 30 秒空闲后释放
+  };
+
+  // 求解完成 → 启动 Worker 冷却 timer
+  const prevIsSolvingRef = useRef(false);
+  useEffect(() => {
+    if (prevIsSolvingRef.current && !isSolving) {
+      scheduleWorkerCooldown();
+    }
+    prevIsSolvingRef.current = isSolving;
+  }, [isSolving]);
+
+  // 组件卸载时清理 Worker 和 timer
+  useEffect(() => {
+    return () => {
+      if (workerCooldownRef.current) clearTimeout(workerCooldownRef.current);
+      if (workerRef.current) {
+        workerRef.current.terminate();
+        workerRef.current = null;
+      }
+    };
+  }, []);
+
+  // 基础 LP 求解函数（复用 Worker，generation 防过期回调）
   const runLpSolver = (lpString: string, varNames: string[], integerMode?: string): Promise<any> => {
+    const generation = solveGenerationRef.current;
+    useStore.getState().setWorkerStatus('solving');
+
+    // 清除冷却 timer（正在使用 Worker）
+    if (workerCooldownRef.current) {
+      clearTimeout(workerCooldownRef.current);
+      workerCooldownRef.current = null;
+    }
+
+    const worker = getOrCreateWorker();
     return new Promise((resolve, reject) => {
-      const worker = new Worker('solver.worker.js');
       const timeoutId = setTimeout(() => {
+        if (solveGenerationRef.current !== generation) {
+          console.warn('[runLpSolver] Stale timeout for gen', generation, 'current:', solveGenerationRef.current);
+          return;
+        }
         worker.terminate();
+        workerRef.current = null;
+        useStore.getState().setWorkerStatus('error');
         reject(new Error('求解超时'));
       }, 60000);
 
       worker.onmessage = (e) => {
         clearTimeout(timeoutId);
-        worker.terminate();
-        // Worker 可能返回 {error: "..."}（求解器崩溃）而非 {result: {...}}
+        if (solveGenerationRef.current !== generation) {
+          console.warn('[runLpSolver] Stale callback for gen', generation);
+          return;
+        }
         if (e.data.error) {
-          console.warn('[runLpSolver] Worker 返回错误:', e.data.error);
+          console.warn('[runLpSolver] Worker error:', e.data.error);
+          useStore.getState().setWorkerStatus('error');
           reject(new Error(e.data.error));
           return;
         }
         const result = e.data.result;
         if (result) {
-          console.log('[runLpSolver] 求解器返回状态:', result.Status, '| 变量数:', Object.keys(result.Columns || result.columns || {}).length);
+          console.log('[runLpSolver] Status:', result.Status, '| vars:', Object.keys(result.Columns || result.columns || {}).length);
         } else {
-          console.log('[runLpSolver] 求解器返回空结果, e.data:', JSON.stringify(e.data).slice(0, 500));
+          console.log('[runLpSolver] Empty result, e.data:', JSON.stringify(e.data).slice(0, 500));
         }
+        useStore.getState().setWorkerStatus('idle');
         resolve(result);
       };
+
       worker.onerror = (err) => {
         clearTimeout(timeoutId);
+        if (solveGenerationRef.current !== generation) return;
         worker.terminate();
+        workerRef.current = null;
+        useStore.getState().setWorkerStatus('error');
         reject(new Error(err.message));
       };
-      // 在 milp 模式下传入原生 HiGHS MIP 选项
+
       const options = integerMode === 'milp' ? { time_limit: 60, presolve: 'on' } : undefined;
-      worker.postMessage({ lpString, requestId: Date.now(), options });
+      worker.postMessage({ lpString, requestId: Date.now(), options, generation });
     });
   };
 
   // solveLp：基础 LP 求解
   const solveLp = async (lpString: string, varNames: string[], integerMode?: string, tradeActive?: Recipe[], fixedUnityConsumption?: number, researchCohesionTotal?: number) => {
-    const result = await runLpSolver(lpString, varNames, integerMode);
-    console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
-    setResult(result);
-    setIsSolving(false);
-    const st = result?.Status;
-    if (st === 'Optimal' || st === 'Feasible' || st === 'NodeLimit' || st === 'TimeLimit' || st === 'SolutionLimit') {
-      setDiagnostic(st === 'Optimal' ? '' : `⚠️ 求解完成 (状态: ${st}，已得可行解但未证最优)`);
-      // 计算实际贸易消耗
-      if (tradeActive && tradeActive.length) {
-        let actualDirect = 0;
-        let actualMaintenance = 0;
-        tradeActive.forEach((recipe, idx) => {
-          const varName = `tr${idx}`;
-          const count = result.Columns?.[varName]?.Primal || result.columns?.[varName]?.Primal || 0;
-          actualDirect += (recipe.tradeUnityDirect || 0) * count;
-          actualMaintenance += (recipe.tradeUnityMaintenance || 0) * count;
-        });
-        setCohesionTradeDirect(actualDirect);
-        setCohesionTradeMaintenance(actualMaintenance);
-        setUnityConsumption(actualDirect + actualMaintenance + (fixedUnityConsumption || 0) + (researchCohesionTotal || 0));
+    try {
+      const result = await runLpSolver(lpString, varNames, integerMode);
+      console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
+      setResult(result);
+      setIsSolving(false);
+      const st = result?.Status;
+      if (st === 'Optimal' || st === 'Feasible' || st === 'NodeLimit' || st === 'TimeLimit' || st === 'SolutionLimit') {
+        setDiagnostic(st === 'Optimal' ? '' : `⚠️ 求解完成 (状态: ${st}，已得可行解但未证最优)`);
+        // 计算实际贸易消耗
+        if (tradeActive && tradeActive.length) {
+          let actualDirect = 0;
+          let actualMaintenance = 0;
+          tradeActive.forEach((recipe, idx) => {
+            const varName = `tr${idx}`;
+            const count = result.Columns?.[varName]?.Primal || result.columns?.[varName]?.Primal || 0;
+            actualDirect += (recipe.tradeUnityDirect || 0) * count;
+            actualMaintenance += (recipe.tradeUnityMaintenance || 0) * count;
+          });
+          setCohesionTradeDirect(actualDirect);
+          setCohesionTradeMaintenance(actualMaintenance);
+          setUnityConsumption(actualDirect + actualMaintenance + (fixedUnityConsumption || 0) + (researchCohesionTotal || 0));
+        }
+      } else if (st === 'Infeasible') {
+        const prev = useStore.getState().diagnostic;
+        setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
       }
-    } else if (st === 'Infeasible') {
-      const prev = useStore.getState().diagnostic;
-      setDiagnostic(prev + '<br>💡 当前设置无法平衡所有中间产物。请勾选"允许外部供给"或调整需求。');
+    } catch (err: any) {
+      console.error('[solveLp] Error:', err.message);
+      setIsSolving(false);
+      setDiagnostic(`求解错误: ${err.message}`);
     }
   };
 
@@ -449,6 +544,14 @@ export default function App() {
 
   const handleSolve = useCallback(async () => {
     const s = useStore.getState();
+    // Guard: prevent concurrent solves
+    if (s.isSolving) {
+      console.warn('[handleSolve] Solve already in progress, ignoring.');
+      return;
+    }
+    s.setIsSolving(true);
+    solveGenerationRef.current += 1;
+    setResult(null); // 释放上次结果内存
 
     // [DIAGNOSTIC] 冗余设置日志
     const rdEnabled = s.enableRedundancy;
@@ -563,6 +666,10 @@ export default function App() {
       globalUpper: s.globalUpper,
       redundancyResources: effectiveRedundancyResources,
       recipeIntegerEnabled: s.recipeIntegerEnabled,
+      buildingSizes: s.buildingSizes,
+      useReferenceSizes: s.useReferenceSizes,
+      excludePowerFootprint: s.excludePowerFootprint,
+      excludeTradeFootprint: s.excludeTradeFootprint,
       // 人口 > 0 时强制居民模块最低值，防止被归零
       minResidentValue: residentFixed > 0 ? residentFixed : undefined,
     };
@@ -622,7 +729,6 @@ export default function App() {
     }
 
     // 根据整数模式选择求解方式
-    setIsSolving(true);
     // MIP 求解器可能返回多种"有解"状态（NodeLimit=达到节点上限，TimeLimit=超时，Feasible=可行未证最优）
     const MIP_SUCCESS = new Set(['Optimal', 'Feasible', 'NodeLimit', 'TimeLimit', 'SolutionLimit']);
     const isMipSuccess = (st: string | undefined): boolean => !!st && MIP_SUCCESS.has(st);
@@ -907,7 +1013,18 @@ export default function App() {
           <OptionsPanel onOpenExcludeModal={() => setExcludeModalOpen(true)} />
           <div className="demand-solve-row">
             <DemandPanel onOpenDemandModal={() => setDemandModalOpen(true)} />
-            <Btn onClick={handleSolve} disabled={!dataLoaded} className="btn-solve">🔧 开始求解</Btn>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Btn onClick={handleSolve} disabled={!dataLoaded || isSolving || workerStatus === 'error'} className="btn-solve">🔧 开始求解</Btn>
+              {workerStatus === 'solving' && <span style={{ color: '#2196F3', fontSize: 13 }}>⚙ 求解中...</span>}
+              {workerStatus === 'error' && (
+                <span style={{ color: '#c62828', fontSize: 13, cursor: 'pointer', textDecoration: 'underline' }}
+                  onClick={() => {
+                    if (workerRef.current) { workerRef.current.terminate(); workerRef.current = null; }
+                    useStore.getState().setWorkerStatus('idle');
+                  }}
+                  title="点击重置 Worker">⚠ Worker 异常 (点击重置)</span>
+              )}
+            </div>
           </div>
         </div>
         <div className="right-column">

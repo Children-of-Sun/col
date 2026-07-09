@@ -46,6 +46,8 @@ export const TradePanel: React.FC = () => {
   const edictLevels = useStore(s => s.edictLevels);
   const researchLevels = useStore(s => s.researchLevels);
   const tradeVoyageTime = useStore(s => s.tradeVoyageTime);
+  const excludeTradeFootprint = useStore(s => s.excludeTradeFootprint);
+  const setExcludeTradeFootprint = useStore(s => s.setExcludeTradeFootprint);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<Set<string>>(new Set(selectedTradeContractIds));
@@ -215,6 +217,14 @@ export const TradePanel: React.FC = () => {
             style={{ width: 80, padding: '4px 8px', borderRadius: 4, border: '1px solid #ccc' }}
           />
           <span style={{ fontSize: 11, color: '#888', marginLeft: 4 }}>地图+海外(普通模式)</span>
+        </div>
+        <div style={{ marginTop: 8, borderTop: '1px solid #ddd', paddingTop: 8 }}>
+          <label>
+            <input type="checkbox" checked={excludeTradeFootprint}
+              onChange={e => setExcludeTradeFootprint(e.target.checked)} />
+            {' '}不计入占地面积
+          </label>
+          <span style={{ fontSize: 11, color: '#888', marginLeft: 8 }}>（勾选后贸易占地不参与最小化计算）</span>
         </div>
         <span style={{ display: 'inline-flex', gap: '15px' }}>
           <span>📈 合同利润率: +{profitBonusFromOffice.toFixed(0)}%</span>

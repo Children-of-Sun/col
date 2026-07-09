@@ -62,6 +62,7 @@ export const useStore = create<StoreState>((set, get) => ({
 
   result: null,
   isSolving: false,
+  workerStatus: 'idle' as 'idle' | 'solving' | 'error',
   diagnostic: '',
 
   solverActive: [],
@@ -114,6 +115,11 @@ export const useStore = create<StoreState>((set, get) => ({
 
   optimizationMode: 'machines',
   customWeights: { machines: 100, labor: 0, cohesion: 0, area: 0, raw: 0 },
+  buildingSizes: {} as Record<string, { width: number; height: number }>,
+  buildingSizesRaw: { theoretical: {}, reference: {} } as { theoretical: Record<string, { width: number; height: number }>; reference: Record<string, { width: number; height: number }> },
+  useReferenceSizes: false,
+  excludePowerFootprint: false,
+  excludeTradeFootprint: false,
 
   // 整数模式相关
   integerMode: 'continuous' as 'continuous' | 'ceil' | 'rounding' | 'milp',
@@ -214,6 +220,7 @@ export const useStore = create<StoreState>((set, get) => ({
   setShowTinyErrors: (v) => set({ showTinyErrors: v }),
   setResult: (r) => set({ result: r }),
   setIsSolving: (v) => set({ isSolving: v }),
+  setWorkerStatus: (status) => set({ workerStatus: status }),
   setDiagnostic: (msg) => set({ diagnostic: msg }),
   setSolverActive: (active: Recipe[]) => set({ solverActive: active }),
   setSolverVarNames: (names: string[]) => set({ solverVarNames: names }),
@@ -358,6 +365,17 @@ export const useStore = create<StoreState>((set, get) => ({
 
   setOptimizationMode: (mode) => set({ optimizationMode: mode }),
   setCustomWeights: (weights) => set({ customWeights: { ...get().customWeights, ...weights } }),
+  setBuildingSizes: (sizes) => set({ buildingSizes: sizes }),
+  setBuildingSizesRaw: (raw) => set({ buildingSizesRaw: raw }),
+  setUseReferenceSizes: (v) => {
+    const { buildingSizesRaw } = get();
+    set({
+      useReferenceSizes: v,
+      buildingSizes: v ? buildingSizesRaw.reference : buildingSizesRaw.theoretical,
+    });
+  },
+  setExcludePowerFootprint: (v) => set({ excludePowerFootprint: v }),
+  setExcludeTradeFootprint: (v) => set({ excludeTradeFootprint: v }),
 
   setIntegerMode: (mode) => set({ integerMode: mode }),
   setMilpTimeLimit: (v) => set({ milpTimeLimit: v }),
@@ -430,6 +448,9 @@ export const useStore = create<StoreState>((set, get) => ({
     if (s.recipeIntegerEnabled !== undefined) state.recipeIntegerEnabled = s.recipeIntegerEnabled;
     if (s.tradeVoyageTime !== undefined) state.tradeVoyageTime = s.tradeVoyageTime;
     if (s.enableRedundancy !== undefined) state.enableRedundancy = s.enableRedundancy;
+    if (s.useReferenceSizes !== undefined) state.useReferenceSizes = s.useReferenceSizes;
+    if (s.excludePowerFootprint !== undefined) state.excludePowerFootprint = s.excludePowerFootprint;
+    if (s.excludeTradeFootprint !== undefined) state.excludeTradeFootprint = s.excludeTradeFootprint;
     if (s.globalLower !== undefined) state.globalLower = s.globalLower;
     if (s.globalUpper !== undefined) state.globalUpper = s.globalUpper;
     if (s.redundancyResources !== undefined) state.redundancyResources = s.redundancyResources;
@@ -510,6 +531,9 @@ export const useStore = create<StoreState>((set, get) => ({
       recipeIntegerEnabled: s.recipeIntegerEnabled,
       tradeVoyageTime: s.tradeVoyageTime,
       enableRedundancy: s.enableRedundancy,
+      useReferenceSizes: s.useReferenceSizes,
+      excludePowerFootprint: s.excludePowerFootprint,
+      excludeTradeFootprint: s.excludeTradeFootprint,
       globalLower: s.globalLower,
       globalUpper: s.globalUpper,
       redundancyResources: s.redundancyResources,

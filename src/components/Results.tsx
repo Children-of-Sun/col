@@ -3,7 +3,7 @@ import { useStore } from '../stores';
 import { Btn } from './UI';
 import { t, getMaintenanceReduction, SPACE_CARGO_ITEMS } from '../utils';
 import { Recipe } from '../types';
-import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue } from '../utils/format';
+import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue, computeRecipeArea, formatFootprint, smartRound, formatPowerSmart, formatComputingSmart, formatNetValue } from '../utils/format';
 import { IconWithFallback } from './IconWithFallback';
 import { computeEmbeddedValues } from '../embeddedValues';
 
@@ -91,6 +91,7 @@ function mergeResources(target: Record<string, number>, source: Record<string, n
   }
 }
 
+
 const SummaryTable: React.FC<{
   data: { prod: Record<string, number>; cons: Record<string, number> };
   showTinyErrors: boolean;
@@ -159,7 +160,7 @@ const SummaryTable: React.FC<{
               return (
               <React.Fragment key={item}>
                 <tr>
-                  <td style={{ textAlign: 'center' }}>
+                  <td className="summary-name-cell" style={{ textAlign: 'center' }}>
                     {showIcons && icon ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
@@ -173,7 +174,7 @@ const SummaryTable: React.FC<{
                 </tr>
                 {showLaborRow && item === '人力' && (
                   <tr style={{ borderTop: '1px solid #ccc', background: '#f9f9f9' }}>
-                    <td style={{ textAlign: 'center' }}><strong>{t('人力（工人）', translation)}</strong></td>
+                    <td className="summary-name-cell" style={{ textAlign: 'center' }}><strong>{t('人力（工人）', translation)}</strong></td>
                     <td>-</td>
                     <td>-</td>
                     <td className={netWorkers < 0 ? 'negative-value' : netWorkers > 0 ? 'positive-value' : ''}>
@@ -196,13 +197,13 @@ const SummaryTable: React.FC<{
     <div className="split-summary">
       <div className="split-column">
         <table className="data-table">
-          <thead><tr><th>{t('净产出 (正)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
+          <thead><tr><th style={{ width: '30%' }}>{t('净产出', translation)}</th><th style={{ width: '70%' }}>{t('数量/分', translation)}</th></tr></thead>
           <tbody>
             {positiveItems.map(({ item, net }) => {
               const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
               return (
               <tr key={item}>
-                <td style={{ textAlign: 'center' }}>
+                <td className="summary-name-cell" style={{ textAlign: 'center' }}>
                   {showIcons && icon ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
@@ -210,7 +211,7 @@ const SummaryTable: React.FC<{
                     </div>
                   ) : t(item, translation)}
                 </td>
-                <td className="positive-value">{item === 'electricity' ? formatPowerSigned(net) : item === 'computing' ? formatComputingSigned(net) : '+' + net.toFixed(4)}</td>
+                <td className="positive-value">{item === 'electricity' ? formatPowerSigned(net) : item === 'computing' ? formatComputingSigned(net) : formatNetValue(net)}</td>
               </tr>
             )})}
             {Array.from({ length: maxRows - positiveItems.length }).map((_, i) => <tr key={`empty-pos-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
@@ -219,13 +220,13 @@ const SummaryTable: React.FC<{
       </div>
       <div className="split-column">
         <table className="data-table">
-          <thead><tr><th>{t('净消耗 (负)', translation)}</th><th>{t('数量/分', translation)}</th></tr></thead>
+          <thead><tr><th style={{ width: '30%' }}>{t('净消耗', translation)}</th><th style={{ width: '70%' }}>{t('数量/分', translation)}</th></tr></thead>
           <tbody>
             {negativeItems.map(({ item, net }) => {
               const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
               return (
               <tr key={item}>
-                <td style={{ textAlign: 'center' }}>
+                <td className="summary-name-cell" style={{ textAlign: 'center' }}>
                   {showIcons && icon ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
@@ -233,7 +234,7 @@ const SummaryTable: React.FC<{
                     </div>
                   ) : t(item, translation)}
                 </td>
-                <td className="negative-value">{item === 'electricity' ? formatPowerSigned(net) : item === 'computing' ? formatComputingSigned(net) : net.toFixed(4)}</td>
+                <td className="negative-value">{item === 'electricity' ? formatPowerSigned(net) : item === 'computing' ? formatComputingSigned(net) : formatNetValue(net)}</td>
               </tr>
             )})}
             {Array.from({ length: maxRows - negativeItems.length }).map((_, i) => <tr key={`empty-neg-${i}`}><td colSpan={2}>&nbsp;</td></tr>)}
@@ -247,7 +248,9 @@ const SummaryTable: React.FC<{
 const RecipeList: React.FC<{
   recipes: { recipe: Recipe; count: number; perMin: any }[];
   translation: Record<string, string>;
-}> = ({ recipes, translation }) => {
+  buildingSizes: Record<string, { width: number; height: number }>;
+  showFullStats: boolean;
+}> = ({ recipes, translation, buildingSizes, showFullStats }) => {
   const isTrade = recipes.length > 0 && recipes[0].recipe.module === 'trade';
   return (
     <div className="table-wrapper">
@@ -255,16 +258,17 @@ const RecipeList: React.FC<{
         <thead>
           <tr>
             <th className="recipe-name-cell">{t('         配方         ', translation)}</th>
-            <th>{t('建筑', translation)}</th>
-            <th>{t('理论机器数', translation)}</th>
-            <th>{t('实际机器数', translation)}</th>
-            <th>{t('人力/分', translation)}</th>
-            <th>{t('电力/分', translation)}</th>
-            <th>{t('算力/分', translation)}</th>
-            <th>{t('维护', translation)}</th>
-            {isTrade && <th>{t('凝聚力消耗/分', translation)}</th>}
-            <th>{t('投入/分', translation)}</th>
-            <th>{t('产出/分', translation)}</th>
+            <th className="col-narrow">{t('建筑', translation)}</th>
+            <th className="col-narrow">{t('理论机器数', translation)}</th>
+            <th className="col-narrow">{t('实际机器数', translation)}</th>
+            <th className="col-narrow">{t('占地', translation)}</th>
+            <th className="col-narrow">{t('人力', translation)}</th>
+            <th className="col-narrow">{t('电力', translation)}</th>
+            <th className="col-narrow">{t('算力', translation)}</th>
+            <th className="col-narrow">{t('维护', translation)}</th>
+            {isTrade && <th className="col-narrow">{t('凝聚力消耗', translation)}</th>}
+            <th className="col-wide">{t('投入', translation)}</th>
+            <th className="col-wide">{t('产出', translation)}</th>
           </tr>
         </thead>
         <tbody>
@@ -274,30 +278,46 @@ const RecipeList: React.FC<{
             const pm = item.perMin;
             const skipItems = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii']);
             const filteredInputs = Object.entries(pm.inputs).filter(([k]) => !skipItems.has(k));
-            const inputs = filteredInputs.map(([k, v]) => `${t(k, translation)}×${v.toFixed(2)}`).join(', ') || '无';
-            const outputs = Object.entries(pm.outputs).map(([k, v]) => `${t(k, translation)}×${v.toFixed(2)}`).join(', ') || '无';
-            const maintParts = [];
-            if (pm.maintI > 0) maintParts.push(`M I:${pm.maintI.toFixed(2)}`);
-            if (pm.maintII > 0) maintParts.push(`M II:${pm.maintII.toFixed(2)}`);
-            if (pm.maintIII > 0) maintParts.push(`M III:${pm.maintIII.toFixed(2)}`);
+            const inputs = filteredInputs.map(([k, v]) => `${t(k, translation)}×${v.toFixed(4)}`).join(', ') || '无';
+            const outputs = Object.entries(pm.outputs).map(([k, v]) => `${t(k, translation)}×${v.toFixed(4)}`).join(', ') || '无';
+            const maintParts: string[] = [];
+            if (pm.maintI > 0) {
+              const mi = smartRound(pm.maintI, showFullStats);
+              maintParts.push(`M I:${mi.text}`);
+            }
+            if (pm.maintII > 0) {
+              const mii = smartRound(pm.maintII, showFullStats);
+              maintParts.push(`M II:${mii.text}`);
+            }
+            if (pm.maintIII > 0) {
+              const miii = smartRound(pm.maintIII, showFullStats);
+              maintParts.push(`M III:${miii.text}`);
+            }
             const maintStr = maintParts.join(' ') || '-';
+            const maintTitle = maintParts.length > 0 ? maintParts.join(' ') : '-';
             let cohesionConsumption = '';
             if (isTrade) {
-              cohesionConsumption = (pm.cohesion || 0).toFixed(4);
+              cohesionConsumption = (pm.cohesion || 0).toFixed(1);
             }
+            const fullName = t(r.name, translation);
+            const displayName = fullName.length > 5 ? fullName.slice(0, 5) + '…' : fullName;
+            const workersR = smartRound(pm.workers, showFullStats);
+            const powerR = formatPowerSmart(pm.electricity, showFullStats);
+            const computingR = formatComputingSmart(pm.computing, showFullStats);
             return (
               <tr key={idx}>
-                <td className="recipe-name-cell" title={t(r.name, translation)}>{t(r.name, translation)}</td>
+                <td className="recipe-name-cell" title={fullName}>{displayName}</td>
                 <td>{t(r.buildingName, translation)}</td>
-                <td>{cnt.toFixed(4)}</td>
+                <td>{cnt.toFixed(2)}</td>
                 <td>{pm.machineCount.toFixed(2)}</td>
-                <td>{pm.workers.toFixed(2)}</td>
-                <td>{formatPowerSigned(pm.electricity)}</td>
-                <td>{formatComputingSigned(pm.computing)}</td>
-                <td>{maintStr}</td>
+                <td title={(() => { const a = computeRecipeArea(item.recipe, item.count, buildingSizes); return a.toFixed(1) + ' 小格'; })()}>{formatFootprint(computeRecipeArea(item.recipe, item.count, buildingSizes))}</td>
+                <td title={workersR.title}>{workersR.text}</td>
+                <td title={powerR.title}>{powerR.text}</td>
+                <td title={computingR.title}>{computingR.text}</td>
+                <td title={maintTitle}>{maintStr}</td>
                 {isTrade && <td>{cohesionConsumption}</td>}
-                <td>{inputs}</td>
-                <td>{outputs}</td>
+                <td className="col-wide">{inputs}</td>
+                <td className="col-wide">{outputs}</td>
               </tr>
             );
           })}
@@ -315,11 +335,12 @@ const ModuleRow: React.FC<{
   netElectricity: number;
   computing: number;
   totalMaintenance: number;
+  footprint: number;
   netProds: { item: string; net: number }[];
   netCons: { item: string; net: number }[];
   onClick: () => void;
   translation: Record<string, string>;
-}> = ({ name, machineCount, actualMachineCount, workers, netElectricity, computing, totalMaintenance, netProds, netCons, onClick, translation }) => {
+}> = ({ name, machineCount, actualMachineCount, workers, netElectricity, computing, totalMaintenance, footprint, netProds, netCons, onClick, translation }) => {
   const [expanded, setExpanded] = useState(false);
   const toggleExpand = () => setExpanded(!expanded);
   return (
@@ -331,7 +352,8 @@ const ModuleRow: React.FC<{
           👷 {t('人力', translation)}: {workers.toFixed(2)} &nbsp;|&nbsp;
           ⚡ {t('净电力', translation)}: {formatPowerSigned(netElectricity)} &nbsp;|&nbsp;
           💻 {t('算力', translation)}: {formatComputingSigned(computing)} &nbsp;|&nbsp;
-          🔧 {t('维护总量', translation)}: {totalMaintenance.toFixed(2)}
+          🔧 {t('维护总量', translation)}: {totalMaintenance.toFixed(2)} &nbsp;|&nbsp;
+          📐 {t('占地', translation)}: {formatFootprint(footprint)}
         </span>
         <span className="expand-icon">{expanded ? '▼' : '▶'}</span>
       </div>
@@ -379,9 +401,13 @@ export const Results: React.FC = () => {
   const cohesionTradeMaintenance = useStore(s => s.cohesionTradeMaintenance);
   const cohesionEdict = useStore(s => s.cohesionEdict);
   const integerMode = useStore(s => s.integerMode);
+  const buildingSizes = useStore(s => s.buildingSizes);
+  const useReferenceSizes = useStore(s => s.useReferenceSizes);
+  const setUseReferenceSizes = useStore(s => s.setUseReferenceSizes);
   const [selectedTab, setSelectedTab] = useState<string>('全厂总览');
   const [recipeSearch, setRecipeSearch] = useState('');
   const [showCeilMachines, setShowCeilMachines] = useState(false);
+  const [showFullStats, setShowFullStats] = useState(false);
   const buildingIcons = useStore(s => s.buildingIcons);
   const handleTabChange = (name: string) => { setSelectedTab(name); };
 
@@ -415,6 +441,57 @@ export const Results: React.FC = () => {
     });
     return Object.values(byBuilding).sort((a, b) => b.count - a.count);
   }, [solverActive, varValues, solverVarNames, buildingIcons, showCeilMachines]);
+
+  // 电力占地面积（始终计算，不受开关影响）
+  const powerFootprint = useMemo(() => {
+    if (!solverActive.length || !Object.keys(varValues).length) return 0;
+    let area = 0;
+    solverActive.forEach((recipe, idx) => {
+      if (recipe.module !== 'power') return;
+      const varName = solverVarNames[idx];
+      const machineCount = varValues[varName] || 0;
+      area += computeRecipeArea(recipe, machineCount, buildingSizes);
+    });
+    return area;
+  }, [solverActive, varValues, solverVarNames, buildingSizes]);
+
+  // 贸易占地面积（始终计算，不受开关影响）
+  const tradeFootprint = useMemo(() => {
+    if (!solverActive.length || !Object.keys(varValues).length) return 0;
+    let area = 0;
+    solverActive.forEach((recipe, idx) => {
+      if (recipe.module !== 'trade') return;
+      const varName = solverVarNames[idx];
+      const machineCount = varValues[varName] || 0;
+      area += computeRecipeArea(recipe, machineCount, buildingSizes);
+    });
+    return area;
+  }, [solverActive, varValues, solverVarNames, buildingSizes]);
+
+  // 农业占地面积（始终计算，不受开关影响）
+  const agricultureFootprint = useMemo(() => {
+    if (!solverActive.length || !Object.keys(varValues).length) return 0;
+    let area = 0;
+    solverActive.forEach((recipe, idx) => {
+      if (!(recipe.module === 'main' && recipe.category === '农业')) return;
+      const varName = solverVarNames[idx];
+      const machineCount = varValues[varName] || 0;
+      area += computeRecipeArea(recipe, machineCount, buildingSizes);
+    });
+    return area;
+  }, [solverActive, varValues, solverVarNames, buildingSizes]);
+
+  // 总占地面积（始终全部累加，不受开关影响）
+  const totalFootprint = useMemo(() => {
+    if (!solverActive.length || !Object.keys(varValues).length) return 0;
+    let area = 0;
+    solverActive.forEach((recipe, idx) => {
+      const varName = solverVarNames[idx];
+      const machineCount = varValues[varName] || 0;
+      area += computeRecipeArea(recipe, machineCount, buildingSizes);
+    });
+    return area;
+  }, [solverActive, varValues, solverVarNames, buildingSizes]);
 
   const gameData = useStore(s => s.gameData);
   const edictLevels = useStore(s => s.edictLevels);
@@ -635,6 +712,7 @@ export const Results: React.FC = () => {
 
   const moduleRows = useMemo(() => {
     const rows: any[] = [];
+    const catArea = (recipes: typeof recipeData) => recipes.reduce((s, r) => s + computeRecipeArea(r.recipe, r.machineCount, buildingSizes), 0);
     for (const [name, cat] of Object.entries(categoryData.mainCategories)) {
       const prodElec = cat.prod['electricity'] || 0, consElec = cat.cons['electricity'] || 0;
       const netElectricity = prodElec - consElec;
@@ -647,7 +725,7 @@ export const Results: React.FC = () => {
       }
       const netProds = Object.entries(netMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net }));
       const netCons = Object.entries(netMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net }));
-      rows.push({ name, machineCount: cat.machineCount, actualMachineCount: (cat as any).actualMachineCount || 0, workers: cat.workers, netElectricity, computing: cat.computing, totalMaintenance, netProds, netCons });
+      rows.push({ name, machineCount: cat.machineCount, actualMachineCount: (cat as any).actualMachineCount || 0, workers: cat.workers, netElectricity, computing: cat.computing, totalMaintenance, footprint: catArea((cat as any).recipes || []), netProds, netCons });
     }
     // 电力模块
     const powerNetElec = (categoryData.power.prod['electricity'] || 0) - (categoryData.power.cons['electricity'] || 0);
@@ -661,6 +739,7 @@ export const Results: React.FC = () => {
       name: '电力模块', machineCount: categoryData.power.machineCount, actualMachineCount: categoryData.power.actualMachineCount, workers: categoryData.power.workers,
       netElectricity: powerNetElec, computing: categoryData.power.computing,
       totalMaintenance: categoryData.power.maintI + categoryData.power.maintII + categoryData.power.maintIII,
+      footprint: catArea(categoryData.power.recipes || []),
       netProds: Object.entries(powerNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(powerNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
@@ -676,6 +755,7 @@ export const Results: React.FC = () => {
       name: '贸易模块', machineCount: categoryData.trade.machineCount, actualMachineCount: categoryData.trade.actualMachineCount, workers: categoryData.trade.workers,
       netElectricity: tradeNetElec, computing: categoryData.trade.computing,
       totalMaintenance: categoryData.trade.maintI + categoryData.trade.maintII + categoryData.trade.maintIII,
+      footprint: catArea(categoryData.trade.recipes || []),
       netProds: Object.entries(tradeNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(tradeNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
@@ -691,6 +771,7 @@ export const Results: React.FC = () => {
       name: '农业模块', machineCount: categoryData.agriculture.machineCount, actualMachineCount: categoryData.agriculture.actualMachineCount, workers: categoryData.agriculture.workers,
       netElectricity: agriNetElec, computing: categoryData.agriculture.computing,
       totalMaintenance: categoryData.agriculture.maintI + categoryData.agriculture.maintII + categoryData.agriculture.maintIII,
+      footprint: catArea(categoryData.agriculture.recipes || []),
       netProds: Object.entries(agriNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(agriNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
@@ -706,11 +787,12 @@ export const Results: React.FC = () => {
       name: '特殊模块', machineCount: categoryData.special.machineCount, actualMachineCount: categoryData.special.actualMachineCount, workers: categoryData.special.workers,
       netElectricity: specialNetElec, computing: categoryData.special.computing,
       totalMaintenance: categoryData.special.maintI + categoryData.special.maintII + categoryData.special.maintIII,
+      footprint: catArea(categoryData.special.recipes || []),
       netProds: Object.entries(specialNetMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net })),
       netCons: Object.entries(specialNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
     return rows;
-  }, [categoryData]);
+  }, [categoryData, buildingSizes]);
 
   if (!result && !isSolving && !diagnostic) return null;
   const resultStatus = result?.Status ?? result?.status;
@@ -719,15 +801,20 @@ export const Results: React.FC = () => {
     <div className="results-container">
       <style>{`
         .results-container { font-size: 1.1rem; }
-        .table-wrapper { overflow-x: auto; }
-        .data-table { width: 100%; border-collapse: collapse; font-size: 1rem; }
-        .data-table th, .data-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #eee; }
-        .recipe-name-cell { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .data-table tbody tr:hover { background: #f9f9f9; }
+        .table-wrapper { overflow: visible; }
+        .split-column .data-table { table-layout: fixed; }
+        .data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        .data-table thead { position: sticky; top: 0; z-index: 1; }
+        .data-table th { padding: 4px 6px; text-align: left; border-bottom: 2px solid #ddd; background: #f5f5f5; font-weight: 600; white-space: normal; }
+        .data-table td { padding: 4px 6px; text-align: left; border-bottom: 1px solid #eee; }
+        .recipe-name-cell { max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .col-narrow { white-space: normal; }
+        .col-wide { white-space: normal; overflow-wrap: break-word; }
+        .col-wide-num { white-space: nowrap; }
         .positive-value { color: #2e7d32; font-weight: bold; }
         .negative-value { color: #c62828; font-weight: bold; }
-        .split-summary { display: flex; gap: 20px; }
-        .split-column { flex: 1; }
+        .split-summary { display: flex; gap: 12px; }
+        .split-column { flex: 1; min-width: 0; }
         .module-row { border: 1px solid #e0e0e0; border-radius: 8px; margin-bottom: 16px; background: #fff; transition: box-shadow 0.2s; }
         .module-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         .module-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px; cursor: pointer; font-size: 1rem; }
@@ -742,25 +829,33 @@ export const Results: React.FC = () => {
         .tab-bar { display: flex; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #ccc; margin-bottom: 20px; padding-bottom: 8px; }
         .tab-button { padding: 8px 16px; border: none; background: #f5f5f5; border-radius: 20px; cursor: pointer; font-size: 1rem; transition: all 0.2s; }
         .tab-button.active { background: #2563eb; color: white; }
-        .results-layout { display: flex; gap: 24px; flex-wrap: wrap; }
-        .summary-panel { flex: 2; min-width: 280px; }
-        .detail-panel { flex: 3; min-width: 400px; }
+        .results-layout { display: flex; gap: 16px; max-height: 75vh; }
+        .summary-panel { width: 320px; flex-shrink: 0; overflow-y: auto; }
+        .detail-panel { flex: 1; min-width: 400px; overflow-y: auto; }
         .hint { color: #666; font-size: 0.9rem; }
         .stat { background: #e8f0fe; padding: 10px; border-radius: 6px; margin: 10px 0; font-size: 1rem; }
         .btn { padding: 6px 12px; font-size: 1rem; }
+        .summary-name-cell { max-width: 90px; }
+        .summary-name-cell span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
       `}</style>
 
       {isSolving && <div>🔄 求解中...</div>}
       {diagnostic && <div style={{ background: '#fff3cd', padding: 8, whiteSpace: 'pre-wrap', fontSize: 13 }} dangerouslySetInnerHTML={{ __html: diagnostic }} />}
       {result && resultStatus === 'Optimal' && (
         <>
-          <div style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
             <Btn onClick={() => setShowTinyErrors(!showTinyErrors)} variant={showTinyErrors ? 'primary' : 'default'}>
               {showTinyErrors ? '🔍 隐藏微小误差' : '🔍 显示微小误差'}
             </Btn>
+            <Btn onClick={() => setShowFullStats(!showFullStats)} variant={showFullStats ? 'primary' : 'default'}>
+              {showFullStats ? '📊 隐藏完整数值' : '📊 显示完整数值'}
+            </Btn>
+            <Btn onClick={() => setUseReferenceSizes(!useReferenceSizes)} variant={useReferenceSizes ? 'primary' : 'default'}>
+              {useReferenceSizes ? '📐 参考尺寸' : '📐 理论尺寸'}
+            </Btn>
           </div>
           <div className="stat">
-            ✅ 理论总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 实际总机器数: <b>{categoryData.all.actualMachineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{formatPowerSigned((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0))}</b><br/>
+            ✅ 理论总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 实际总机器数: <b>{categoryData.all.actualMachineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{formatPowerSigned((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0))}</b> | 总占地面积: <b title={totalFootprint.toFixed(1) + ' 小格'}>{formatFootprint(totalFootprint)}</b> | 不含电力贸易农业: <b title={(totalFootprint - powerFootprint - tradeFootprint - agricultureFootprint).toFixed(1) + ' 小格'}>{formatFootprint(totalFootprint - powerFootprint - tradeFootprint - agricultureFootprint)}</b> | 电力占地: <b title={powerFootprint.toFixed(1) + ' 小格'}>{formatFootprint(powerFootprint)}</b> | 贸易占地: <b title={tradeFootprint.toFixed(1) + ' 小格'}>{formatFootprint(tradeFootprint)}</b> | 农业占地: <b title={agricultureFootprint.toFixed(1) + ' 小格'}>{formatFootprint(agricultureFootprint)}</b><br/>
             🎯 凝聚力产量: 居民 <b>{residentUnity.toFixed(2)}</b> | 空间站 <b>{stationUnity.toFixed(2)}</b>  | 总计 <b>{unityProduction.toFixed(2)}</b><br/>
             📉 凝聚力消耗: 贸易直接: <b>{cohesionTradeDirect.toFixed(2)}</b> | 贸易维持: <b>{cohesionTradeMaintenance.toFixed(2)}</b> | 法令: <b>{cohesionEdict.toFixed(2)}</b> | 研究: <b>{labCohesionTotal.toFixed(2)}</b> | 总计: <b>{(cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal).toFixed(2)}</b><br/>
             净凝聚力: <b>{(unityProduction - (cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal)).toFixed(2)}</b>
@@ -1018,7 +1113,7 @@ export const Results: React.FC = () => {
                 <>
                   <h4>{t('配方列表', translation)}</h4>
                   {currentData && currentData.recipes && currentData.recipes.length > 0 ? (
-                    <RecipeList recipes={currentData.recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} />
+                    <RecipeList recipes={currentData.recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} buildingSizes={buildingSizes} showFullStats={showFullStats} />
                   ) : <div className="hint">{t('无配方数据', translation)}</div>}
                 </>
               )}
@@ -1061,6 +1156,15 @@ export const Results: React.FC = () => {
                       </div>
                       <div style={{ fontSize: 13, color: '#555' }}>
                         {showCeilMachines ? m.count.toFixed(0) : m.count.toFixed(2)} 台
+                      </div>
+                      <div style={{ fontSize: 11, color: '#888' }}>
+                        占地: {(() => {
+                          const key = m.buildingName?.toLowerCase?.() || '';
+                          const size = buildingSizes[key];
+                          if (!size) return '—';
+                          const area = size.width * size.height * m.count;
+                          return <span title={area.toFixed(1) + ' 小格'}>{formatFootprint(area)}</span>;
+                        })()}
                       </div>
                     </div>
                   </div>

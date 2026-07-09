@@ -130,6 +130,9 @@ export interface Recipe {
   tradeUnityPer100?: number;
   tradeUnityDirect?: number;          // 贸易直接消耗（每分钟）
   tradeUnityMaintenance?: number;     // 贸易维持消耗（每分钟）
+  _tradeDockName?: string;    // 贸易码头显示名称（用于占地面积查找）
+  _tradeModuleName?: string;  // 贸易模块显示名称（用于占地面积查找）
+  _tradeBaySlots?: number;    // 贸易码头舱位数（用于计算模块总占地面积）
 }
 
 export interface LabMeta {
@@ -251,6 +254,11 @@ export interface StoreState {
 
   optimizationMode: 'machines' | 'labor' | 'cohesion' | 'area' | 'raw' | 'custom';
   customWeights: { machines: number; labor: number; cohesion: number; area: number; raw: number };
+  buildingSizes: Record<string, { width: number; height: number }>;
+  buildingSizesRaw: { theoretical: Record<string, { width: number; height: number }>; reference: Record<string, { width: number; height: number }> };
+  useReferenceSizes: boolean;  // 是否使用参考尺寸（配套占地）
+  excludePowerFootprint: boolean;  // 电力模块不计入占地面积
+  excludeTradeFootprint: boolean;   // 贸易模块不计入占地面积
 
   // 新增字段
   integerMode: IntegerMode;
@@ -347,6 +355,11 @@ export interface StoreState {
   setSolarEfficiency: (value: number) => void;
   setOptimizationMode: (mode: StoreState['optimizationMode']) => void;
   setCustomWeights: (weights: Partial<StoreState['customWeights']>) => void;
+  setBuildingSizes: (sizes: Record<string, { width: number; height: number }>) => void;
+  setBuildingSizesRaw: (raw: { theoretical: Record<string, { width: number; height: number }>; reference: Record<string, { width: number; height: number }> }) => void;
+  setUseReferenceSizes: (v: boolean) => void;
+  setExcludePowerFootprint: (v: boolean) => void;
+  setExcludeTradeFootprint: (v: boolean) => void;
   setExcludedOutputs: (items: string[]) => void;
   setExcludedInputs: (items: string[]) => void;
   setExcludedItems: (items: string[]) => void;

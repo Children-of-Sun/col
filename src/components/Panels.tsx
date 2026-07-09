@@ -35,6 +35,8 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
   const setSteamLowMode = useStore(s => s.setSteamLowMode);
   const solarEfficiency = useStore(s => s.solarEfficiency);
   const setSolarEfficiency = useStore(s => s.setSolarEfficiency);
+  const excludePowerFootprint = useStore(s => s.excludePowerFootprint);
+  const setExcludePowerFootprint = useStore(s => s.setExcludePowerFootprint);
 
   return (
     <div className="section">
@@ -85,6 +87,14 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
            />
            <span style={{ marginLeft: 8 }}>{Math.round(solarEfficiency * 100)}%</span>
             <span className="hint" style={{ marginLeft: 8 }}>{t('（仅影响太阳能面板输出）', translation)}</span>
+      </div>
+      <div style={{ marginTop: 8, borderTop: '1px solid #ddd', paddingTop: 8 }}>
+        <label>
+          <input type="checkbox" checked={excludePowerFootprint}
+            onChange={e => setExcludePowerFootprint(e.target.checked)} />
+          {' '}不计入占地面积
+        </label>
+        <span className="hint" style={{ marginLeft: 8 }}>{t('（勾选后电力建筑占地按0计算）', translation)}</span>
       </div>
     </div>
   );

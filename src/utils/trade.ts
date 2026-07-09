@@ -80,7 +80,7 @@ function getDockAndModuleConsumption(slots: number, moduleSize: string, totalMod
   else if (moduleMaintUnit === 'maintenance ii') maintII += moduleMaintQty * totalModules;
   else if (moduleMaintUnit === 'maintenance iii') maintIII += moduleMaintQty * totalModules;
 
-  return { workers, electricity, maintI, maintII, maintIII };
+  return { workers, electricity, maintI, maintII, maintIII, dockName: dockBuilding?.name || '', moduleName: moduleBuilding?.name || '' };
 }
 
 // 统一的贸易配方生成函数
@@ -155,7 +155,7 @@ export function buildTradeRecipe(params: {
   const totalTime = actualTravelTime + loadTime;
   const totalModules = m + n;
 
-  const { workers, electricity, maintI, maintII, maintIII } = getDockAndModuleConsumption(baySlots, moduleSize, totalModules, gameData, fullData);
+  const { workers, electricity, maintI, maintII, maintIII, dockName, moduleName } = getDockAndModuleConsumption(baySlots, moduleSize, totalModules, gameData, fullData);
 
   const perMinBuy = buy / totalTime;
   const perMinSell = sell / totalTime;
@@ -171,7 +171,10 @@ const perMinMaintIII = maintIII;
 
   const recipe: Recipe = {
     id: `trade_${contract.id}`,
-    name: `贸易: ${t(contract.name || contract.id, translation)}`,
+    name: (() => {
+      const rawName = t(contract.name || contract.id, translation);
+      return rawName.replace(/^合同[。，,\s]*/, '');
+    })(),
     buildingId: 'trade',
     buildingName: t('贸易码头', translation),
     category: '贸易',
@@ -200,6 +203,9 @@ const perMinMaintIII = maintIII;
     tradeUnityPer100: contract.unity_per_100_bought || 0,
     tradeUnityDirect: perMinUnityDirect,
     tradeUnityMaintenance: perMinUnityMaintenance,
+    _tradeDockName: dockName,
+    _tradeModuleName: moduleName,
+    _tradeBaySlots: baySlots,
   };
 
   const displayData = {

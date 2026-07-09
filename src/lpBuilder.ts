@@ -38,6 +38,9 @@ export interface LpInput {
   globalLower?: number;
   globalUpper?: number;
   redundancyResources?: Record<string, RedundancyResource>;
+  buildingSizes?: Record<string, { width: number; height: number }>;
+  excludePowerFootprint?: boolean;
+  excludeTradeFootprint?: boolean;
 }
 
 export interface LpOutput {
@@ -61,6 +64,9 @@ export function buildLp(input: LpInput): LpOutput {
     globalUpper = 100,
     redundancyResources = {},
     recipeIntegerEnabled = {},
+    buildingSizes = {} as Record<string, { width: number; height: number }>,
+    excludePowerFootprint = false,
+    excludeTradeFootprint = false,
   } = input;
   
   const isAllowExternal = allowExternal ?? false;
@@ -102,7 +108,29 @@ export function buildLp(input: LpInput): LpOutput {
           coeff = (buyRate / 100) * unityPer100;
         }
       } else if (target === 'area') {
-        coeff = 1;
+        // 电力模块不计入占地 → 系数=0
+        if (excludePowerFootprint && recipe.module === 'power') {
+          coeff = 0;
+        } else if (recipe.module === 'trade') {
+          // 贸易不计入占地 → 系数=0
+          if (excludeTradeFootprint) {
+            coeff = 0;
+          } else {
+            // 贸易占地 = 码头 + 模块
+            let area = 0;
+            const dockKey = (recipe._tradeDockName || '').toLowerCase();
+            const modKey = (recipe._tradeModuleName || '').toLowerCase();
+            const dockSize = buildingSizes[dockKey];
+            const modSize = buildingSizes[modKey];
+            if (dockSize) area += dockSize.width * dockSize.height;
+            if (modSize) area += modSize.width * modSize.height;
+            coeff = area || 1;
+          }
+        } else {
+          const key = recipe.buildingName?.toLowerCase?.() || '';
+          const size = buildingSizes[key];
+          coeff = size ? size.width * size.height : 1;
+        }
       } else if (target === 'raw') {
         for (const [item, qty] of Object.entries(recipe.inputs)) {
           if (isRaw(item)) {
@@ -124,14 +152,12 @@ export function buildLp(input: LpInput): LpOutput {
     const targets = ['machines', 'labor', 'cohesion', 'area', 'raw'];
     const weights = [customWeights.machines, customWeights.labor, customWeights.cohesion, customWeights.area, customWeights.raw];
     const totalCoeffs: number[] = new Array(varNames.length).fill(0);
-    let idx = 0;
     for (let t = 0; t < targets.length; t++) {
       if (weights[t] === 0) continue;
       const coeffs = computeTargetCoeffs(targets[t]);
       for (let i = 0; i < coeffs.length; i++) {
-        totalCoeffs[idx + i] += weights[t] * coeffs[i];
+        totalCoeffs[i] += weights[t] * coeffs[i];
       }
-      idx += coeffs.length;
     }
     const terms: string[] = [];
     for (let i = 0; i < varNames.length; i++) {
@@ -738,7 +764,12 @@ export function buildLp(input: LpInput): LpOutput {
 
   // 居民模块最小比例（r0 >= minResidentValue）
   if (minResidentValue !== undefined && residentVarNames.length > 0) {
-    lp += ` c_res_min: ${residentVarNames[0]} >= ${minResidentValue}\n`;
+    if (ignored.has('人力')) {
+      // 忽略人力时固定居民模块 = pop/1000，防止浮动
+      lp += ` c_res_fix: ${residentVarNames[0]} = ${minResidentValue}\n`;
+    } else {
+      lp += ` c_res_min: ${residentVarNames[0]} >= ${minResidentValue}\n`;
+    }
   }
 
   // 添加整数声明（仅在 milp 模式下）
