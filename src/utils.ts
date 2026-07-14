@@ -1,4 +1,6 @@
 // src/utils.ts
+const DEBUG = typeof window !== 'undefined' && window.localStorage?.getItem('factoryDebug') === 'true';
+
 const RAW_ITEMS = new Set([
   "limestone","wood","rock","quartz","coal","sand","sulfur","salt","stone",
   "iron ore","copper ore","uranium ore","gold ore","bauxite","titanium ore",
@@ -56,6 +58,7 @@ export function getMaintenanceReduction(count: number): number {
   if (count >= 3) total += 0.01;
   let addition = 0.005;
   for (let i = 4; i <= count; i++) { total += addition; addition /= 2; }
+  // 几何级数收敛于 0.08，Math.min(total, 1) 理论上不可达，保留作为安全上限
   return Math.min(total, 1);
 }
 
@@ -82,18 +85,7 @@ export function getSeriesName(
          powerSeriesList.find(s => s.levels.some(lv => lv.buildingId === buildingId))?.name || '';
 }
 
-export const POWER_OUTPUT_ITEMS = new Set([
-  'exhaust',
-  'air pollution',
-  'carbon dioxide',
-  'steam (depleted)',
-  'spent fuel',
-  'spent mox',
-  'core fuel (spent)',
-  'blanket fuel (enriched)'
-]);
-
-import { GameData, Edict, Office, Research, Recipe, TradeContract } from './types';
+import { GameData, Edict, Office, Research, Recipe, TradeContract, SolverResult } from './types';
 
 export function getRecycleRate(
   base: number,
@@ -132,7 +124,7 @@ export function calcResidentDemands(
   stationLevel: number = 0,
   medicalMultiplier: number = 1
 ) {
-  const factor = pop / data.populationScale;
+  const factor = data.populationScale > 0 ? pop / data.populationScale : 0;
   const housing = data.housingTiers[housingIdx] || { multipliers: {}, unityMultiplierConditions: [] };
 
   let catMods: Record<string, number> = {};
@@ -154,7 +146,10 @@ export function calcResidentDemands(
       if (e.targetCategory && e.targetCategory !== 'none' && !e.itemEffect) {
         // 农业提振不应影响居民食物消耗
         if (e.name !== '农业提振') {
-          catMods[e.targetCategory] = (catMods[e.targetCategory] || 1) * (1 - eff);
+          const cats = Array.isArray(e.targetCategory) ? e.targetCategory : [e.targetCategory];
+          for (const cat of cats) {
+            catMods[cat] = (catMods[cat] || 1) * (1 - eff);
+          }
         }
       }
       if (e.itemEffect) {
@@ -231,24 +226,28 @@ export function calcResidentDemands(
   let foodUnity = 0;
   let nonFoodUnity = 0;
 
-  console.log('catMods:', catMods);
-  console.log('itemMods:', itemMods);
+  if (DEBUG) {
+  if (DEBUG) {
+    console.log('catMods:', catMods);
+    console.log('itemMods:', itemMods);
+  }
+  }
   if (numActiveGroups > 0) {
     for (const [grp, enabledList] of Object.entries(activeGroups)) {
       const numFoodsInThisGroup = enabledList.length;
       for (const name of enabledList) {
         const svc = data.services[name];
         let demand = svc.demand * factor;
-        console.log(`[食物] ${name}: 基础需求=${svc.demand}, factor=${factor}, 初步demand=${demand}`);
+        if (DEBUG) console.log(`[食物] ${name}: 基础需求=${svc.demand}, factor=${factor}, 初步demand=${demand}`);
         if (housing.multipliers[name]) demand *= housing.multipliers[name];
         let mod = catMods['food'] || 1;
         const itemKey = name.toLowerCase();
         if (itemMods[itemKey]) mod *= itemMods[itemKey];
-        console.log(`  mod=${mod}, 乘后demand=${demand}`);
+        if (DEBUG) console.log(`  mod=${mod}, 乘后demand=${demand}`);
         demand = demand / (numActiveGroups * numFoodsInThisGroup);
-        console.log(`  除以组数: numActiveGroups=${numActiveGroups}, numFoods=${numFoodsInThisGroup}, 结果=${demand}`);
+        if (DEBUG) console.log(`  除以组数: numActiveGroups=${numActiveGroups}, numFoods=${numFoodsInThisGroup}, 结果=${demand}`);
         demand *= mod;
-        console.log(`  最终需求=${demand}`);
+        if (DEBUG) console.log(`  最终需求=${demand}`);
         demands.push({ item: itemKey, rate: demand });
         const unityMult = itemUnityMods[itemKey] || 1;
         foodUnity += svc.unity * unityMult;
@@ -373,12 +372,12 @@ export function calcResidentWaste(
     if (!svc) continue;  // 找不到服务则跳过（可能是科技物品如 research 等）
 
     if (svc.waste) {
-      svc.waste.forEach((coeff, idx) => {
+      svc.waste.forEach((coeff: number, idx: number) => {
         wasteArr[idx] += d.rate * coeff;
       });
     }
     if (svc.extraWaste) {
-      for (const [item, coeff] of Object.entries(svc.extraWaste)) {
+      for (const [item, coeff] of Object.entries(svc.extraWaste) as [string, number][]) {
         extraWasteMap[item] = (extraWasteMap[item] || 0) + d.rate * coeff;
       }
     }
@@ -419,95 +418,46 @@ export function getMaintenanceWasteMap(data: GameData) {
   return map;
 }
 
-export function isMaintenanceRecyclingRecipe(recipe: Recipe): boolean {
-  return recipe.id.includes('Maintenance') && recipe.id.includes('Recycling');
-}
-
-export function isConsumptionWasteItem(item: string): boolean {
-  const items = [
-    'office supplies',
-    'retired waste',
-    'lab equipment',
-    'lab equipment ii',
-    'lab equipment iii',
-    'lab equipment iv'
-  ];
-  return items.includes(item.toLowerCase());
-}
-
 // 新增：判断贸易合同是否用于获取原矿
 export function isOreContract(contract: TradeContract): boolean {
   return isRaw(contract.buyItem);
 }
 
-// ========== 贸易隐含成本计算（仅用于凝聚力模式） ==========
+// ========== 共享工具函数 ==========
 
-/**
- * 物品隐含凝聚力成本计算（从原矿到该物品的最小贸易凝聚力消耗）
- * 原理：只有贸易消耗凝聚力，生产不消耗。通过迭代计算每个物品的"隐含成本"，
- * 代表获得 1 单位该物品所需的最小贸易凝聚力（通过最优贸易链）。
- *
- * 原矿成本 = 0（可无限开采，不消耗凝聚力）
- * 对于每个贸易配方（卖出 A，买入 B）：cost_B = min(cost_B, (cost_A * 用量_A + 直接凝聚力) / 获得量_B)
- */
-export function computeImplicitCosts(
-  tradeRecipes: Recipe[],
-  maxIter: number = 20
-): Map<string, number> {
-  const cost = new Map<string, number>();
+/** MIP 求解器可能返回的"有解"状态 */
+export const MIP_SUCCESS = new Set(['Optimal', 'Feasible', 'NodeLimit', 'TimeLimit', 'SolutionLimit']);
 
-  // 原矿集合（可无限开采，成本为0）
-  const oreItems = new Set([
-    'iron ore', 'copper ore', 'limestone', 'coal', 'sand', 'rock', 'quartz',
-    'sulfur', 'salt', 'stone', 'bauxite', 'titanium ore', 'gold ore',
-    'water', 'seawater', 'air', 'crude oil', 'wood', 'imported goods'
-  ]);
-  for (const item of oreItems) cost.set(item, 0);
-
-  // 迭代更新成本（从原矿向上游传递）
-  let changed = true;
-  for (let iter = 0; iter < maxIter && changed; iter++) {
-    changed = false;
-    for (const recipe of tradeRecipes) {
-      if (recipe.module !== 'trade') continue;
-      // 卖出品（input）是支付的高阶产品，买入品（output）是获得的原矿或中间产品
-      const sellItem = Object.keys(recipe.inputs)[0];
-      const sellRate = recipe.inputs[sellItem];
-      const buyItem = Object.keys(recipe.outputs)[0];
-      const buyRate = recipe.outputs[buyItem];
-      const direct = recipe.upkeep['凝聚力'] || 0;
-
-      const buyCost = cost.get(buyItem);
-      if (buyCost === undefined) continue;
-
-      // 计算卖出品的成本：获得买入品所需的凝聚力 = 卖出品成本 * 卖出量 + 直接凝聚力
-      // 因此卖出品成本 = (买入品成本 * 买入量 - 直接凝聚力) / 卖出量
-      // 注意：如果直接凝聚力过大可能导致负数，但取最大值0
-      const newSellCost = Math.max(0, (buyCost * buyRate - direct) / sellRate);
-      const oldSellCost = cost.get(sellItem);
-      if (oldSellCost === undefined || newSellCost < oldSellCost - 1e-6) {
-        cost.set(sellItem, newSellCost);
-        changed = true;
-      }
-    }
-  }
-  return cost;
+/** 判断求解状态是否为成功（有可行解） */
+export function isMipSuccess(status: string | undefined): boolean {
+  return !!status && MIP_SUCCESS.has(status);
 }
 
-/**
- * 计算贸易配方的净凝聚力消耗（每分钟）
- * 净成本 = 卖出品成本 * 卖出速率 - 买入品成本 * 买入速率 + 直接凝聚力
- */
-export function getAdjustedCohesion(recipe: Recipe, costs: Map<string, number>): number {
-  const sellItem = Object.keys(recipe.inputs)[0];
-  const sellRate = recipe.inputs[sellItem];
-  const buyItem = Object.keys(recipe.outputs)[0];
-  const buyRate = recipe.outputs[buyItem];
-  const direct = recipe.upkeep['凝聚力'] || 0;
-  const sellCost = costs.get(sellItem);
-  const buyCost = costs.get(buyItem);
-  if (sellCost === undefined || buyCost === undefined) {
-    return direct; // 回退到直接凝聚力
-  }
-  return (sellCost * sellRate) - (buyCost * buyRate) + direct;
+/** 从求解结果中安全提取列值（兼容 Columns/columns, Primal/primal） */
+export function getColValue(result: SolverResult | null | undefined, varName: string): number {
+  if (!result) return 0;
+  const cols = result.Columns || result.columns;
+  if (!cols) return 0;
+  const col = cols[varName];
+  if (!col) return 0;
+  return (col as any).Primal ?? (col as any).primal ?? 0;
+}
+
+/** 合并所有活跃配方数组 */
+export function getAllActive(recipeBuild: {
+  mainActive: Recipe[];
+  powerActive: Recipe[];
+  residentActive: Recipe[];
+  stationActive: Recipe[];
+  specialActive: Recipe[];
+  tradeActive: Recipe[];
+}): Recipe[] {
+  return [
+    ...recipeBuild.mainActive,
+    ...recipeBuild.powerActive,
+    ...recipeBuild.residentActive,
+    ...recipeBuild.stationActive,
+    ...recipeBuild.specialActive,
+    ...recipeBuild.tradeActive,
+  ];
 }

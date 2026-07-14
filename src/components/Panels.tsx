@@ -1,7 +1,7 @@
 import React from 'react';
 import { useStore } from '../stores';
-import { Btn, Checkbox, Select, ModalShell, SearchInput } from './UI';
-import { t, isPowerBuilding, HIDDEN_SERIES, ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getMaintenanceReduction, getSeriesName } from '../utils';
+import { Btn, Select } from './UI';
+import { t, ROCKET_BASE, STATION_PARTS_RATE, CREW_SUPPLIES_RATE, SPACE_CARGO_ITEMS, getMaintenanceReduction, getSeriesName } from '../utils';
 import { Recipe, Series } from '../types';
 export const MainLevelPanel: React.FC<{ onOpenLevelModal: () => void; onOpenRecipeModal: () => void }> = ({ onOpenLevelModal, onOpenRecipeModal }) => {
   const mainSeriesList = useStore(s => s.mainSeriesList);
@@ -114,7 +114,7 @@ export const SpaceStationPanel: React.FC = () => {
   const gameData = useStore(s => s.gameData);
   const researchLevels = useStore(s => s.researchLevels);
   const rocketCargoResearch = gameData?.research.find(r => r.name === '火箭载荷量');
-  const rocketCargoLevel = rocketCargoResearch ? (researchLevels[gameData.research.indexOf(rocketCargoResearch)] || 0) : 0;
+  const rocketCargoLevel = rocketCargoResearch ? (researchLevels[gameData!.research.indexOf(rocketCargoResearch)] || 0) : 0;
   const cargoBonus = 1 + rocketCargoLevel * 0.05;
   const rocket = ROCKET_BASE[rocketType];
   const crewCap = rocket.crewBase + (rocket.crewMax - rocket.crewBase) * (cargoBonus - 1);
@@ -157,8 +157,10 @@ export const StatuePanel: React.FC = () => {
   const statueCount = useStore(s => s.statueCount);
   const setStatueCount = useStore(s => s.setStatueCount);
   const dataLoaded = useStore(s => s.dataLoaded);
+  const gameData = useStore(s => s.gameData);
   const fullData = useStore(s => s.fullData);
-  const statueBuilding = fullData?.machines_and_buildings?.find((b: any) => b.name === 'The Statue of Maintenance');
+  const buildingsSource = gameData?.machines_and_buildings || fullData?.machines_and_buildings;
+  const statueBuilding = buildingsSource?.find((b: any) => b.name === 'The Statue of Maintenance');
   const maintUnit = statueBuilding?.maintenance_cost_units || '';
   const maintQty = statueBuilding?.maintenance_cost_quantity || 0;
   const electricity = statueBuilding?.electricity_consumed || 0;
@@ -197,7 +199,7 @@ export const DemandPanel: React.FC<{ onOpenDemandModal: () => void }> = ({ onOpe
     <div className="section">
       <h3>🎯 生产目标</h3>
       <Btn onClick={onOpenDemandModal} disabled={!dataLoaded}>🎯 选择产品</Btn>
-      <ul>{demands.map((d, i) => <li key={i}>{t(d.item, translation)} ({d.item}): {d.rate}/分 <Btn variant="danger" onClick={() => removeDemand(i)}>🗑️</Btn></li>)}</ul>
+      <ul>{demands.map((d, i) => <li key={`${d.item}_${d.rate}_${i}`}>{t(d.item, translation)} ({d.item}): {d.rate}/分 <Btn variant="danger" onClick={() => removeDemand(i)}>🗑️</Btn></li>)}</ul>
     </div>
   );
 };

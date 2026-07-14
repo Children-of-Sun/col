@@ -1,7 +1,7 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { useStore } from '../stores';
 import { t } from '../utils';
-import { Btn, Select, ModalShell } from './UI';
+import { Btn, ModalShell } from './UI';
 
 export const LabPanel: React.FC = () => {
   const labLevel = useStore(s => s.labLevel);
@@ -48,14 +48,15 @@ export const LabPanel: React.FC = () => {
     baseOutput = equipmentConsumption; // 每消耗1设备产出1研究
   }
 
-  // 计算总加成倍率
-  const getTotalMultiplier = () => {
+  // 计算总加成倍率（memoized）
+  const { totalMultiplier, popBonusPercent, edictBonusPercent, officeBonusPercent, stationBonusPercent } = React.useMemo(() => {
     let mult = 1;
 
     // 人口加成
     mult *= (1 + population * 0.00005);
 
-    // 法令“研究效率”
+    // 法令”研究效率”
+    let edictPct = 0;
     if (gameData) {
       const edict = gameData.edicts.find(e => e.name === '研究效率');
       if (edict) {
@@ -63,19 +64,21 @@ export const LabPanel: React.FC = () => {
         const lvl = edictLevels[idx] ?? -1;
         if (lvl >= 0) {
           mult *= (1 + (edict.effectPerLevel[lvl] || 0));
+          edictPct = (edict.effectPerLevel[lvl] || 0) * 100;
         }
       }
     }
 
-    // 办公“研究效率”
+    // 办公”研究效率”
+    let officePct = 0;
     if (gameData) {
       const office = gameData.office.find(o => o.name === '研究效率');
       if (office) {
         const idx = gameData.office.indexOf(office);
         const lvl = officeLevels[idx] || 0;
         if (lvl > 0) {
-          // 注意：effectPerLevel 可能为每级增量，首级需要特殊处理，这里假设 effectPerLevel 已是每级实际效果（含首级）
           mult *= (1 + (office.effectPerLevel || 0) * lvl);
+          officePct = ((office.effectPerLevel || 0) * lvl) * 100;
         }
       }
     }
@@ -83,33 +86,16 @@ export const LabPanel: React.FC = () => {
     // 空间站等级
     mult *= (1 + stationLevel * 0.05);
 
-    return mult;
-  };
+    return {
+      totalMultiplier: mult,
+      popBonusPercent: population * 0.005,
+      edictBonusPercent: edictPct,
+      officeBonusPercent: officePct,
+      stationBonusPercent: stationLevel * 5,
+    };
+  }, [population, gameData, edictLevels, officeLevels, stationLevel]);
 
-  const totalMultiplier = getTotalMultiplier();
   const finalOutput = baseOutput * totalMultiplier;
-
-  // 明细数据（用于显示）
-  const popBonusPercent = population * 0.005;
-  let edictBonusPercent = 0;
-  if (gameData) {
-    const edict = gameData.edicts.find(e => e.name === '研究效率');
-    if (edict) {
-      const idx = gameData.edicts.indexOf(edict);
-      const lvl = edictLevels[idx] ?? -1;
-      if (lvl >= 0) edictBonusPercent = (edict.effectPerLevel[lvl] || 0) * 100;
-    }
-  }
-  let officeBonusPercent = 0;
-  if (gameData) {
-    const office = gameData.office.find(o => o.name === '研究效率');
-    if (office) {
-      const idx = gameData.office.indexOf(office);
-      const lvl = officeLevels[idx] || 0;
-      if (lvl > 0) officeBonusPercent = ((office.effectPerLevel || 0) * lvl) * 100;
-    }
-  }
-  const stationBonusPercent = stationLevel * 5;
 
   return (
     <div className="section">

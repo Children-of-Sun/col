@@ -6,6 +6,8 @@ import { t } from '../utils';
 const evalCost = (formula: string | undefined, x: number): number | null => {
   if (!formula) return null;
   try {
+    // 仅允许数字、运算符、括号、空格和变量 x
+    if (!/^[\d\s+\-*/().x^]+$/.test(formula)) return null;
     // 将数学公式中的 ^ (幂运算) 替换为 JS 的 ** 运算符
     const jsFormula = formula.replace(/\^/g, '**');
     const fn = new Function('x', `return ${jsFormula}`);
@@ -31,24 +33,27 @@ const TechPanel: React.FC = () => {
 
   if (!gameData) return null;
 
-  let grandTotal = 0;
-  const items = gameData.research.map((res, idx) => {
-    const lvl = researchLevels[idx] || 0;
-    const nextCost = lvl < res.maxLevel ? evalCost(res.costFormula, lvl) : null;
-    let totalCost = 0;
-    for (let i = 0; i < lvl; i++) {
-      const c = evalCost(res.costFormula, i);
-      if (c !== null) totalCost += c;
-    }
-    grandTotal += totalCost;
-    return { res, idx, lvl, nextCost, totalCost };
-  });
+  const { items, grandTotal } = React.useMemo(() => {
+    let total = 0;
+    const list = gameData.research.map((res, idx) => {
+      const lvl = researchLevels[idx] || 0;
+      const nextCost = lvl < res.maxLevel ? evalCost(res.costFormula, lvl) : null;
+      let totalCost = 0;
+      for (let i = 0; i < lvl; i++) {
+        const c = evalCost(res.costFormula, i);
+        if (c !== null) totalCost += c;
+      }
+      total += totalCost;
+      return { res, idx, lvl, nextCost, totalCost };
+    });
+    return { items: list, grandTotal: total };
+  }, [gameData, researchLevels]);
 
   return (
     <div>
       <h4>🔬 {t('研究', translation)}</h4>
       {items.map(({ res, idx, lvl, nextCost, totalCost }) => (
-        <div key={idx} style={{ marginBottom: 5 }}>
+        <div key={res.name} style={{ marginBottom: 5 }}>
           <label>{res.name} ({t('最高', translation)} {res.maxLevel}): </label>
           <input
             type="number"

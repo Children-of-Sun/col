@@ -113,12 +113,11 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
       }
     }
 
-    s.setIntegerMode(newMode as any);
+    s.setIntegerMode(newMode as 'continuous' | 'ceil' | 'rounding' | 'milp');
   };
 
   const showIcons = useStore(s => s.showIcons);
   const setShowIcons = useStore(s => s.setShowIcons);
-  const productCategories = useStore(s => s.productCategories);
 
   const [outputModalOpen, setOutputModalOpen] = useState(false);
   const [inputModalOpen, setInputModalOpen] = useState(false);
@@ -193,7 +192,7 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
 
       <div style={{ marginBottom: 8 }}>
         <label>🎯 优化模式: </label>
-        <select value={optimizationMode} onChange={e => setOptimizationMode(e.target.value as any)} className="optimization-select">
+        <select value={optimizationMode} onChange={e => setOptimizationMode(e.target.value as 'machines' | 'labor' | 'cohesion' | 'area' | 'raw' | 'custom')} className="optimization-select">
           <option value="machines">最小化机器数量</option>
           <option value="labor">最小化人力</option>
           <option value="cohesion">最大化凝聚力</option>

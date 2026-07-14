@@ -42,6 +42,37 @@ export const Select: React.FC<SelectProps> = ({ value, options, onChange, style 
   </select>
 );
 
+interface ToggleSwitchProps {
+  checked: boolean;
+  onChange: () => void;
+  disabled?: boolean;
+  size?: 'small' | 'medium';
+}
+export const ToggleSwitch: React.FC<ToggleSwitchProps> = ({ checked, onChange, disabled = false, size = 'small' }) => {
+  const w = size === 'medium' ? 40 : 36;
+  const h = size === 'medium' ? 22 : 20;
+  const knobSize = size === 'medium' ? 18 : 16;
+  const offset = checked ? w - knobSize - 2 : 2;
+  return (
+    <span
+      onClick={disabled ? undefined : onChange}
+      title={checked ? '开' : '关'}
+      style={{
+        display: 'inline-block', width: w, height: h, borderRadius: h / 2,
+        background: checked ? '#4caf50' : '#ccc', position: 'relative',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1, transition: 'background 0.2s',
+      }}
+    >
+      <span style={{
+        position: 'absolute', top: 2, left: offset,
+        width: knobSize, height: knobSize, borderRadius: '50%', background: '#fff',
+        transition: 'left 0.2s', boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
+      }} />
+    </span>
+  );
+};
+
 interface SearchInputProps {
   placeholder?: string;
   value: string;

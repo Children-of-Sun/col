@@ -13,12 +13,11 @@ import OfficePanel from './components/OfficePanel';
 import { TradePanel } from './components/TradePanel';
 import { AgriculturePanel } from './components/AgriculturePanel';
 import { buildLp } from './lpBuilder';
-import { t } from './utils';
+import { t, isMipSuccess, getColValue, getAllActive } from './utils';
 import { isContinuous } from './utils/format';
 import { buildActiveRecipes } from './buildActiveRecipes';
 import { Demand, Recipe } from './types';
 import './App.css';
-console.log('OptionsPanel imported:', OptionsPanel);
 
 const DEBUG = (() => {
   if (typeof window !== 'undefined') {
@@ -29,7 +28,6 @@ const DEBUG = (() => {
 
 declare global {
   interface Window {
-    __hasAutoLoadedSettings?: boolean;
     __store: any;
     solveLp?: (lpString: string, varNames: string[]) => Promise<any>;
   }
@@ -75,111 +73,111 @@ export default function App() {
     window.solveLp = solveLp;
     
     (async () => {
-      try {
-        const resp = await fetch('./data.json');
-        if (resp.ok) {
-          const json = await resp.json();
-          loadData(json);
-          // 构建建筑图标映射
-          const buildingIcons: Record<string, string> = {};
-          for (const b of json.machines_and_buildings) {
-            if (b.icon_path) {
-              let fileName = b.icon_path.split('/').pop() || '';
-              fileName = fileName.replace(/\.svg$/i, '.png');
-              buildingIcons[b.id] = `icons/buildings/${fileName}`;
-            }
-          }
-          useStore.getState().setBuildingIcons(buildingIcons);
-        }
-      } catch (e) { /* ignore */ }
-      try {
-        const resp = await fetch('./zh_en.json');
-        if (resp.ok) loadTranslation(await resp.json());
-      } catch (e) { /* ignore */ }
-      try {
-        const resp = await fetch('./factory_settings.json');
-        if (resp.ok) importSettings(await resp.json());
-      } catch (e) { /* ignore */ }
-      try {
-        const resp = await fetch('./GameData.json');
-        if (resp.ok) useStore.getState().setGameData(await resp.json());
-      } catch (e) { /* ignore */ }
-      try {
-        const resp = await fetch('./contracts.json');
-        if (resp.ok) {
-          const contractsData = await resp.json();
-          const contracts = contractsData.contracts.map((c: any) => ({
-            id: c.id,
-            name: c.name || c.id,
-            buyItem: c.product_to_buy_name.toLowerCase(),
-            sellItem: c.product_to_pay_with_name.toLowerCase(),
-            buyRate: c.product_to_buy_quantity,
-            sellRate: c.product_to_pay_with_quantity,
-            unity_per_100_bought: c.unity_per_100_bought,
-            unity_per_month: c.unity_per_month,
-            min_reputation_required: c.min_reputation_required,
-          }));
-          setTradeContracts(contracts);
-        }
-      } catch (e) { /* ignore */ }
-      try {
-        const resp = await fetch('./building_sizes.json');
-        if (resp.ok) {
-          const json = await resp.json();
-          const theoretical: Record<string, { width: number; height: number }> = {};
-          const reference: Record<string, { width: number; height: number }> = {};
-          for (const entry of json) {
-            const key = entry.id.toLowerCase();
-            theoretical[key] = { width: entry.width, height: entry.height };
-            reference[key] = {
-              width: entry.refWidth ?? entry.width,
-              height: entry.refHeight ?? entry.height,
-            };
-          }
-          useStore.getState().setBuildingSizesRaw({ theoretical, reference });
-          useStore.getState().setBuildingSizes(theoretical);
-        }
-      } catch (e) { /* ignore */ }
-      try {
-        const resp = await fetch('./products.json');
-        if (resp.ok) {
-          const productsData = await resp.json();
-          const productIcons: Record<string, string> = {};
-          const productCategories: Record<string, string> = {};
-
-          for (const p of productsData.products) {
-            const nameLower = p.name.toLowerCase();
-            // 分类
-            productCategories[nameLower] = p.type || 'Other';
-
-            if (p.icon_path) {
-              let fileName = p.icon_path.split('/').pop() || '';
-              fileName = fileName.replace(/\.svg$/i, '.png');
-              productIcons[nameLower] = `icons/products/${fileName}`;
-            }
-          }
-          useStore.getState().setProductIcons(productIcons);
-          useStore.getState().setProductCategories(productCategories);
-          console.log('产品图标映射加载完成，共', Object.keys(productIcons).length, '个');
-        }
-      } catch (e) { console.error('加载 products.json 失败', e); }
-      if (!window.__hasAutoLoadedSettings && localStorage.getItem('factorySettings')) {
+      // 辅助：安全 fetch JSON（失败静默返回 null）
+      const safeFetch = async (url: string): Promise<any> => {
         try {
-          const s = JSON.parse(localStorage.getItem('factorySettings')!);
-          useStore.getState().importSettings(s);
-          const state = useStore.getState();
-          const labBuildings = state.labMeta.map(meta => meta.buildingId);
-          for (const buildingId of labBuildings) {
-            const recipesForBuilding = state.recipes.filter(r => r.buildingId === buildingId && r.module === 'special');
-            const enabledRecipes = recipesForBuilding.filter(r => state.recipeEnabled[r.id]);
-            if (enabledRecipes.length > 1) {
-              for (let i = 1; i < enabledRecipes.length; i++) {
-                state.setRecipeEnabled(enabledRecipes[i].id, false);
+          const resp = await fetch(url);
+          return resp.ok ? resp.json() : null;
+        } catch { return null; }
+      };
+
+      // Phase 1: data.json 必须先加载（初始化 recipes, series, labMeta 等）
+      const dataJson = await safeFetch('./data.json');
+      if (dataJson) {
+        loadData(dataJson);
+        // 构建建筑图标映射
+        const buildingIcons: Record<string, string> = {};
+        for (const b of dataJson.machines_and_buildings) {
+          if (b.icon_path) {
+            let fileName = b.icon_path.split('/').pop() || '';
+            fileName = fileName.replace(/\.svg$/i, '.png');
+            buildingIcons[b.id] = `icons/buildings/${fileName}`;
+          }
+        }
+        useStore.getState().setBuildingIcons(buildingIcons);
+      }
+
+      // Phase 2: 并行加载其余所有数据（不阻塞，各自独立处理）
+      const [zhEn, factorySettings, gameData, contractsData, buildingSizes, productsData] = await Promise.all([
+        safeFetch('./zh_en.json'),
+        safeFetch('./factory_settings.json'),
+        safeFetch('./GameData.json'),
+        safeFetch('./contracts.json'),
+        safeFetch('./building_sizes.json'),
+        safeFetch('./products.json'),
+      ]);
+
+      if (zhEn) loadTranslation(zhEn);
+      if (factorySettings) importSettings(factorySettings);
+      if (gameData) useStore.getState().setGameData(gameData);
+
+      if (contractsData) {
+        const contracts = contractsData.contracts.map((c: any) => ({
+          id: c.id,
+          name: c.name || c.id,
+          buyItem: c.product_to_buy_name.toLowerCase(),
+          sellItem: c.product_to_pay_with_name.toLowerCase(),
+          buyRate: c.product_to_buy_quantity,
+          sellRate: c.product_to_pay_with_quantity,
+          unity_per_100_bought: c.unity_per_100_bought,
+          unity_per_month: c.unity_per_month,
+          min_reputation_required: c.min_reputation_required,
+        }));
+        setTradeContracts(contracts);
+      }
+
+      if (buildingSizes) {
+        const theoretical: Record<string, { width: number; height: number }> = {};
+        const reference: Record<string, { width: number; height: number }> = {};
+        for (const entry of buildingSizes) {
+          const key = entry.id.toLowerCase();
+          theoretical[key] = { width: entry.width, height: entry.height };
+          reference[key] = {
+            width: entry.refWidth ?? entry.width,
+            height: entry.refHeight ?? entry.height,
+          };
+        }
+        useStore.getState().setBuildingSizesRaw({ theoretical, reference });
+        useStore.getState().setBuildingSizes(theoretical);
+      }
+
+      if (productsData) {
+        const productIcons: Record<string, string> = {};
+        const productCategories: Record<string, string> = {};
+        for (const p of productsData.products) {
+          const nameLower = p.name.toLowerCase();
+          productCategories[nameLower] = p.type || 'Other';
+          if (p.icon_path) {
+            let fileName = p.icon_path.split('/').pop() || '';
+            fileName = fileName.replace(/\.svg$/i, '.png');
+            productIcons[nameLower] = `icons/products/${fileName}`;
+          }
+        }
+        useStore.getState().setProductIcons(productIcons);
+        useStore.getState().setProductCategories(productCategories);
+        if (DEBUG) console.log('产品图标映射加载完成，共', Object.keys(productIcons).length, '个');
+      }
+
+      // Phase 3: 自动加载上次保存的配置
+      if (localStorage.getItem('factorySettings')) {
+        try {
+          const raw = localStorage.getItem('factorySettings');
+          if (raw) {
+            const s = JSON.parse(raw);
+            useStore.getState().importSettings(s);
+            const state = useStore.getState();
+            const labBuildings = state.labMeta.map(meta => meta.buildingId);
+            for (const buildingId of labBuildings) {
+              const recipesForBuilding = state.recipes.filter(r => r.buildingId === buildingId && r.module === 'special');
+              const enabledRecipes = recipesForBuilding.filter(r => state.recipeEnabled[r.id]);
+              if (enabledRecipes.length > 1) {
+                for (let i = 1; i < enabledRecipes.length; i++) {
+                  state.setRecipeEnabled(enabledRecipes[i].id, false);
+                }
               }
             }
           }
-          window.__hasAutoLoadedSettings = true;
-        } catch(e) {}
+        } catch(e) { console.error('自动加载配置失败:', e); }
       }
     })();
   }, []);
@@ -293,7 +291,7 @@ export default function App() {
   const solveLp = async (lpString: string, varNames: string[], integerMode?: string, tradeActive?: Recipe[], fixedUnityConsumption?: number, researchCohesionTotal?: number) => {
     try {
       const result = await runLpSolver(lpString, varNames, integerMode);
-      console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
+      if (DEBUG) console.log('求解结果变量示例:', Object.entries(result.Columns || {}).slice(0, 10));
       setResult(result);
       setIsSolving(false);
       const st = result?.Status;
@@ -305,7 +303,7 @@ export default function App() {
           let actualMaintenance = 0;
           tradeActive.forEach((recipe, idx) => {
             const varName = `tr${idx}`;
-            const count = result.Columns?.[varName]?.Primal || result.columns?.[varName]?.Primal || 0;
+            const count = getColValue(result, varName);
             actualDirect += (recipe.tradeUnityDirect || 0) * count;
             actualMaintenance += (recipe.tradeUnityMaintenance || 0) * count;
           });
@@ -357,7 +355,7 @@ export default function App() {
       const computeResourceTotals = (lpResult: any): Record<string, { prod: number; cons: number }> => {
         const totals: Record<string, { prod: number; cons: number }> = {};
         for (let i = 0; i < currentVarNames.length; i++) {
-          const val = lpResult.Columns?.[currentVarNames[i]]?.Primal || lpResult.columns?.[currentVarNames[i]]?.Primal || 0;
+          const val = getColValue(lpResult, currentVarNames[i]);
           if (val <= 0) continue;
           const recipe = allRecipes[i];
           // 产出
@@ -393,7 +391,7 @@ export default function App() {
           const idx = currentVarNames.indexOf(varName);
           if (idx < 0 || idx >= allRecipes.length) continue;
           const recipe = allRecipes[idx];
-          const val = lpResult.Columns?.[varName]?.Primal || lpResult.columns?.[varName]?.Primal || 0;
+          const val = getColValue(lpResult, varName);
           if (val <= 0) continue;
           const ceiled = Math.ceil(val);
           const extra = ceiled - val;
@@ -557,7 +555,7 @@ export default function App() {
     const rdEnabled = s.enableRedundancy;
     const rdExplicitlyConfigured = Object.keys(s.redundancyResources || {}).filter(k => s.redundancyResources[k]?.enabled === true);
     const rdExplicitlyDisabled = Object.keys(s.redundancyResources || {}).filter(k => s.redundancyResources[k]?.enabled === false);
-    console.warn('[冗余] handleSolve 读取状态:', {
+    if (DEBUG) console.warn('[冗余] handleSolve 读取状态:', {
       enableRedundancy: rdEnabled,
       globalLower: s.globalLower,
       globalUpper: s.globalUpper,
@@ -576,13 +574,12 @@ export default function App() {
 
     if (!result) {
       setDiagnostic('没有启用的配方。');
+      setIsSolving(false);
       return;
     }
 
     // [DIAGNOSTIC] 冗余状态摘要（显示在诊断输出中）
-    if (rdEnabled) {
-      console.warn(`[冗余] 状态: 已启用 (全局 L=${s.globalLower}% U=${s.globalUpper}%), 显式配置=${rdExplicitlyConfigured.length}个, 显式禁用=${rdExplicitlyDisabled.length}个, 其余物品自动使用全局值`);
-    }
+    if (DEBUG) console.warn(`[冗余] 状态: 已启用 (全局 L=${s.globalLower}% U=${s.globalUpper}%), 显式配置=${rdExplicitlyConfigured.length}个, 显式禁用=${rdExplicitlyDisabled.length}个, 其余物品自动使用全局值`);
 
     const { mainActive, powerActive, residentActive, stationActive, specialActive, tradeActive,
       ignored, excludedOutputs, excludedInputs, reductionFactor, allExternalSupplies,
@@ -591,8 +588,8 @@ export default function App() {
 
     // 计算研究所凝聚力消耗（从 specialActive 中汇总）
     const researchCohesionTotal = specialActive
-      .filter(r => (r as any).researchCohesion)
-      .reduce((sum, r) => sum + ((r as any).researchCohesion || 0), 0);
+      .filter(r => r.researchCohesion)
+      .reduce((sum, r) => sum + (r.researchCohesion || 0), 0);
 
     // 法令消耗已包含在 fixedUnityConsumption 中
     // 存储各项消耗到 store
@@ -636,7 +633,7 @@ export default function App() {
           let actualMaintenance = 0;
           tradeActive.forEach((recipe, idx) => {
             const cols = lpResult?.Columns || lpResult?.columns || {};
-            const val = cols[`tr${idx}`]?.Primal ?? cols[`tr${idx}`]?.primal ?? 0;
+            const val = getColValue(lpResult, `tr${idx}`);
             actualDirect += (recipe.tradeUnityDirect || 0) * val;
             actualMaintenance += (recipe.tradeUnityMaintenance || 0) * val;
           });
@@ -694,7 +691,7 @@ export default function App() {
       relaxLabor: false,
     });
 
-    if (integerMode === 'milp') {
+    if (integerMode === 'milp' && DEBUG) {
       console.log('=== MILP 模式 LP 结尾 ===');
       console.log(pass1Lp.lpString.slice(-800));
     }
@@ -729,9 +726,8 @@ export default function App() {
     }
 
     // 根据整数模式选择求解方式
-    // MIP 求解器可能返回多种"有解"状态（NodeLimit=达到节点上限，TimeLimit=超时，Feasible=可行未证最优）
-    const MIP_SUCCESS = new Set(['Optimal', 'Feasible', 'NodeLimit', 'TimeLimit', 'SolutionLimit']);
-    const isMipSuccess = (st: string | undefined): boolean => !!st && MIP_SUCCESS.has(st);
+    // MIP 求解器可能返回多种"有解"状态
+    // （已提取为共享工具函数 isMipSuccess）
 
     // MILP 模式下：收集需要取整的配方→变量映射，用于后处理圆整
     const getIntegerVarMap = (): Map<string, { recipe: Recipe; varName: string }> => {
@@ -756,8 +752,7 @@ export default function App() {
       const fixed: Record<string, number> = {};
       const cols = lpResult?.Columns || lpResult?.columns || {};
       for (const [varName] of intVarMap) {
-        const col = cols[varName];
-        const val = col?.Primal ?? col?.primal ?? 0;
+        const val = getColValue(lpResult, varName);
         if (val <= 1e-9) continue;
         const rounded = method === 'ceil' ? Math.ceil(val) : Math.round(val);
         if (rounded > 0) fixed[varName] = rounded;
@@ -831,10 +826,9 @@ export default function App() {
           }
 
           // 连续解成功 → 逐个迭代圆整
-          const cols = result1?.Columns || result1?.columns || {};
           const intEntries: { varName: string; continuousVal: number; nearest: number; ceil: number; distance: number }[] = [];
           for (const [varName] of intVarMap) {
-            const val = cols[varName]?.Primal ?? cols[varName]?.primal ?? 0;
+            const val = getColValue(result1, varName);
             if (val <= 1e-9) continue;
             const nearest = Math.round(val);
             const ceil = Math.ceil(val);
@@ -972,10 +966,12 @@ export default function App() {
               <Btn onClick={() => {
                 const data = useStore.getState().exportSettings();
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
+                a.href = url;
                 a.download = 'factory_settings.json';
                 a.click();
+                setTimeout(() => URL.revokeObjectURL(url), 100);
               }}>📤 导出全部设置</Btn>
               <Btn onClick={() => {
                 const input = document.createElement('input');
@@ -990,9 +986,14 @@ export default function App() {
                 input.click();
               }}>📥 导入全部设置</Btn>
               <Btn onClick={() => {
-                const s = useStore.getState().exportSettings();
-                localStorage.setItem('factorySettings', JSON.stringify(s));
-                alert('配置已保存到浏览器');
+                try {
+                  const s = useStore.getState().exportSettings();
+                  localStorage.setItem('factorySettings', JSON.stringify(s));
+                  alert('配置已保存到浏览器');
+                } catch(e) {
+                  console.error('保存配置失败:', e);
+                  alert('保存配置失败: ' + (e instanceof Error ? e.message : String(e)));
+                }
               }}>💾 保存当前配置</Btn>
               <Btn onClick={() => {
                 if (confirm('恢复默认会丢弃当前设置，确定吗？')) {

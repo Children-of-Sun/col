@@ -20,22 +20,24 @@ const ResidentPanel: React.FC = () => {
 
   if (!gameData) return <div>请先加载居民配置文件</div>;
 
-  // 食物分组
-  const foodGroups: Record<string, string[]> = {};
-  for (const [name, svc] of Object.entries(gameData.services)) {
-    if (svc.category === 'food' && svc['Food Category']) {
-      const grp = svc['Food Category'];
-      if (!foodGroups[grp]) foodGroups[grp] = [];
-      foodGroups[grp].push(name);
+  const { foodGroups, medicalList, otherList } = React.useMemo(() => {
+    // 食物分组
+    const groups: Record<string, string[]> = {};
+    for (const [name, svc] of Object.entries(gameData.services)) {
+      if (svc.category === 'food' && svc['Food Category']) {
+        const grp = svc['Food Category'];
+        if (!groups[grp]) groups[grp] = [];
+        groups[grp].push(name);
+      }
     }
-  }
-
-  const medicalList = Object.keys(gameData.services).filter(
-    name => gameData.services[name].category === 'medical'
-  );
-  const otherList = Object.keys(gameData.services).filter(
-    name => gameData.services[name].category !== 'food' && gameData.services[name].category !== 'medical'
-  );
+    const medList = Object.keys(gameData.services).filter(
+      name => gameData.services[name].category === 'medical'
+    );
+    const othList = Object.keys(gameData.services).filter(
+      name => gameData.services[name].category !== 'food' && gameData.services[name].category !== 'medical'
+    );
+    return { foodGroups: groups, medicalList: medList, otherList: othList };
+  }, [gameData]);
 
   return (
     <div>

@@ -1,28 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../stores';
 import { t } from '../utils';
-
-// 辅助组件：自动尝试 SVG -> PNG 降级
-const IconWithFallback: React.FC<{ src: string; alt: string; style?: React.CSSProperties }> = ({ src, alt, style }) => {
-  const [currentSrc, setCurrentSrc] = useState(src);
-  const [hasError, setHasError] = useState(false);
-
-  const handleError = () => {
-    if (!hasError) {
-      // 尝试将扩展名从 .svg 替换为 .png
-      const pngSrc = src.replace(/\.svg$/i, '.png');
-      if (pngSrc !== src) {
-        setCurrentSrc(pngSrc);
-        setHasError(true);
-      } else {
-        // 如果原始路径不是 .svg，不做 fallback
-        console.warn(`无法加载图标: ${src}`);
-      }
-    }
-  };
-
-  return <img src={currentSrc} alt={alt} style={style} onError={handleError} loading="lazy" decoding="async" />;
-};
+import { IconWithFallback } from './IconWithFallback';
 
 interface ExcludeContentProps {
   items: string[];

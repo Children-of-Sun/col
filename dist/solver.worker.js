@@ -9,19 +9,114 @@ var solverInstance = null;
 var solverReady = false;
 var initPromise = null;
 
+// ========== IndexedDB 缓存：避免每次访问都下载 3MB WASM ==========
+var DB_NAME = 'solver-cache';
+var DB_VERSION = 1;
+var STORE_NAME = 'wasm';
+var CACHE_VERSION_KEY = 'highs-wasm-v1';
+
+function openDB() {
+  return new Promise(function(resolve, reject) {
+    var req = indexedDB.open(DB_NAME, DB_VERSION);
+    var timeout = setTimeout(function() {
+      reject(new Error('IndexedDB 打开超时'));
+    }, 5000);
+    req.onupgradeneeded = function(e) {
+      var db = e.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+    req.onsuccess = function(e) {
+      clearTimeout(timeout);
+      resolve(e.target.result);
+    };
+    req.onerror = function(e) {
+      clearTimeout(timeout);
+      reject(e.target.error);
+    };
+  });
+}
+
+function getCachedWasm() {
+  return openDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      // 先检查版本号
+      var txVer = db.transaction(STORE_NAME, 'readonly');
+      var storeVer = txVer.objectStore(STORE_NAME);
+      var verReq = storeVer.get(CACHE_VERSION_KEY);
+      verReq.onsuccess = function() {
+        if (verReq.result !== CACHE_VERSION_KEY) {
+          // 版本不匹配，清除旧缓存
+          db.close();
+          clearOldCache().then(function() { resolve(null); });
+          return;
+        }
+        // 版本匹配，读取 WASM
+        var tx = db.transaction(STORE_NAME, 'readonly');
+        var store = tx.objectStore(STORE_NAME);
+        var wasmReq = store.get('wasm');
+        wasmReq.onsuccess = function() {
+          db.close();
+          if (wasmReq.result) {
+            console.log('[Worker] 从 IndexedDB 加载 WASM 缓存 (' +
+              (wasmReq.result.byteLength / 1024 / 1024).toFixed(1) + ' MB)');
+          }
+          resolve(wasmReq.result || null);
+        };
+        wasmReq.onerror = function() { db.close(); resolve(null); };
+      };
+      verReq.onerror = function() { db.close(); resolve(null); };
+    });
+  }).catch(function(err) {
+    console.warn('[Worker] IndexedDB 读取失败，将通过网络下载:', err.message);
+    return null;
+  });
+}
+
+function cacheWasm(buffer) {
+  return openDB().then(function(db) {
+    return new Promise(function(resolve, reject) {
+      var tx = db.transaction(STORE_NAME, 'readwrite');
+      var store = tx.objectStore(STORE_NAME);
+      store.put(buffer, 'wasm');
+      store.put(CACHE_VERSION_KEY, CACHE_VERSION_KEY);
+      tx.oncomplete = function() {
+        db.close();
+        console.log('[Worker] WASM 已缓存到 IndexedDB (' +
+          (buffer.byteLength / 1024 / 1024).toFixed(1) + ' MB)');
+        resolve();
+      };
+      tx.onerror = function() { db.close(); reject(tx.error); };
+    });
+  }).catch(function(err) {
+    console.warn('[Worker] IndexedDB 写入失败:', err.message);
+  });
+}
+
+function clearOldCache() {
+  return openDB().then(function(db) {
+    var tx = db.transaction(STORE_NAME, 'readwrite');
+    var store = tx.objectStore(STORE_NAME);
+    store.clear();
+    return new Promise(function(resolve) {
+      tx.oncomplete = function() { db.close(); resolve(); };
+      tx.onerror = function() { db.close(); resolve(); };
+    });
+  }).catch(function() {});
+}
+
 function getSolver() {
   if (solverReady && solverInstance) return Promise.resolve(solverInstance);
   if (initPromise) return initPromise;
 
   initPromise = self.Module({
     instantiateWasm: function(imports, successCallback) {
-      const wasmURL = new URL('highs.wasm', self.location.href).href;
+      var wasmURL = new URL('highs.wasm', self.location.href).href;
 
       function doInstantiate(binary) {
         return WebAssembly.instantiate(binary, imports).then(function(result) {
-          // WebAssembly.instantiate 返回 {module, instance}
           var wasmInstance = result.instance;
-          // 尝试多个可能的导出名 (v1.14='t', v1.8='v', standard='memory')
           var mem = wasmInstance.exports.t || wasmInstance.exports.v || wasmInstance.exports.memory;
           if (mem && typeof mem.grow === 'function') {
             var curBytes = mem.buffer.byteLength;
@@ -37,14 +132,35 @@ function getSolver() {
               }
             }
           }
-          // HiGHS 1.14: successCallback 签名为 (instance, module)
           successCallback(wasmInstance);
         });
       }
 
-      return fetch(wasmURL)
-        .then(function(response) { return response.arrayBuffer(); })
-        .then(doInstantiate);
+      // 优先从 IndexedDB 读取缓存，未命中则网络下载
+      return getCachedWasm().then(function(cached) {
+        if (cached) {
+          return doInstantiate(cached).catch(function(err) {
+            // WASM 实例化失败（可能缓存损坏），清除缓存后重试网络下载
+            console.warn('[Worker] 缓存 WASM 实例化失败，清除缓存并尝试网络下载:', err.message);
+            return clearOldCache().then(function() {
+              return fetch(wasmURL)
+                .then(function(response) { return response.arrayBuffer(); })
+                .then(function(buffer) {
+                  cacheWasm(buffer);
+                  return doInstantiate(buffer);
+                });
+            });
+          });
+        }
+        console.log('[Worker] 未找到缓存，从网络下载 WASM...');
+        return fetch(wasmURL)
+          .then(function(response) { return response.arrayBuffer(); })
+          .then(function(buffer) {
+            // 异步写入缓存，不阻塞求解
+            cacheWasm(buffer);
+            return doInstantiate(buffer);
+          });
+      });
     }
   }).then(function(solver) {
     solverInstance = solver;

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo } from 'react';
 import { useStore } from '../stores';
 import { Select } from './UI';
 import { t } from '../utils';
+import { CropSetting } from '../types';
 import { getAgricultureMultipliers } from '../utils/agricultureMultipliers';
 
 export const AgriculturePanel: React.FC = () => {
@@ -32,14 +33,19 @@ export const AgriculturePanel: React.FC = () => {
     if (recipes.length > 0 && farms.length === 0) {
       loadAgricultureBuildings();
     }
-  }, [recipes, farms.length, loadAgricultureBuildings]);
+  }, [recipes, farms, loadAgricultureBuildings]);
 
   const maxFT = globalFertilizerType === 'organic' ? 100 : (globalFertilizerType === 'I' ? 120 : 140);
   const fertValue = globalFertilizerType === 'organic' ? 1 : (globalFertilizerType === 'I' ? 2 : 2.5);
   const P = cropRotation ? 1.0 : 1.5;
   const FT = targetFertility / 100;
 
-  const computeCrop = (crop: any) => {
+  const multipliers = useMemo(
+    () => getAgricultureMultipliers(gameData, edictLevels, officeLevels, researchLevels),
+    [gameData, edictLevels, officeLevels, researchLevels]
+  );
+
+  const computeCrop = (crop: CropSetting) => {
     const waterPerMin = crop.baseWaterPerMin;
     const fc = crop.baseFc;
     let requiredFertility: number;
@@ -59,11 +65,6 @@ export const AgriculturePanel: React.FC = () => {
   };
 
   const fertLabel = globalFertilizerType === 'organic' ? '有机肥' : `肥料 ${globalFertilizerType}`;
-
-  const multipliers = useMemo(
-    () => getAgricultureMultipliers(gameData, edictLevels, officeLevels, researchLevels),
-    [gameData, edictLevels, officeLevels, researchLevels]
-  );
 
   return (
     <div className="section">

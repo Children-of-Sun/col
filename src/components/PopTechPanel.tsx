@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import { useStore } from '../stores';
-import { GameData } from '../types';
 import { Btn } from './UI';
 import { t } from '../utils';
 

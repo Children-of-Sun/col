@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useCallback } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
-import { Btn, ModalShell, SearchInput, Select } from './UI';
+import { Btn, ModalShell, SearchInput, Select, ToggleSwitch } from './UI';
 import { ProductGrid } from './ProductGrid';
 import { t, isPowerBuilding, HIDDEN_SERIES, isRaw, isPowerItem, getSeriesName } from '../utils';
 import { Recipe, Series } from '../types';
@@ -125,30 +125,29 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   const currentCat = activeCat || cats[0] || '';
 
   const filtered = useMemo(() => {
-    return entries.filter(e => {
-      // 清除之前的匹配记录
-      e.matchedRecipes = undefined;
-      if (currentCat === '🚫 已禁用') return !e.buildingEnabled;
-      if (e.category !== currentCat) return false;
+    const result: any[] = [];
+    for (const e of entries) {
+      let matchedRecipes: any[] | undefined;
+      if (currentCat === '🚫 已禁用') {
+        if (!e.buildingEnabled) result.push({ ...e, matchedRecipes: undefined });
+        continue;
+      }
+      if (e.category !== currentCat) continue;
       if (search) {
         const s = search.toLowerCase();
         const buildingNameMatch = t(e.buildingName, translation).toLowerCase().includes(s);
-        // 匹配配方名、原料、产物
-        const matchingRecipes = e.recipes.filter(r => {
+        const matchingRecipes = e.recipes.filter((r: any) => {
           if (t(r.name, translation).toLowerCase().includes(s)) return true;
           if (Object.keys(r.inputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
           if (Object.keys(r.outputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
           return false;
         });
-        if (!buildingNameMatch && matchingRecipes.length === 0) return false;
-        // 仅配方匹配（建筑名未匹配）→ 只显示匹配的配方
-        if (!buildingNameMatch) {
-          e.matchedRecipes = matchingRecipes;
-        }
-        // 建筑名匹配 → matchedRecipes 保持 undefined → 显示全部配方
+        if (!buildingNameMatch && matchingRecipes.length === 0) continue;
+        if (!buildingNameMatch) matchedRecipes = matchingRecipes;
       }
-      return true;
-    });
+      result.push({ ...e, matchedRecipes });
+    }
+    return result;
   }, [entries, currentCat, search, translation]);
 
   return (
@@ -323,28 +322,8 @@ const BuildingBlock: React.FC<{
                   </span>
                 </span>
                 {showToggle && (
-                  <span
-                    onClick={e => { e.stopPropagation(); handleIntegerToggle(r); }}
-                    title={intOn ? '取整：开' : '取整：关'}
-                    style={{
-                      display: 'inline-block',
-                      width: 36, height: 20, borderRadius: 10,
-                      background: intOn ? '#4caf50' : '#ccc',
-                      position: 'relative',
-                      cursor: 'pointer',
-                      flexShrink: 0,
-                      marginLeft: 8,
-                      transition: 'background 0.2s',
-                    }}
-                  >
-                    <span style={{
-                      position: 'absolute', top: 2,
-                      left: intOn ? 18 : 2,
-                      width: 16, height: 16, borderRadius: '50%',
-                      background: '#fff',
-                      transition: 'left 0.2s',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                    }} />
+                  <span style={{ flexShrink: 0, marginLeft: 8 }} onClick={e => e.stopPropagation()}>
+                    <ToggleSwitch checked={intOn} onChange={() => handleIntegerToggle(r)} />
                   </span>
                 )}
               </div>
@@ -420,29 +399,25 @@ export const PowerRecipeModal: React.FC<{ open: boolean; onClose: () => void }> 
   const currentCat = activeCat || cats[0] || '';
 
   const filtered = useMemo(() => {
-    return entries.filter(e => {
-      // 清除之前的匹配记录
-      e.matchedRecipes = undefined;
-      if (e.category !== currentCat) return false;
+    const result: any[] = [];
+    for (const e of entries) {
+      let matchedRecipes: any[] | undefined;
+      if (e.category !== currentCat) continue;
       if (search) {
         const s = search.toLowerCase();
         const buildingNameMatch = t(e.buildingName, translation).toLowerCase().includes(s);
-        // 匹配配方名、原料、产物
-        const matchingRecipes = e.recipes.filter(r => {
+        const matchingRecipes = e.recipes.filter((r: any) => {
           if (t(r.name, translation).toLowerCase().includes(s)) return true;
           if (Object.keys(r.inputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
           if (Object.keys(r.outputs).some(k => t(k, translation).toLowerCase().includes(s))) return true;
           return false;
         });
-        if (!buildingNameMatch && matchingRecipes.length === 0) return false;
-        // 仅配方匹配（建筑名未匹配）→ 只显示匹配的配方
-        if (!buildingNameMatch) {
-          e.matchedRecipes = matchingRecipes;
-        }
-        // 建筑名匹配 → matchedRecipes 保持 undefined → 显示全部配方
+        if (!buildingNameMatch && matchingRecipes.length === 0) continue;
+        if (!buildingNameMatch) matchedRecipes = matchingRecipes;
       }
-      return true;
-    });
+      result.push({ ...e, matchedRecipes });
+    }
+    return result;
   }, [entries, currentCat, search, translation]);
 
   return (

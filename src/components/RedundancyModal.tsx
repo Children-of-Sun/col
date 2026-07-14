@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { useStore } from '../stores';
-import { Btn, Checkbox, SearchInput, ModalShell } from './UI';
+import { Btn, ModalShell } from './UI';
 import { IconWithFallback } from './IconWithFallback';
 import { t } from '../utils';
 import { RedundancyResource } from '../types';

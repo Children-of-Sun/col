@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useStore } from '../stores';
 import { Btn } from './UI';
-import { t, getMaintenanceReduction, SPACE_CARGO_ITEMS } from '../utils';
+import { t, getMaintenanceReduction, SPACE_CARGO_ITEMS, getColValue } from '../utils';
 import { Recipe } from '../types';
 import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue, computeRecipeArea, formatFootprint, smartRound, formatPowerSmart, formatComputingSmart, formatNetValue } from '../utils/format';
 import { IconWithFallback } from './IconWithFallback';
@@ -99,7 +99,7 @@ const SummaryTable: React.FC<{
   splitMode?: boolean;
   netWorkers?: number;
   showLaborRow?: boolean;
-}> = ({ data, showTinyErrors, translation, splitMode = false, netWorkers = 0, showLaborRow = false }) => {
+}> = React.memo(({ data, showTinyErrors, translation, splitMode = false, netWorkers = 0, showLaborRow = false }) => {
   const productIcons = useStore(s => s.productIcons);
   const showIcons = useStore(s => s.showIcons);
   const forcedOrder = ['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research'];
@@ -243,14 +243,14 @@ const SummaryTable: React.FC<{
       </div>
     </div>
   );
-};
+});
 
 const RecipeList: React.FC<{
   recipes: { recipe: Recipe; count: number; perMin: any }[];
   translation: Record<string, string>;
   buildingSizes: Record<string, { width: number; height: number }>;
   showFullStats: boolean;
-}> = ({ recipes, translation, buildingSizes, showFullStats }) => {
+}> = React.memo(({ recipes, translation, buildingSizes, showFullStats }) => {
   const isTrade = recipes.length > 0 && recipes[0].recipe.module === 'trade';
   return (
     <div className="table-wrapper">
@@ -278,8 +278,8 @@ const RecipeList: React.FC<{
             const pm = item.perMin;
             const skipItems = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii']);
             const filteredInputs = Object.entries(pm.inputs).filter(([k]) => !skipItems.has(k));
-            const inputs = filteredInputs.map(([k, v]) => `${t(k, translation)}×${v.toFixed(4)}`).join(', ') || '无';
-            const outputs = Object.entries(pm.outputs).map(([k, v]) => `${t(k, translation)}×${v.toFixed(4)}`).join(', ') || '无';
+            const inputs = filteredInputs.map(([k, v]) => `${t(k, translation)}×${(v as number).toFixed(4)}`).join(', ') || '无';
+            const outputs = Object.entries(pm.outputs).map(([k, v]) => `${t(k, translation)}×${(v as number).toFixed(4)}`).join(', ') || '无';
             const maintParts: string[] = [];
             if (pm.maintI > 0) {
               const mi = smartRound(pm.maintI, showFullStats);
@@ -305,7 +305,7 @@ const RecipeList: React.FC<{
             const powerR = formatPowerSmart(pm.electricity, showFullStats);
             const computingR = formatComputingSmart(pm.computing, showFullStats);
             return (
-              <tr key={idx}>
+              <tr key={r.id}>
                 <td className="recipe-name-cell" title={fullName}>{displayName}</td>
                 <td>{t(r.buildingName, translation)}</td>
                 <td>{cnt.toFixed(2)}</td>
@@ -325,7 +325,7 @@ const RecipeList: React.FC<{
       </table>
     </div>
   );
-};
+});
 
 const ModuleRow: React.FC<{
   name: string;
@@ -340,7 +340,7 @@ const ModuleRow: React.FC<{
   netCons: { item: string; net: number }[];
   onClick: () => void;
   translation: Record<string, string>;
-}> = ({ name, machineCount, actualMachineCount, workers, netElectricity, computing, totalMaintenance, footprint, netProds, netCons, onClick, translation }) => {
+}> = React.memo(({ name, machineCount, actualMachineCount, workers, netElectricity, computing, totalMaintenance, footprint, netProds, netCons, onClick, translation }) => {
   const [expanded, setExpanded] = useState(false);
   const toggleExpand = () => setExpanded(!expanded);
   return (
@@ -381,7 +381,7 @@ const ModuleRow: React.FC<{
       )}
     </div>
   );
-};
+});
 
 export const Results: React.FC = () => {
   const result = useStore(s => s.result);
@@ -409,16 +409,18 @@ export const Results: React.FC = () => {
   const [showCeilMachines, setShowCeilMachines] = useState(false);
   const [showFullStats, setShowFullStats] = useState(false);
   const buildingIcons = useStore(s => s.buildingIcons);
-  const handleTabChange = (name: string) => { setSelectedTab(name); };
+  const handleTabChange = useCallback((name: string) => { setSelectedTab(name); }, []);
 
   const varValues = useMemo(() => {
     const cols = result?.Columns || result?.columns || {};
     const map: Record<string, number> = {};
     solverVarNames.forEach((name, idx) => {
-      let val = 0;
-      if (cols[name]?.Primal !== undefined) val = cols[name].Primal;
-      else if (cols[name]?.primal !== undefined) val = cols[name].primal;
-      else if (cols[`Column${idx}`]?.Primal !== undefined) val = cols[`Column${idx}`].Primal;
+      let val = getColValue(result, name);
+      if (val === 0) {
+        // 回落：ColumnN 格式（兼容旧版求解器）
+        const col = cols[`Column${idx}`];
+        if (col) val = (col as { Primal?: number }).Primal ?? 0;
+      }
       map[name] = val;
     });
     return map;
@@ -648,7 +650,7 @@ export const Results: React.FC = () => {
       allWorkers += cat.workers; allElectricity += cat.electricity; allComputing += cat.computing;
       allMaintI += cat.maintI; allMaintII += cat.maintII; allMaintIII += cat.maintIII;
       allMachineCount += cat.machineCount;
-      allActualMachineCount += (cat as any).actualMachineCount || 0;
+      allActualMachineCount += cat.actualMachineCount || 0;
     }
 
     return {
@@ -682,9 +684,11 @@ export const Results: React.FC = () => {
       }
     }
     const result: { item: string; prod: number; cons: number }[] = [];
+    const allProd = categoryData.all.prod as Record<string, number>;
+    const allCons = categoryData.all.cons as Record<string, number>;
     for (const item of matchedItems) {
-      const prod = categoryData.all.prod[item] || 0;
-      const cons = categoryData.all.cons[item] || 0;
+      const prod = allProd[item] || 0;
+      const cons = allCons[item] || 0;
       if (Math.abs(prod) > 1e-9 || Math.abs(cons) > 1e-9) {
         result.push({ item, prod, cons });
       }
@@ -714,25 +718,29 @@ export const Results: React.FC = () => {
     const rows: any[] = [];
     const catArea = (recipes: typeof recipeData) => recipes.reduce((s, r) => s + computeRecipeArea(r.recipe, r.machineCount, buildingSizes), 0);
     for (const [name, cat] of Object.entries(categoryData.mainCategories)) {
-      const prodElec = cat.prod['electricity'] || 0, consElec = cat.cons['electricity'] || 0;
+      const p = cat.prod as Record<string, number>;
+      const c = cat.cons as Record<string, number>;
+      const prodElec = p['electricity'] || 0, consElec = c['electricity'] || 0;
       const netElectricity = prodElec - consElec;
       const totalMaintenance = cat.maintI + cat.maintII + cat.maintIII;
-      const allItems = new Set([...Object.keys(cat.prod), ...Object.keys(cat.cons)]);
+      const allItems = new Set([...Object.keys(p), ...Object.keys(c)]);
       const netMap: Record<string, number> = {};
       for (const item of allItems) {
-        const prod = cat.prod[item] || 0, cons = cat.cons[item] || 0, net = prod - cons;
+        const prod = p[item] || 0, cons = c[item] || 0, net = prod - cons;
         if (Math.abs(net) > 1e-6) netMap[item] = net;
       }
       const netProds = Object.entries(netMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net }));
       const netCons = Object.entries(netMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net }));
-      rows.push({ name, machineCount: cat.machineCount, actualMachineCount: (cat as any).actualMachineCount || 0, workers: cat.workers, netElectricity, computing: cat.computing, totalMaintenance, footprint: catArea((cat as any).recipes || []), netProds, netCons });
+      rows.push({ name, machineCount: cat.machineCount, actualMachineCount: cat.actualMachineCount || 0, workers: cat.workers, netElectricity, computing: cat.computing, totalMaintenance, footprint: catArea(cat.recipes || []), netProds, netCons });
     }
     // 电力模块
-    const powerNetElec = (categoryData.power.prod['electricity'] || 0) - (categoryData.power.cons['electricity'] || 0);
-    const powerAllItems = new Set([...Object.keys(categoryData.power.prod), ...Object.keys(categoryData.power.cons)]);
+    const pp = categoryData.power.prod as Record<string, number>;
+    const pc = categoryData.power.cons as Record<string, number>;
+    const powerNetElec = (pp['electricity'] || 0) - (pc['electricity'] || 0);
+    const powerAllItems = new Set([...Object.keys(pp), ...Object.keys(pc)]);
     const powerNetMap: Record<string, number> = {};
     for (const item of powerAllItems) {
-      const prod = categoryData.power.prod[item] || 0, cons = categoryData.power.cons[item] || 0, net = prod - cons;
+      const prod = pp[item] || 0, cons = pc[item] || 0, net = prod - cons;
       if (Math.abs(net) > 1e-6) powerNetMap[item] = net;
     }
     rows.push({
@@ -744,11 +752,13 @@ export const Results: React.FC = () => {
       netCons: Object.entries(powerNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
     // 贸易模块
-    const tradeNetElec = (categoryData.trade.prod['electricity'] || 0) - (categoryData.trade.cons['electricity'] || 0);
-    const tradeAllItems = new Set([...Object.keys(categoryData.trade.prod), ...Object.keys(categoryData.trade.cons)]);
+    const tp = categoryData.trade.prod as Record<string, number>;
+    const tc = categoryData.trade.cons as Record<string, number>;
+    const tradeNetElec = (tp['electricity'] || 0) - (tc['electricity'] || 0);
+    const tradeAllItems = new Set([...Object.keys(tp), ...Object.keys(tc)]);
     const tradeNetMap: Record<string, number> = {};
     for (const item of tradeAllItems) {
-      const prod = categoryData.trade.prod[item] || 0, cons = categoryData.trade.cons[item] || 0, net = prod - cons;
+      const prod = tp[item] || 0, cons = tc[item] || 0, net = prod - cons;
       if (Math.abs(net) > 1e-6) tradeNetMap[item] = net;
     }
     rows.push({
@@ -760,11 +770,13 @@ export const Results: React.FC = () => {
       netCons: Object.entries(tradeNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
     // 农业模块
-    const agriNetElec = (categoryData.agriculture.prod['electricity'] || 0) - (categoryData.agriculture.cons['electricity'] || 0);
-    const agriAllItems = new Set([...Object.keys(categoryData.agriculture.prod), ...Object.keys(categoryData.agriculture.cons)]);
+    const ap = categoryData.agriculture.prod as Record<string, number>;
+    const ac = categoryData.agriculture.cons as Record<string, number>;
+    const agriNetElec = (ap['electricity'] || 0) - (ac['electricity'] || 0);
+    const agriAllItems = new Set([...Object.keys(ap), ...Object.keys(ac)]);
     const agriNetMap: Record<string, number> = {};
     for (const item of agriAllItems) {
-      const prod = categoryData.agriculture.prod[item] || 0, cons = categoryData.agriculture.cons[item] || 0, net = prod - cons;
+      const prod = ap[item] || 0, cons = ac[item] || 0, net = prod - cons;
       if (Math.abs(net) > 1e-6) agriNetMap[item] = net;
     }
     rows.push({
@@ -776,11 +788,13 @@ export const Results: React.FC = () => {
       netCons: Object.entries(agriNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
     // 特殊模块
-    const specialNetElec = (categoryData.special.prod['electricity'] || 0) - (categoryData.special.cons['electricity'] || 0);
-    const specialAllItems = new Set([...Object.keys(categoryData.special.prod), ...Object.keys(categoryData.special.cons)]);
+    const sp = categoryData.special.prod as Record<string, number>;
+    const sc = categoryData.special.cons as Record<string, number>;
+    const specialNetElec = (sp['electricity'] || 0) - (sc['electricity'] || 0);
+    const specialAllItems = new Set([...Object.keys(sp), ...Object.keys(sc)]);
     const specialNetMap: Record<string, number> = {};
     for (const item of specialAllItems) {
-      const prod = categoryData.special.prod[item] || 0, cons = categoryData.special.cons[item] || 0, net = prod - cons;
+      const prod = sp[item] || 0, cons = sc[item] || 0, net = prod - cons;
       if (Math.abs(net) > 1e-6) specialNetMap[item] = net;
     }
     rows.push({
@@ -840,7 +854,7 @@ export const Results: React.FC = () => {
       `}</style>
 
       {isSolving && <div>🔄 求解中...</div>}
-      {diagnostic && <div style={{ background: '#fff3cd', padding: 8, whiteSpace: 'pre-wrap', fontSize: 13 }} dangerouslySetInnerHTML={{ __html: diagnostic }} />}
+      {diagnostic && <div style={{ background: '#fff3cd', padding: 8, whiteSpace: 'pre-wrap', fontSize: 13 }} dangerouslySetInnerHTML={{ __html: diagnostic.replace(/</g, '&lt;').replace(/>/g, '&gt;') }} />}
       {result && resultStatus === 'Optimal' && (
         <>
           <div style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
@@ -855,7 +869,7 @@ export const Results: React.FC = () => {
             </Btn>
           </div>
           <div className="stat">
-            ✅ 理论总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 实际总机器数: <b>{categoryData.all.actualMachineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{formatPowerSigned((categoryData.all.prod['electricity'] || 0) - (categoryData.all.cons['electricity'] || 0))}</b> | 总占地面积: <b title={totalFootprint.toFixed(1) + ' 小格'}>{formatFootprint(totalFootprint)}</b> | 不含电力贸易农业: <b title={(totalFootprint - powerFootprint - tradeFootprint - agricultureFootprint).toFixed(1) + ' 小格'}>{formatFootprint(totalFootprint - powerFootprint - tradeFootprint - agricultureFootprint)}</b> | 电力占地: <b title={powerFootprint.toFixed(1) + ' 小格'}>{formatFootprint(powerFootprint)}</b> | 贸易占地: <b title={tradeFootprint.toFixed(1) + ' 小格'}>{formatFootprint(tradeFootprint)}</b> | 农业占地: <b title={agricultureFootprint.toFixed(1) + ' 小格'}>{formatFootprint(agricultureFootprint)}</b><br/>
+            ✅ 理论总机器数: <b>{categoryData.all.machineCount.toFixed(2)}</b> | 实际总机器数: <b>{categoryData.all.actualMachineCount.toFixed(2)}</b> | 总人力: <b>{categoryData.all.workers.toFixed(2)}</b> | 净电力: <b>{formatPowerSigned(((categoryData.all.prod as Record<string, number>)['electricity'] || 0) - ((categoryData.all.cons as Record<string, number>)['electricity'] || 0))}</b> | 总占地面积: <b title={totalFootprint.toFixed(1) + ' 小格'}>{formatFootprint(totalFootprint)}</b> | 不含电力贸易农业: <b title={(totalFootprint - powerFootprint - tradeFootprint - agricultureFootprint).toFixed(1) + ' 小格'}>{formatFootprint(totalFootprint - powerFootprint - tradeFootprint - agricultureFootprint)}</b> | 电力占地: <b title={powerFootprint.toFixed(1) + ' 小格'}>{formatFootprint(powerFootprint)}</b> | 贸易占地: <b title={tradeFootprint.toFixed(1) + ' 小格'}>{formatFootprint(tradeFootprint)}</b> | 农业占地: <b title={agricultureFootprint.toFixed(1) + ' 小格'}>{formatFootprint(agricultureFootprint)}</b><br/>
             🎯 凝聚力产量: 居民 <b>{residentUnity.toFixed(2)}</b> | 空间站 <b>{stationUnity.toFixed(2)}</b>  | 总计 <b>{unityProduction.toFixed(2)}</b><br/>
             📉 凝聚力消耗: 贸易直接: <b>{cohesionTradeDirect.toFixed(2)}</b> | 贸易维持: <b>{cohesionTradeMaintenance.toFixed(2)}</b> | 法令: <b>{cohesionEdict.toFixed(2)}</b> | 研究: <b>{labCohesionTotal.toFixed(2)}</b> | 总计: <b>{(cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal).toFixed(2)}</b><br/>
             净凝聚力: <b>{(unityProduction - (cohesionTradeDirect + cohesionTradeMaintenance + cohesionEdict + labCohesionTotal)).toFixed(2)}</b>
@@ -1101,7 +1115,7 @@ export const Results: React.FC = () => {
           <div className="results-layout">
             <div className="summary-panel">
               <h4>{t('资源平衡', translation)}</h4>
-              {currentData && <SummaryTable data={{ prod: currentData.prod || {}, cons: currentData.cons || {} }} showTinyErrors={showTinyErrors} translation={translation} splitMode={!isOverview} netWorkers={netWorkers} showLaborRow={isOverview} />}
+              {currentData && <SummaryTable data={{ prod: (currentData as any).prod || {}, cons: (currentData as any).cons || {} }} showTinyErrors={showTinyErrors} translation={translation} splitMode={!isOverview} netWorkers={netWorkers} showLaborRow={isOverview} />}
             </div>
             <div className="detail-panel">
               {selectedTab === '全厂总览' ? (
@@ -1112,8 +1126,8 @@ export const Results: React.FC = () => {
               ) : (
                 <>
                   <h4>{t('配方列表', translation)}</h4>
-                  {currentData && currentData.recipes && currentData.recipes.length > 0 ? (
-                    <RecipeList recipes={currentData.recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} buildingSizes={buildingSizes} showFullStats={showFullStats} />
+                  {currentData && (currentData as any).recipes && (currentData as any).recipes.length > 0 ? (
+                    <RecipeList recipes={(currentData as any).recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} buildingSizes={buildingSizes} showFullStats={showFullStats} />
                   ) : <div className="hint">{t('无配方数据', translation)}</div>}
                 </>
               )}

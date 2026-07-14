@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { TradeContract, Recipe } from '../types';
-import { t, isOreContract } from '../utils';
+import { t } from '../utils';
 import { Btn, ModalShell, SearchInput, Checkbox } from './UI';
 import { buildTradeRecipe } from '../utils/trade';
 
@@ -46,6 +46,7 @@ export const TradePanel: React.FC = () => {
   const edictLevels = useStore(s => s.edictLevels);
   const researchLevels = useStore(s => s.researchLevels);
   const tradeVoyageTime = useStore(s => s.tradeVoyageTime);
+  const setTradeVoyageTime = useStore(s => s.setTradeVoyageTime);
   const excludeTradeFootprint = useStore(s => s.excludeTradeFootprint);
   const setExcludeTradeFootprint = useStore(s => s.setExcludeTradeFootprint);
 
@@ -185,7 +186,7 @@ export const TradePanel: React.FC = () => {
         </div>
         <div>
           <label>模块尺寸: </label>
-          <select value={moduleSize} onChange={e => setModuleSize(e.target.value as any)}>
+          <select value={moduleSize} onChange={e => setModuleSize(e.target.value as 'S' | 'M' | 'L')}>
             <option value="S">S (125/min)</option><option value="M">M (250/min)</option><option value="L">L (500/min)</option>
           </select>
         </div>
@@ -197,7 +198,7 @@ export const TradePanel: React.FC = () => {
         </div>
         <div>
           <label>航行模式: </label>
-          <select value={travelMode} onChange={e => setTravelMode(e.target.value as any)}>
+          <select value={travelMode} onChange={e => setTravelMode(e.target.value as 'normal' | 'special')}>
             <option value="normal">{t('普通', translation)}</option>
             <option value="special">{t('特殊', translation)}</option>
           </select>
@@ -209,7 +210,7 @@ export const TradePanel: React.FC = () => {
             value={tradeVoyageTime || ''}
             onChange={e => {
               const val = parseFloat(e.target.value);
-              useStore.setState({ tradeVoyageTime: isNaN(val) ? 0 : val });
+              setTradeVoyageTime(isNaN(val) ? 0 : val);
             }}
             placeholder="0=使用旧逻辑"
             step="1"

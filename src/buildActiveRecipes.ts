@@ -1,5 +1,5 @@
 import { useStore } from './stores';
-import { Recipe, Demand, CropSetting } from './types';
+import { Recipe, Demand, CropSetting, LevelEntry, BuildingRaw, Research as ResearchType } from './types';
 import {
   getMaintenanceReduction,
   getRecycleRate,
@@ -103,8 +103,8 @@ export function buildActiveRecipes(
   const active = state.recipes.filter(r => {
     if (!state.recipeEnabled[r.id]) return false;
     const sn = (r.module === 'power')
-      ? state.powerSeriesList.find(ps => ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name
-      : state.mainSeriesList.find(ms => ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+      ? state.powerSeriesList.find(ps => ps.levels.some((lv: LevelEntry) => lv.buildingId === r.buildingId))?.name
+      : state.mainSeriesList.find(ms => ms.levels.some((lv: LevelEntry) => lv.buildingId === r.buildingId))?.name;
     if (sn) {
       if (r.module === 'power') {
         if (!state.powerEnabled[sn]) return false;
@@ -222,7 +222,7 @@ export function buildActiveRecipes(
   // ========== 办公室建筑配方 ==========
   let focusBonusPerWorker = 0;
   if (gameData) {
-    const focusResearch = gameData.research.find((r: any) => r.name === '专注点');
+    const focusResearch = gameData.research.find((r: ResearchType) => r.name === '专注点');
     if (focusResearch) {
       const idx = gameData.research.indexOf(focusResearch);
       const lvl = researchLevels[idx] || 0;
@@ -232,7 +232,7 @@ export function buildActiveRecipes(
       }
     }
   }
-  const buildingsSource = (gameData as any)?.machines_and_buildings || state.fullData?.machines_and_buildings;
+  const buildingsSource = gameData?.machines_and_buildings || state.fullData?.machines_and_buildings;
   const officeBuildings = buildingsSource?.filter((b: any) => b.name?.startsWith('Office')) || [];
   for (const building of officeBuildings) {
     const enabled = state.officeBuildingEnabled[building.id];
@@ -308,7 +308,7 @@ export function buildActiveRecipes(
         module: 'special',
       };
       const statueBuilding = state.fullData?.machines_and_buildings?.find(
-        (b: any) => b.name === 'The Statue of Maintenance'
+        (b: BuildingRaw) => b.name === 'The Statue of Maintenance'
       );
       if (statueBuilding) {
         if (statueBuilding.maintenance_cost_units && statueBuilding.maintenance_cost_quantity) {
@@ -455,7 +455,7 @@ export function buildActiveRecipes(
     gameData?.baseRecycleRate ?? 0.2,
     gameData?.edicts || [],
     state.edictLevels,
-    gameData?.office,
+    gameData?.office || [],
     state.officeLevels
   );
 
@@ -541,7 +541,7 @@ export function buildActiveRecipes(
     if (r.category === '农业' || r.category === '办公室') return true;
     if (!state.recipeEnabled[r.id]) return false;
     const sn = state.mainSeriesList.find(ms =>
-      ms.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+      ms.levels.some((lv: LevelEntry) => lv.buildingId === r.buildingId))?.name;
     if (sn) {
       if (!state.mainEnabled[sn]) return false;
       if (state.mainSelectedLevel[sn] !== r.buildingLevel) return false;
@@ -553,7 +553,7 @@ export function buildActiveRecipes(
   let powerActive = modifiedActive.filter(r => {
     if (!state.recipeEnabled[r.id] || r.module !== 'power') return false;
     const sn = state.powerSeriesList.find(ps =>
-      ps.levels.some((lv: any) => lv.buildingId === r.buildingId))?.name;
+      ps.levels.some((lv: LevelEntry) => lv.buildingId === r.buildingId))?.name;
     if (!sn) return false;
     if (!state.powerEnabled[sn]) return false;
     if (state.powerSelectedLevel[sn] !== r.buildingLevel) return false;

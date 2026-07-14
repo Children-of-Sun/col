@@ -1,7 +1,7 @@
 import { create } from 'zustand';
-import { StoreState, DataJson, ParsedData, SolverResult, Demand, GameData, Recipe, TradeContract, TradeSetup, FarmSetting, CropSetting } from './types';
+import { StoreState, DataJson, ParsedData, GameData, Recipe, TradeSetup, FarmSetting, CropSetting } from './types';
 import { parseData } from './parseData';
-import { getSeriesName, isPowerBuilding, HIDDEN_SERIES } from './utils';
+import { getSeriesName } from './utils';
 
 function initializeFromParsed(p: ParsedData): Partial<StoreState> {
   const mainEnabled: Record<string, boolean> = {};
@@ -57,12 +57,13 @@ export const useStore = create<StoreState>((set, get) => ({
   diagnosticMode: false,
   excludedOutputs: [],
   excludedInputs: [],
+  excludedItems: [],
   constraintMode: 'noProd' as const,
   showTinyErrors: true,
 
   result: null,
   isSolving: false,
-  workerStatus: 'idle' as 'idle' | 'solving' | 'error',
+  workerStatus: 'idle',
   diagnostic: '',
 
   solverActive: [],
@@ -216,6 +217,7 @@ export const useStore = create<StoreState>((set, get) => ({
   setDiagnosticMode: (v) => set({ diagnosticMode: v }),
   setExcludedOutputs: (items) => set({ excludedOutputs: items.map(i => i.toLowerCase()) }),
   setExcludedInputs: (items) => set({ excludedInputs: items.map(i => i.toLowerCase()) }),
+  setExcludedItems: (items) => set({ excludedItems: items }),
   setConstraintMode: (v) => set({ constraintMode: v }),
   setShowTinyErrors: (v) => set({ showTinyErrors: v }),
   setResult: (r) => set({ result: r }),
@@ -268,6 +270,7 @@ export const useStore = create<StoreState>((set, get) => ({
   setSelectedTradeRecipes: (recipes) => set({ selectedTradeRecipes: recipes }),
   setTradeParams: (params) => set(state => ({ tradeParams: { ...state.tradeParams, ...params } })),
   setSelectedTradeContractIds: (ids) => set({ selectedTradeContractIds: ids }),
+  setTradeVoyageTime: (value: number) => set({ tradeVoyageTime: value }),
   setEnableTradeModule: (value) => set({ enableTradeModule: value }),
 
   setEnableAgriculture: (value: boolean) => set({ enableAgriculture: value }),
@@ -385,7 +388,7 @@ export const useStore = create<StoreState>((set, get) => ({
   setRedundancyResources: (r) => set({ redundancyResources: r }),
   setRedundancyAutoItems: (items) => set({ redundancyAutoItems: items }),
   setRedundancyMilpDisabled: (items) => set({ redundancyMilpDisabled: items }),
-  setRecipeIntegerEnabled: (id, enabled) => set((s: any) => ({ recipeIntegerEnabled: { ...s.recipeIntegerEnabled, [id]: enabled } })),
+  setRecipeIntegerEnabled: (id: string, enabled: boolean) => set(s => ({ recipeIntegerEnabled: { ...s.recipeIntegerEnabled, [id]: enabled } })),
   setCohesionTradeDirect: (value: number) => set({ cohesionTradeDirect: value }),
   setCohesionTradeMaintenance: (value: number) => set({ cohesionTradeMaintenance: value }),
   setCohesionEdict: (value: number) => set({ cohesionEdict: value }),
@@ -398,82 +401,62 @@ export const useStore = create<StoreState>((set, get) => ({
 
   importSettings: (s) => {
     const state: Partial<StoreState> = {};
-    if (s.mainEnabled) state.mainEnabled = s.mainEnabled;
-    if (s.mainLevels) state.mainSelectedLevel = s.mainLevels;
-    if (s.powerEnabled) state.powerEnabled = s.powerEnabled;
-    if (s.powerLevels) state.powerSelectedLevel = s.powerLevels;
-    if (s.recipes) state.recipeEnabled = s.recipes;
+
+    // 简单字段：import key 与 state key 相同，直接用 !== undefined 检查
+    const simpleFields = [
+      'mainEnabled', 'powerEnabled', 'mainBuildingEnabledMap', 'powerBuildingEnabledMap',
+      'stationLevel', 'rocketType', 'statueCount', 'labLevel', 'labCount',
+      'steamLowMode', 'constraintMode', 'showTinyErrors', 'allowExternal',
+      'solarEfficiency', 'population', 'housingIndex', 'selectedMedical',
+      'edictLevels', 'officeLevels', 'researchLevels', 'optimizationMode',
+      'enableTradeModule', 'showIcons', 'ignoredItems',
+      'enableAgriculture', 'cropRotation', 'globalFertilizerType',
+      'targetFertility', 'enableFocusConsumption',
+      'officeBuildingEnabled', 'officeSelectedLevel', 'officeRecipeEnabled',
+      'integerMode', 'milpTimeLimit', 'recipeIntegerEnabled',
+      'tradeVoyageTime', 'enableRedundancy', 'useReferenceSizes',
+      'excludePowerFootprint', 'excludeTradeFootprint',
+      'globalLower', 'globalUpper', 'redundancyResources',
+      'redundancyAutoItems', 'redundancyMilpDisabled',
+      'officeCollapsed', 'farmCollapsed', 'medicalMultiplier',
+      'demands', 'externalSupplies', 'selectedTradeRecipes',
+      'selectedTradeContractIds', 'hideStage', 'diagnosticMode',
+      'customWeights', 'tradeParams', 'excludedItems',
+    ] as const;
+    for (const key of simpleFields) {
+      if ((s as any)[key] !== undefined) (state as any)[key] = (s as any)[key];
+    }
+
+    // 重命名字段：import key → state key
+    if (s.mainLevels !== undefined) state.mainSelectedLevel = s.mainLevels;
+    if (s.powerLevels !== undefined) state.powerSelectedLevel = s.powerLevels;
+    if (s.recipes !== undefined) state.recipeEnabled = s.recipes;
+
+    // 需要转换的字段
     if (s.excludedOutputs) state.excludedOutputs = s.excludedOutputs.map((x: string) => x.toLowerCase());
     if (s.excludedInputs) state.excludedInputs = s.excludedInputs.map((x: string) => x.toLowerCase());
-    if (s.stationLevel !== undefined) state.stationLevel = s.stationLevel;
-    if (s.rocketType !== undefined) state.rocketType = s.rocketType;
-    if (s.statueCount !== undefined) state.statueCount = s.statueCount;
-    if (s.labLevel !== undefined) state.labLevel = s.labLevel;
-    if (s.labCount !== undefined) state.labCount = s.labCount;
-    if (s.steamLowMode !== undefined) state.steamLowMode = s.steamLowMode;
-    if (s.constraintMode !== undefined) state.constraintMode = s.constraintMode;
-    if (s.showTinyErrors !== undefined) state.showTinyErrors = s.showTinyErrors;
-    if (s.mainBuildingEnabledMap) state.mainBuildingEnabledMap = s.mainBuildingEnabledMap;
-    if (s.powerBuildingEnabledMap) state.powerBuildingEnabledMap = s.powerBuildingEnabledMap;
-    if (s.allowExternal !== undefined) state.allowExternal = s.allowExternal;
-    if (s.tradeContract !== undefined) state.tradeSetup = { ...state.tradeSetup, contractId: s.tradeContract };
-    if (s.tradeDockLevel !== undefined) state.tradeSetup = { ...state.tradeSetup, dockLevel: s.tradeDockLevel };
-    if (s.tradeFuel !== undefined) state.tradeSetup = { ...state.tradeSetup, fuelName: s.tradeFuel };
-    if (s.solarEfficiency !== undefined) state.solarEfficiency = s.solarEfficiency;
-    if (s.tradeParams) state.tradeParams = { ...state.tradeParams, ...s.tradeParams };
-    if (s.selectedTradeContractIds) state.selectedTradeContractIds = s.selectedTradeContractIds;
-    if (s.optimizationMode) state.optimizationMode = s.optimizationMode;
-    if (s.customWeights) state.customWeights = s.customWeights;
-    if (s.population !== undefined) state.population = s.population;
-    if (s.housingIndex !== undefined) state.housingIndex = s.housingIndex;
     if (s.selectedFoods) state.selectedFoods = new Set(s.selectedFoods);
-    if (s.selectedMedical !== undefined) state.selectedMedical = s.selectedMedical;
     if (s.selectedOthers) state.selectedOthers = new Set(s.selectedOthers);
-    if (s.edictLevels) state.edictLevels = s.edictLevels;
-    if (s.officeLevels) state.officeLevels = s.officeLevels;
-    if (s.researchLevels) state.researchLevels = s.researchLevels;
-    if (s.enableTradeModule !== undefined) state.enableTradeModule = s.enableTradeModule;
-    if (s.showIcons !== undefined) state.showIcons = s.showIcons;
-    if (s.ignoredItems !== undefined) state.ignoredItems = s.ignoredItems;
-    if (s.enableAgriculture !== undefined) state.enableAgriculture = s.enableAgriculture;
-    if (s.cropRotation !== undefined) state.cropRotation = s.cropRotation;
-    if (s.globalFertilizerType !== undefined) state.globalFertilizerType = s.globalFertilizerType;
-    if (s.targetFertility !== undefined) state.targetFertility = s.targetFertility;
-    if (s.enableFocusConsumption !== undefined) state.enableFocusConsumption = s.enableFocusConsumption;
-    if (s.officeBuildingEnabled !== undefined) state.officeBuildingEnabled = s.officeBuildingEnabled;
-    if (s.officeSelectedLevel !== undefined) state.officeSelectedLevel = s.officeSelectedLevel;
-    if (s.officeRecipeEnabled !== undefined) state.officeRecipeEnabled = s.officeRecipeEnabled;
-    if (s.integerMode !== undefined) state.integerMode = s.integerMode;
-    if (s.milpTimeLimit !== undefined) state.milpTimeLimit = s.milpTimeLimit;
-    if (s.recipeIntegerEnabled !== undefined) state.recipeIntegerEnabled = s.recipeIntegerEnabled;
-    if (s.tradeVoyageTime !== undefined) state.tradeVoyageTime = s.tradeVoyageTime;
-    if (s.enableRedundancy !== undefined) state.enableRedundancy = s.enableRedundancy;
-    if (s.useReferenceSizes !== undefined) state.useReferenceSizes = s.useReferenceSizes;
-    if (s.excludePowerFootprint !== undefined) state.excludePowerFootprint = s.excludePowerFootprint;
-    if (s.excludeTradeFootprint !== undefined) state.excludeTradeFootprint = s.excludeTradeFootprint;
-    if (s.globalLower !== undefined) state.globalLower = s.globalLower;
-    if (s.globalUpper !== undefined) state.globalUpper = s.globalUpper;
-    if (s.redundancyResources !== undefined) state.redundancyResources = s.redundancyResources;
-    if (s.redundancyAutoItems !== undefined) state.redundancyAutoItems = s.redundancyAutoItems;
-    if (s.redundancyMilpDisabled !== undefined) state.redundancyMilpDisabled = s.redundancyMilpDisabled;
-    if (s.officeCollapsed !== undefined) state.officeCollapsed = s.officeCollapsed;
-    if (s.farmCollapsed !== undefined) state.farmCollapsed = s.farmCollapsed;
-    // 生产目标 & 外部供给
-    if (s.demands !== undefined) state.demands = s.demands;
-    if (s.externalSupplies !== undefined) state.externalSupplies = s.externalSupplies;
-    if (s.selectedTradeRecipes !== undefined) state.selectedTradeRecipes = s.selectedTradeRecipes;
-    // 其他 UI 设置
-    if (s.hideStage !== undefined) state.hideStage = s.hideStage;
-    if (s.diagnosticMode !== undefined) state.diagnosticMode = s.diagnosticMode;
-    if (s.medicalMultiplier !== undefined) state.medicalMultiplier = s.medicalMultiplier;
+
+    // 嵌套字段：TradeSetup
+    if (s.tradeContract !== undefined) state.tradeSetup = { ...state.tradeSetup, contractId: s.tradeContract } as TradeSetup;
+    if (s.tradeDockLevel !== undefined) state.tradeSetup = { ...state.tradeSetup, dockLevel: s.tradeDockLevel } as TradeSetup;
+    if (s.tradeFuel !== undefined) state.tradeSetup = { ...state.tradeSetup, fuelName: s.tradeFuel } as TradeSetup;
+
+    // Farms 需要深度恢复
     if (s.farms !== undefined) {
-      // 深度恢复 farms 结构（确保每个 crop 的 enabled 等字段保留）
       state.farms = s.farms.map((farm: any) => ({
         ...farm,
         crops: farm.crops.map((crop: any) => ({ ...crop }))
       }));
     }
     set(state);
+    // 同步 buildingSizes：useReferenceSizes 通过 simpleFields 直接赋值后，
+    // 需要联动更新 buildingSizes（模拟 setUseReferenceSizes action 的副作用）
+    if (s.useReferenceSizes !== undefined) {
+      const { buildingSizesRaw } = get();
+      set({ buildingSizes: s.useReferenceSizes ? buildingSizesRaw.reference : buildingSizesRaw.theoretical });
+    }
   },
 
   exportSettings: () => {
@@ -497,9 +480,9 @@ export const useStore = create<StoreState>((set, get) => ({
       mainBuildingEnabledMap: s.mainBuildingEnabledMap,
       powerBuildingEnabledMap: s.powerBuildingEnabledMap,
       allowExternal: s.allowExternal,
-      tradeContract: s.tradeSetup.contractId,
-      tradeDockLevel: s.tradeSetup.dockLevel,
-      tradeFuel: s.tradeSetup.fuelName,
+      tradeContract: s.tradeSetup?.contractId ?? '',
+      tradeDockLevel: s.tradeSetup?.dockLevel ?? 1,
+      tradeFuel: s.tradeSetup?.fuelName ?? 'Diesel',
       solarEfficiency: s.solarEfficiency,
       medicalMultiplier: s.medicalMultiplier,
       tradeParams: s.tradeParams,
@@ -548,28 +531,37 @@ export const useStore = create<StoreState>((set, get) => ({
       // 其他 UI 设置
       hideStage: s.hideStage,
       diagnosticMode: s.diagnosticMode,
+      excludedItems: s.excludedItems,
     };
   },
 
   enableSeriesForItem: (item: string) => {
     const s = get();
+    // 构建新的状态对象，不直接修改 get() 返回的快照
+    const newPowerEnabled = { ...s.powerEnabled };
+    const newPowerSelectedLevel = { ...s.powerSelectedLevel };
+    const newMainEnabled = { ...s.mainEnabled };
+    const newMainSelectedLevel = { ...s.mainSelectedLevel };
+    const newRecipeEnabled = { ...s.recipeEnabled };
+
     s.recipes.filter(r => r.outputs[item] && !r.isHidden).forEach(r => {
       const sn = getSeriesName(r.buildingId, s.mainSeriesList, s.powerSeriesList);
+      if (!sn) return; // 防止空字符串键污染状态
       if (r.module === 'power') {
-        s.powerEnabled[sn] = true;
-        s.powerSelectedLevel[sn] = r.buildingLevel;
+        newPowerEnabled[sn] = true;
+        newPowerSelectedLevel[sn] = r.buildingLevel;
       } else {
-        s.mainEnabled[sn] = true;
-        s.mainSelectedLevel[sn] = r.buildingLevel;
+        newMainEnabled[sn] = true;
+        newMainSelectedLevel[sn] = r.buildingLevel;
       }
-      s.recipeEnabled[r.id] = true;
+      newRecipeEnabled[r.id] = true;
     });
     set({
-      mainEnabled: { ...s.mainEnabled },
-      mainSelectedLevel: { ...s.mainSelectedLevel },
-      powerEnabled: { ...s.powerEnabled },
-      powerSelectedLevel: { ...s.powerSelectedLevel },
-      recipeEnabled: { ...s.recipeEnabled },
+      mainEnabled: newMainEnabled,
+      mainSelectedLevel: newMainSelectedLevel,
+      powerEnabled: newPowerEnabled,
+      powerSelectedLevel: newPowerSelectedLevel,
+      recipeEnabled: newRecipeEnabled,
     });
   },
 }));

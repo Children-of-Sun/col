@@ -16,7 +16,7 @@ const EdictPanel: React.FC = () => {
       {gameData.edicts.map((edict, idx) => {
         const lvl = edictLevels[idx] ?? -1;
         return (
-          <div key={idx} style={{ marginBottom: 5 }}>
+          <div key={edict.name} style={{ marginBottom: 5 }}>
             <label>{t(edict.name, translation)}: </label>
             <select value={lvl} onChange={e => setEdictLevel(idx, parseInt(e.target.value))}>
               <option value={-1}>关闭</option>

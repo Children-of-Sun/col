@@ -241,11 +241,12 @@ export function buildLp(input: LpInput): LpOutput {
       const isMaintenanceOutput = (it === 'maintenance i' || it === 'maintenance ii' || it === 'maintenance iii') && r.outputs[it];
       
       if (r.outputs[it]) {
-        if (isMaintenanceOutput) scale = 60 / r.duration;
+        if (r.duration <= 0) { /* skip division by zero, treat as non-scalable */ }
+        else if (isMaintenanceOutput) scale = 60 / r.duration;
         else if (!isContinuousItem) scale = 60 / r.duration;
       }
       if (r.inputs[it]) {
-        if (!isContinuousItem) scale = 60 / r.duration;
+        if (r.duration > 0 && !isContinuousItem) scale = 60 / r.duration;
       }
       
       if (r.outputs[it]) c += scale * r.outputs[it];
@@ -293,7 +294,7 @@ export function buildLp(input: LpInput): LpOutput {
       }
       let scale = 1;
       if (r.inputs[it]) {
-        if (!isContinuous(it)) scale = 60 / r.duration;
+        if (r.duration > 0 && !isContinuous(it)) scale = 60 / r.duration;
       }
       if (r.inputs[it]) c += scale * r.inputs[it];
       if (r.upkeep[it]) {
@@ -342,7 +343,7 @@ export function buildLp(input: LpInput): LpOutput {
       }
       const m = content.match(/^([\d.]+)\s+(.+)$/);
       if (m) {
-        terms.push({ coeff: sign * termSign * parseFloat(m[1]), varName: m[2] });
+        terms.push({ coeff: sign * termSign * parseFloat(m[1]), varName: m[2].trim() });
       }
     }
     return terms;
@@ -441,7 +442,7 @@ export function buildLp(input: LpInput): LpOutput {
   };
 
   // [DIAGNOSTIC] 冗余设置摘要
-  if (enableRedundancy) {
+  if (enableRedundancy && DEBUG) {
     const explicitlyConfigured = Object.keys(redundancyResources).filter(k => redundancyResources[k]?.enabled === true);
     const explicitlyDisabled = Object.keys(redundancyResources).filter(k => redundancyResources[k]?.enabled === false);
     console.warn('[冗余] buildLp 入参:', {
@@ -776,7 +777,6 @@ export function buildLp(input: LpInput): LpOutput {
   // 仅对用户开启了"取整"开关的配方变量标记 INTEGER
   // 贸易、农场、特殊、居民、空间站配方保持连续
   if (integerMode === 'milp') {
-    const hasAnyIntegerEnabled = Object.values(recipeIntegerEnabled).some(v => v === true);
     const agriVarNames = new Set(
       mainActive.filter(r => r.category === '农业').map((_, i) => `x${i}`)
     );
@@ -803,7 +803,7 @@ export function buildLp(input: LpInput): LpOutput {
     }
   }
   // [DIAGNOSTIC] 冗余约束应用摘要
-  if (enableRedundancy) {
+  if (enableRedundancy && DEBUG) {
     const maintenanceItems = ['maintenance i', 'maintenance ii', 'maintenance iii'];
     const maintenanceStatus = maintenanceItems.map(mi => {
       const rf = getRedundancyFactors(mi);

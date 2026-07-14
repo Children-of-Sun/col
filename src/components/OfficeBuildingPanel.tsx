@@ -32,7 +32,7 @@ export const OfficeBuildingPanel: React.FC = () => {
   return (
     <div className="section">
       <h3>🏢 办公室建筑</h3>
-      {officeBuildings.map(b => (
+      {officeBuildings.map((b: any) => (
         <div key={b.id} className="building-block" style={{ marginBottom: 10 }}>
           <div className="building-header" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <input
@@ -58,7 +58,7 @@ export const OfficeBuildingPanel: React.FC = () => {
         {currentBuilding && (
           <div>
             {officeBuildings
-              .find(b => b.id === currentBuilding)
+              .find((b: any) => b.id === currentBuilding)
               ?.recipes?.map((r: any) => (
               <div key={r.id} className="recipe-entry" style={{ marginBottom: 8 }}>
                 <label>

@@ -1,10 +1,11 @@
 import { buildLp } from './lpBuilder';
 import { useStore } from './stores';
-import { Recipe, Demand } from './types';
+import { Recipe, Demand, SolverResult } from './types';
 import { buildActiveRecipes } from './buildActiveRecipes';
+import { getColValue } from './utils';
 
 // 求解器运行函数（复用原有 runLpSolver）
-declare function runLpSolver(lpString: string, varNames: string[], integerMode?: string): Promise<any>;
+declare function runLpSolver(lpString: string, varNames: string[], integerMode?: string): Promise<SolverResult>;
 
 // 需求优先级定义（数值越小越重要）
 const DEMAND_PRIORITY: Record<string, number> = {
@@ -29,31 +30,28 @@ const DEFAULT_PRIORITY = 5;
 
 interface SolveResult {
   status: 'optimal' | 'infeasible' | 'relaxed';
-  result: any;
+  result: SolverResult | null;
   diagnostic: string;
   surplusItems?: { item: string; amount: number; sourceRecipes: Recipe[] }[];
 }
 
 /** 从 LP 求解结果计算实际人力消耗 */
 function computeTotalLabor(
-  result: any,
+  result: SolverResult,
   varNames: string[],
   recipeBuild: ReturnType<typeof buildActiveRecipes>,
 ): number {
-  const cols = result?.Columns || result?.columns;
-  if (!cols) return 0;
   let totalLabor = 0;
   const allRecipes = [
-    ...recipeBuild.mainActive,
-    ...recipeBuild.powerActive,
-    ...recipeBuild.residentActive,
-    ...recipeBuild.stationActive,
-    ...recipeBuild.specialActive,
-    ...recipeBuild.tradeActive,
+    ...recipeBuild!.mainActive,
+    ...recipeBuild!.powerActive,
+    ...recipeBuild!.residentActive,
+    ...recipeBuild!.stationActive,
+    ...recipeBuild!.specialActive,
+    ...recipeBuild!.tradeActive,
   ];
   for (let i = 0; i < varNames.length; i++) {
-    const col = cols[varNames[i]];
-    const val = col?.Primal ?? col?.primal ?? 0;
+    const val = getColValue(result, varNames[i]);
     if (val > 0) {
       totalLabor += (allRecipes[i]?.upkeep['人力'] || 0) * val;
     }
@@ -66,13 +64,13 @@ export async function solveWithFallback(
   getFixedDemands: () => Demand[],
   setDiagnostic: (msg: string) => void,
   setIsSolving: (v: boolean) => void,
-  setResult: (r: any) => void,
+  setResult: (r: SolverResult | null) => void,
   setUnityProduction: (v: number) => void,
   setUnityConsumption: (v: number) => void,
   setCohesionTradeDirect: (v: number) => void,
   setCohesionTradeMaintenance: (v: number) => void,
   setCohesionEdict: (v: number) => void,
-  setExternalSupplies: (s: any) => void,
+  setExternalSupplies: (s: { item: string; rate: number }[]) => void,
   setSolverMissing: (m: string[]) => void,
 ): Promise<SolveResult> {
   const state = useStore.getState();
@@ -113,7 +111,7 @@ export async function solveWithFallback(
       fixedUnityProduction: recipeBuild.fixedUnityProduction,
       fixedUnityConsumption: recipeBuild.fixedUnityConsumption,
       integerMode: state.integerMode,
-      steamLowMode: state.steamLowMode as any,
+      steamLowMode: state.steamLowMode as 'internal' | 'shared',
       excludedOutputs: new Set(state.excludedOutputs),
       excludedInputs: new Set(state.excludedInputs),
       ignored: new Set(state.ignoredItems),

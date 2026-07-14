@@ -4,7 +4,7 @@ import { t } from '../utils';
 // 码头槽位 → 建筑 ID
 const dockBuildingIdMap: Record<number, string> = { 2: 'CargoDepotT1', 4: 'CargoDepotT2', 6: 'CargoDepotT3', 8: 'CargoDepotT4' };
 // 模块尺寸 → 建筑 ID
-const moduleBuildingIdMap: Record<string, string> = { S: 'moduleST1', M: 'ModuleT2', L: 'ModuleT3' };
+const moduleBuildingIdMap: Record<string, string> = { S: 'moduleT1', M: 'ModuleT2', L: 'ModuleT3' };
 
 // 查找建筑（优先从 gameData.machines_and_buildings，回退到 fullData）
 const findBuilding = (id: string, gameData: any, fullData: any) => {

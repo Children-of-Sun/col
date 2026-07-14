@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import { useStore } from '../stores';
 import { t } from '../utils';
-import { Checkbox } from './UI';
+import { Checkbox, ToggleSwitch } from './UI';
 
 const OfficePanel: React.FC = () => {
   const gameData = useStore(s => s.gameData);
@@ -226,34 +226,13 @@ const OfficePanel: React.FC = () => {
                             {t(recipe.name, translation)}
                           </td>
                           <td style={{ padding: 6, fontSize: '0.8rem' }}>
-                            {inputEntries.length ? inputEntries.map(e => `${e.name}×${e.rate}`).join(', ') : '无'}
+                            {inputEntries.length ? inputEntries.map((e: any) => `${e.name}×${e.rate}`).join(', ') : '无'}
                           </td>
                           <td style={{ padding: 6, fontSize: '0.8rem' }}>
-                            {outputEntries.length ? outputEntries.map(e => `${e.name}×${e.rate}`).join(', ') : '无'}
+                            {outputEntries.length ? outputEntries.map((e: any) => `${e.name}×${e.rate}`).join(', ') : '无'}
                           </td>
                           <td style={{ padding: 6, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
-                            <span
-                              onClick={() => { if (bEnabled) handleIntegerToggle(recipe); }}
-                              title={intOn ? '取整：开' : '取整：关'}
-                              style={{
-                                display: 'inline-block',
-                                width: 36, height: 20, borderRadius: 10,
-                                background: intOn ? '#4caf50' : '#ccc',
-                                position: 'relative',
-                                cursor: bEnabled ? 'pointer' : 'not-allowed',
-                                opacity: bEnabled ? 1 : 0.5,
-                                transition: 'background 0.2s',
-                              }}
-                            >
-                              <span style={{
-                                position: 'absolute', top: 2,
-                                left: intOn ? 18 : 2,
-                                width: 16, height: 16, borderRadius: '50%',
-                                background: '#fff',
-                                transition: 'left 0.2s',
-                                boxShadow: '0 1px 3px rgba(0,0,0,0.3)',
-                              }} />
-                            </span>
+                            <ToggleSwitch checked={intOn} onChange={() => { if (bEnabled) handleIntegerToggle(recipe); }} disabled={!bEnabled} />
                           </td>
                         </tr>
                       );

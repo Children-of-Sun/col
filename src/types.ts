@@ -16,7 +16,7 @@ export interface Service {
 
 export interface Edict {
   name: string;
-  targetCategory: string;
+  targetCategory: string | string[];
   effectPerLevel: number[];
   unityPerLevel: number[];
   itemEffect?: string[];
@@ -57,8 +57,9 @@ export interface GameData {
   baseRecycleRate?: number;
   docks?: DockLevel[];
   fuels?: TradeFuel[];
-  ship_fuel_configs?: any;
+  ship_fuel_configs?: Record<string, any>;
   populationWaste?: { item: string; ratePerPop: number };
+  machines_and_buildings?: BuildingRaw[];
 }
 
 // ==================== 原始数据类型 ====================
@@ -209,6 +210,7 @@ export interface StoreState {
 
   result: SolverResult | null;
   isSolving: boolean;
+  workerStatus: 'idle' | 'solving' | 'error';
   diagnostic: string;
   solverMissing: string[];
   solverFixedDemands: Demand[];
@@ -312,6 +314,7 @@ export interface StoreState {
   setShowTinyErrors: (v: boolean) => void;
   setResult: (r: SolverResult | null) => void;
   setIsSolving: (v: boolean) => void;
+  setWorkerStatus: (status: 'idle' | 'solving' | 'error') => void;
   setDiagnostic: (msg: string) => void;
   setSolverActive: (active: Recipe[]) => void;
   setSolverVarNames: (names: string[]) => void;
@@ -320,8 +323,8 @@ export interface StoreState {
   setUnityProduction: (v: number) => void;
   setUnityConsumption: (v: number) => void;
   setExternalSupplies: (supplies: { item: string; rate: number }[]) => void;
-  importSettings: (s: any) => void;
-  exportSettings: () => any;
+  importSettings: (s: Record<string, any>) => void;
+  exportSettings: () => Record<string, any>;
   enableSeriesForItem: (item: string) => void;
   setGameData: (data: GameData) => void;
   setPopulation: (v: number) => void;
@@ -340,6 +343,7 @@ export interface StoreState {
   setTradeParams: (params: Partial<TradeParams>) => void;
   setSelectedTradeContractIds: (ids: string[]) => void;
   setSelectedTradeRecipes: (recipes: Recipe[]) => void;
+  setTradeVoyageTime: (value: number) => void;
   setEnableTradeModule: (value: boolean) => void;
   setEnableAgriculture: (value: boolean) => void;
   setCropRotation: (value: boolean) => void;
@@ -366,7 +370,6 @@ export interface StoreState {
 
   // 新增 actions
   setIntegerMode: (mode: IntegerMode) => void;
-  setRedundancyFactor: (value: number) => void;
   setMilpTimeLimit: (seconds: number) => void;
   setCohesionTradeDirect: (value: number) => void;
   setCohesionTradeMaintenance: (value: number) => void;
@@ -383,6 +386,7 @@ export interface StoreState {
   setRedundancyResources: (r: Record<string, RedundancyResource>) => void;
   setRedundancyAutoItems: (items: Record<string, boolean>) => void;
   setRedundancyMilpDisabled: (items: Record<string, boolean>) => void;
+  setRecipeIntegerEnabled: (id: string, enabled: boolean) => void;
 }
 
 export interface SolverResult {
