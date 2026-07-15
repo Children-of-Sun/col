@@ -2,6 +2,7 @@
   "name": "factory-calculator",
   "private": true,
   "version": "1.0.0",
+  "license": "MulanPSL-2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -179,6 +179,38 @@ export default function App() {
           }
         } catch(e) { console.error('自动加载配置失败:', e); }
       }
+
+      // Phase 4: 后台预热 WASM（预下载 + IndexedDB 缓存）
+      if (!localStorage.getItem('factoryWasmCached')) {
+        try {
+          const warmupWorker = new Worker('solver.worker.js');
+          const warmupTimeout = setTimeout(function() {
+            warmupWorker.terminate();
+          }, 30000); // 30 秒超时
+          warmupWorker.onmessage = function(ev) {
+            if (ev.data && ev.data.type === 'wasmProgress') {
+              var pct = Math.round((ev.data.loaded / ev.data.total) * 100);
+              useStore.getState().setWorkerStatus('预加载求解器 ' + pct + '%');
+            } else if (ev.data && ev.data.type === 'preloadDone') {
+              clearTimeout(warmupTimeout);
+              warmupWorker.terminate();
+              localStorage.setItem('factoryWasmCached', '1');
+              useStore.getState().setWorkerStatus('idle');
+            } else if (ev.data && ev.data.type === 'preloadError') {
+              clearTimeout(warmupTimeout);
+              warmupWorker.terminate();
+              console.warn('WASM 预热失败:', ev.data.error);
+              useStore.getState().setWorkerStatus('idle');
+            }
+          };
+          warmupWorker.onerror = function() {
+            clearTimeout(warmupTimeout);
+            warmupWorker.terminate();
+            useStore.getState().setWorkerStatus('idle');
+          };
+          warmupWorker.postMessage({ type: 'preload' });
+        } catch(e) { /* 预热失败不影响正常使用 */ }
+      }
     })();
   }, []);
 
@@ -252,6 +284,12 @@ export default function App() {
       }, 60000);
 
       worker.onmessage = (e) => {
+        // 下载进度消息（无 generation，先处理）
+        if (e.data && e.data.type === 'wasmProgress') {
+          const pct = Math.round((e.data.loaded / e.data.total) * 100);
+          useStore.getState().setWorkerStatus('下载求解器 ' + pct + '%');
+          return;
+        }
         clearTimeout(timeoutId);
         if (solveGenerationRef.current !== generation) {
           console.warn('[runLpSolver] Stale callback for gen', generation);

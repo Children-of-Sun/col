@@ -106,14 +106,60 @@ function clearOldCache() {
   }).catch(function() {});
 }
 
+// 下载 WASM 并上报进度
+function fetchWasmWithProgress(wasmURL) {
+  return fetch(wasmURL).then(function(response) {
+    var contentLength = parseInt(response.headers.get('Content-Length') || '0', 10);
+    if (!response.ok) throw new Error('HTTP ' + response.status);
+    // 如果无法获取 Content-Length 或 body 不可流式读取，回退到 arrayBuffer
+    if (!response.body || contentLength === 0) {
+      return response.arrayBuffer().then(function(buffer) {
+        return buffer;
+      });
+    }
+    var loaded = 0;
+    var reader = response.body.getReader();
+    var chunks = [];
+    function pump() {
+      return reader.read().then(function(result) {
+        if (result.done) {
+          var buffer = new Uint8Array(loaded);
+          var pos = 0;
+          for (var i = 0; i < chunks.length; i++) {
+            buffer.set(chunks[i], pos);
+            pos += chunks[i].length;
+          }
+          return buffer.buffer;
+        }
+        chunks.push(result.value);
+        loaded += result.value.length;
+        if (contentLength > 0) {
+          self.postMessage({ type: 'wasmProgress', loaded: loaded, total: contentLength });
+        }
+        return pump();
+      });
+    }
+    return pump();
+  });
+}
+
+// CDN 优先，本地回退
+var CDN_WASM_URL = 'https://cdn.jsdelivr.net/npm/highs@1.14.2/build/highs.wasm';
+var LOCAL_WASM_URL = new URL('highs.wasm', self.location.href).href;
+
+function downloadWasm() {
+  return fetchWasmWithProgress(CDN_WASM_URL).catch(function(err) {
+    console.warn('[Worker] CDN 下载失败，回退到本地:', err.message);
+    return fetchWasmWithProgress(LOCAL_WASM_URL);
+  });
+}
+
 function getSolver() {
   if (solverReady && solverInstance) return Promise.resolve(solverInstance);
   if (initPromise) return initPromise;
 
   initPromise = self.Module({
     instantiateWasm: function(imports, successCallback) {
-      var wasmURL = new URL('highs.wasm', self.location.href).href;
-
       function doInstantiate(binary) {
         return WebAssembly.instantiate(binary, imports).then(function(result) {
           var wasmInstance = result.instance;
@@ -143,23 +189,19 @@ function getSolver() {
             // WASM 实例化失败（可能缓存损坏），清除缓存后重试网络下载
             console.warn('[Worker] 缓存 WASM 实例化失败，清除缓存并尝试网络下载:', err.message);
             return clearOldCache().then(function() {
-              return fetch(wasmURL)
-                .then(function(response) { return response.arrayBuffer(); })
-                .then(function(buffer) {
-                  cacheWasm(buffer);
-                  return doInstantiate(buffer);
-                });
+              return downloadWasm().then(function(buffer) {
+                cacheWasm(buffer);
+                return doInstantiate(buffer);
+              });
             });
           });
         }
         console.log('[Worker] 未找到缓存，从网络下载 WASM...');
-        return fetch(wasmURL)
-          .then(function(response) { return response.arrayBuffer(); })
-          .then(function(buffer) {
-            // 异步写入缓存，不阻塞求解
-            cacheWasm(buffer);
-            return doInstantiate(buffer);
-          });
+        return downloadWasm().then(function(buffer) {
+          // 异步写入缓存，不阻塞求解
+          cacheWasm(buffer);
+          return doInstantiate(buffer);
+        });
       });
     }
   }).then(function(solver) {
@@ -185,6 +227,17 @@ function getSolver() {
 self.onmessage = async function(e) {
   try {
     init();
+
+    // 预热：仅下载并缓存 WASM，不求解
+    if (e.data && e.data.type === 'preload') {
+      try {
+        await getSolver();
+        self.postMessage({ type: 'preloadDone' });
+      } catch (err) {
+        self.postMessage({ type: 'preloadError', error: err.message || String(err) });
+      }
+      return;
+    }
 
     const { lpString, requestId, options, generation } = e.data;
     console.log('[Worker] LP 前500字符:', lpString.slice(0, 500));

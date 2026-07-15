@@ -210,7 +210,7 @@ export interface StoreState {
 
   result: SolverResult | null;
   isSolving: boolean;
-  workerStatus: 'idle' | 'solving' | 'error';
+  workerStatus: string; // 'idle' | 'solving' | 'error' | 进度消息
   diagnostic: string;
   solverMissing: string[];
   solverFixedDemands: Demand[];
@@ -314,7 +314,7 @@ export interface StoreState {
   setShowTinyErrors: (v: boolean) => void;
   setResult: (r: SolverResult | null) => void;
   setIsSolving: (v: boolean) => void;
-  setWorkerStatus: (status: 'idle' | 'solving' | 'error') => void;
+  setWorkerStatus: (status: string) => void;
   setDiagnostic: (msg: string) => void;
   setSolverActive: (active: Recipe[]) => void;
   setSolverVarNames: (names: string[]) => void;
