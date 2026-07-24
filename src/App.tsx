@@ -61,6 +61,7 @@ export default function App() {
   const [powerRecipeModalOpen, setPowerRecipeModalOpen] = useState(false);
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [excludeModalOpen, setExcludeModalOpen] = useState(false);
+  const [helpExpanded, setHelpExpanded] = useState(false);
   const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'agriculture' | 'resident' | 'edict' | 'office' | 'tech'>('main');
 
   // Worker 复用：避免每次求解创建新 Worker（2GB WASM）
@@ -996,6 +997,85 @@ export default function App() {
   return (
     <>
       <h1> 工业巨头量化计算器</h1>
+      <div className="section" style={{ marginBottom: 12 }}>
+        <div onClick={() => setHelpExpanded(!helpExpanded)}
+             style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: '1.1rem', fontWeight: 600 }}>📖 帮助</span>
+          <span style={{ fontSize: '0.85rem', color: '#666' }}>{helpExpanded ? '▼ 收起' : '▶ 展开'}</span>
+        </div>
+        {helpExpanded && (
+          <div style={{ marginTop: 12, lineHeight: 1.8 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px 40px' }}>
+              <div>
+                <h4>📐 概述</h4>
+                <p>本工具使用<strong>线性规划（LP/MILP）</strong>求解器计算最优工厂配置。求解器对约束条件要求严格——如果配方链不完整或存在无法满足的需求，会直接报错。</p>
+
+                <h4>💾 配置管理（左上角）</h4>
+                <ul>
+                  <li><strong>导出/导入</strong> — 将当前设置导出为 JSON 文件，或从文件导入。</li>
+                  <li><strong>保存当前配置</strong> — 写入浏览器缓存，下次打开自动恢复。</li>
+                  <li><strong>恢复默认</strong> — 清除缓存，使用预设默认配置。</li>
+                </ul>
+
+                <h4>⚙️ 求解选项</h4>
+                <ul>
+                  <li><strong>整数模式</strong> — 推荐使用<em>连续解</em>。除 MILP 外其余三种均可直接使用。MILP 较复杂，详见下方注意事项。</li>
+                  <li><strong>电力/算力/人力/维护</strong> — 勾选后对应资源<em>不参与计算</em>。</li>
+                  <li><strong>约束模式</strong> — 默认<em>常规</em>。如果无法求解，尝试切换<em>宽松</em>。</li>
+                  <li><strong>优化模式</strong> — 根据需要选择最小化目标（机器数量/人力/凝聚力/占地/原矿消耗/自定义权重）。</li>
+                </ul>
+
+                <h4>📋 生产需求（求解按钮左侧）</h4>
+                <p>用于设置额外生产目标，如建筑材料、维护物资等。支持排除产出、排除输入、资源冗余三个子功能：</p>
+                <ul>
+                  <li><strong>排除产出</strong> — 允许某些物品无限产出（约束由 = 变为 ≥）。</li>
+                  <li><strong>排除输入</strong> — 允许某些物品无限获取（约束由 = 变为 ≤）。</li>
+                  <li><strong>资源冗余</strong> — 开启后，选中的资源可在设定上下限范围内浮动。</li>
+                </ul>
+              </div>
+
+              <div>
+                <h4>🔧 主要设置区域（右侧标签页）</h4>
+                <ul>
+                  <li><strong>主模块</strong> — 选择需要使用的配方与建筑。关闭建筑后其附属配方均不生效。</li>
+                  <li><strong>电力模块</strong> — 仅电力相关建筑。高压/超高压蒸汽仅在电力模块内流通，不进入主模块。</li>
+                  <li><strong>空间站·研究所等</strong> — 设置空间站、实验室级别与配方。实验室第一个配方不产生回收物。</li>
+                  <li><strong>贸易模块</strong> — 配置贸易合同、码头参数，根据实际情况设置。</li>
+                  <li><strong>农业模块</strong> — 按实际肥力消耗计算，支持轮作与肥料类型选择。</li>
+                  <li><strong>居民模块</strong> — 选择食物与医疗服务，勾选即启用，食物消耗按种类自动分配。</li>
+                  <li><strong>法令·办公·科技</strong> — 按实际等级设置。办公的"启动专注点消耗"约等于将办公室纳入求解，其建筑与配方设置方式与主模块一致。</li>
+                </ul>
+
+                <h4>🚀 求解</h4>
+                <p>点击<strong>开始求解</strong>即可。首次使用需加载求解器（约需下载 3MB WASM 文件）。正常情况下连续解和 MILP 均可在 1 秒内完成。如长时间无结果，请保存配置→刷新页面→重新求解。</p>
+
+                <h4>📊 结果查看</h4>
+                <ul>
+                  <li><strong>显示误差</strong> — 显示极小的求解舍入误差。</li>
+                  <li><strong>展开截断</strong> — 如果数据被截断，点击或鼠标悬浮可查看完整值。</li>
+                  <li><strong>占地切换</strong> — <em>理论值</em>仅计算机器本身面积，<em>参考值</em>按最密堆积估算。</li>
+                  <li><strong>全场总览</strong> — 全局资源平衡表。</li>
+                  <li><strong>配方搜索</strong> — 查找某一物品的产出/消耗明细。</li>
+                </ul>
+
+                <h4>⚠️ 常见问题</h4>
+                <ul>
+                  <li><strong>副产物未处理</strong> — 在常规约束模式下，无生产配方的物品默认可无限获取；但如果有<em>任何</em>配方产出了该物品，则必须自行消化（如炼铝副产碎铁矿，需要提供碎铁矿的消耗配方）和产出。报错时先减少建筑/配方，切换宽松模式，构建基础链后再逐步增加。</li>
+                  <li><strong>农业溢出</strong> — 农业科技过高时，某些依赖肥料的来处理的资源可能溢出导致报错或结果异常。</li>
+                  <li><strong>矿渣/硫等副产物</strong> — 未处理会导致结果异常或报错。</li>
+                </ul>
+
+                <h4>💡 MILP 混合整数规划注意事项</h4>
+                <ul>
+                  <li>MILP 强烈依赖<strong>资源冗余</strong>设置。主模块每个配方右侧的开关控制该配方是否取整。</li>
+                  <li>需手动启用冗余系统并调节全局上下限，求解资源会自动冗余，但请检查——有时可能出问题。</li>
+                  <li>取整配方数量请控制在 <strong>20 个以内</strong>，过多会导致计算时间急剧增长。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
       <div className="app-layout">
         <div className="left-column">
           <div className="section">

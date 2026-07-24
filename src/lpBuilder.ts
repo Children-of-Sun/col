@@ -1,5 +1,5 @@
 import { Recipe, Demand, RedundancyResource } from './types';
-import { isRaw, isNonScalable } from './utils';
+import { isRaw, isOre, isNonScalable } from './utils';
 
 // 全局调试标志
 const DEBUG = typeof window !== 'undefined' && window.localStorage?.getItem('factoryDebug') === 'true';
@@ -133,7 +133,7 @@ export function buildLp(input: LpInput): LpOutput {
         }
       } else if (target === 'raw') {
         for (const [item, qty] of Object.entries(recipe.inputs)) {
-          if (isRaw(item)) {
+          if (isOre(item)) {
             coeff += qty;
           }
         }
@@ -376,9 +376,9 @@ export function buildLp(input: LpInput): LpOutput {
   const producers = new Set<string>();
   const consumers = new Set<string>();
   allActive.forEach(r => {
-    Object.keys(r.outputs).forEach(k => { if (!ignored.has(k) && !excludedOutputs.has(k) && !excludedInputs.has(k)) producers.add(k); });
-    Object.keys(r.inputs).forEach(k => { if (!ignored.has(k) && !excludedOutputs.has(k) && !excludedInputs.has(k)) consumers.add(k); });
-    Object.keys(r.upkeep).forEach(k => { if (!ignored.has(k) && !excludedOutputs.has(k) && !excludedInputs.has(k)) consumers.add(k); });
+    Object.keys(r.outputs).forEach(k => { if (!ignored.has(k)) producers.add(k); });
+    Object.keys(r.inputs).forEach(k => { if (!ignored.has(k)) consumers.add(k); });
+    Object.keys(r.upkeep).forEach(k => { if (!ignored.has(k)) consumers.add(k); });
   });
 
   const demandSet = new Set(demands.map(d => d.item));
@@ -387,7 +387,7 @@ export function buildLp(input: LpInput): LpOutput {
   if (!relaxLabor && producers.has('人力') && consumers.has('人力')) {
     demandSet.add('人力');
   }
-  const items = new Set([...demandSet].filter(i => !ignored.has(i) && !excludedOutputs.has(i) && !excludedInputs.has(i)));
+  const items = new Set([...demandSet].filter(i => !ignored.has(i)));
   producers.forEach(i => { if (!demandSet.has(i)) items.add(i); });
   consumers.forEach(i => items.add(i));
   ['steam (high)', 'steam (super)', 'steam (low)'].forEach(s => {
@@ -396,9 +396,9 @@ export function buildLp(input: LpInput): LpOutput {
 
   let missing: string[] = [];
   if (!isAllowExternal) {
-    missing = [...consumers].filter(i => !producers.has(i) && !ignored.has(i) && !excludedOutputs.has(i) && !excludedInputs.has(i) && !demandSet.has(i));
+    missing = [...consumers].filter(i => !producers.has(i) && !ignored.has(i) && !demandSet.has(i));
     for (const d of demands) {
-      if (!ignored.has(d.item) && !excludedOutputs.has(d.item) && !excludedInputs.has(d.item) && !producers.has(d.item)) {
+      if (!ignored.has(d.item) && !producers.has(d.item)) {
         if (!missing.includes(d.item)) missing.push(d.item);
       }
     }

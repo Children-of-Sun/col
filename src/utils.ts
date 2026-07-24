@@ -39,6 +39,17 @@ export function isRaw(item: string): boolean {
   return RAW_ITEMS.has(item?.toLowerCase());
 }
 
+// 仅矿石（9种不可再生矿物）
+const ORE_ITEMS = new Set([
+  "iron ore","copper ore","coal","limestone","quartz",
+  "gold ore","uranium ore","bauxite","titanium ore",
+  "crude oil",
+]);
+
+export function isOre(item: string): boolean {
+  return ORE_ITEMS.has(item?.toLowerCase());
+}
+
 export function isPowerItem(name: string): boolean {
   return name === 'mechanical power' || name === 'electricity' || name === 'computing';
 }
