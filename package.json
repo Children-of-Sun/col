@@ -12,12 +12,16 @@
     "deploy": "gh-pages -d dist"
   },
   "dependencies": {
+    "@types/d3-shape": "^3.1.8",
+    "d3-shape": "^3.2.0",
+    "dagre": "^0.8.5",
     "highs": "^1.14.2",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@types/dagre": "^0.7.54",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^4.3.1",

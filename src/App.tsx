@@ -16,6 +16,7 @@ import { buildLp } from './lpBuilder';
 import { t, isMipSuccess, getColValue, getAllActive } from './utils';
 import { isContinuous } from './utils/format';
 import { buildActiveRecipes } from './buildActiveRecipes';
+import SimpleMode from './components/SimpleMode';
 import { Demand, Recipe } from './types';
 import './App.css';
 
@@ -62,6 +63,7 @@ export default function App() {
   const [demandModalOpen, setDemandModalOpen] = useState(false);
   const [excludeModalOpen, setExcludeModalOpen] = useState(false);
   const [helpExpanded, setHelpExpanded] = useState(false);
+  const [appMode, setAppMode] = useState<'simple' | 'advanced'>('advanced');
   const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'agriculture' | 'resident' | 'edict' | 'office' | 'tech'>('main');
 
   // Worker 复用：避免每次求解创建新 Worker（2GB WASM）
@@ -996,7 +998,16 @@ export default function App() {
 
   return (
     <>
-      <h1> 工业巨头量化计算器</h1>
+      <h1> 工业巨头量化计算器
+        <span style={{ marginLeft: 16, fontSize: '0.9rem' }}>
+          <Btn variant={appMode === 'simple' ? 'primary' : 'default'}
+               onClick={() => setAppMode('simple')}>🌳 简化</Btn>
+          <Btn variant={appMode === 'advanced' ? 'primary' : 'default'}
+               onClick={() => setAppMode('advanced')} style={{ marginLeft: 4 }}>⚙️ 高级</Btn>
+        </span>
+      </h1>
+      {appMode === 'simple' && <SimpleMode />}
+      {appMode === 'advanced' && (<>
       <div className="section" style={{ marginBottom: 12 }}>
         <div onClick={() => setHelpExpanded(!helpExpanded)}
              style={{ cursor: 'pointer', userSelect: 'none', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1185,6 +1196,7 @@ export default function App() {
       <ExcludeModal open={excludeModalOpen} onClose={() => setExcludeModalOpen(false)} />
 
       <Results />
-    </>
+    </>)}
+  </>
   );
 }

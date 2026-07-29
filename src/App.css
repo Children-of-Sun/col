@@ -144,3 +144,16 @@ td:first-child { text-align: left; }
   background: #f0f0f0;
   color: #333;
 }
+
+/* ====== 简化模式 配方树 ====== */
+.tree-node-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.9rem;
+}
+.tree-node-row:hover {
+  background: #fafafa;
+}
