@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en-US">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="author" content="doubleaxe (dax@xdax.ru, https://github.com/doubleaxe)">
+    <meta name="description" content="calculator/factory planner for factory management games, help page" />
+    <meta name="color-scheme" content="light">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>daxfb-calculator - calculator/factory planner for factory management games, help page</title>
+    <link rel="canonical" href="https://doubleaxe.github.io/daxfb-calculator/docs/" />
+    <link id="theme" rel="stylesheet" href="./assets/github-markdown.css">
+    <style>
+        .markdown-article {
+            box-sizing: border-box;
+            min-width: 200px;
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 45px;
+        }
+        @media (max-width: 767px) {
+            .markdown-article {
+                padding: 15px;
+            }
+        }
+    </style>
+    <script>
+    var searchParams = new URLSearchParams(window.location.search);
+    var theme = searchParams.get('theme');
+    if(theme === 'light') {
+        document.getElementById('theme').href = './assets/github-markdown-light.css';
+    } else if(theme === 'dark') {
+        document.getElementById('theme').href = './assets/github-markdown-dark.css';
+    }
+    </script>
+</head>
+
+<body class="markdown-body">
+    <article class="markdown-article">
+        <h1 id="daxfb-calculator">daxfb-calculator</h1>
+<p>Calculator/Factory Planner for factory management games.</p>
+<p><a href="https://doubleaxe.github.io/daxfb-calculator/docs/">Link to this page</a>.</p>
+<p><a href="https://github.com/doubleaxe/daxfb-calculator/edit/main/docs/README.md">Edit this page</a>.</p>
+<h1 id="general-usage">General usage</h1>
+<p>Calculator can work in two modes: <code>Drag and Drop mode</code> and <code>Point and Click mode</code>.
+First is optimized for PC usage and is turned on by default on PC.
+Second is optimized (and default) for mobile devices, but also may be used on PC.
+Modes are switched on and off using <code>Options</code> dialog.</p>
+<h2 id="drag-and-drop-mode">Drag and Drop mode</h2>
+<p>In this mode everything is dragged by primary mouse button.
+Note: if both <code>Drag and Drop</code> and <code>Point and Click</code> modes are enabled,
+there will be delay (300 ms) between mouse button is pressed on item and dragging actually starts.
+This is done to differentiate <code>Click</code> and <code>Drag</code> events.</p>
+<details><summary>Drag factory and drop on blueprint</summary>
+
+<p><img src="./assets/drag-n-drop-1.gif" alt="drag-n-drop-1"></p>
+</details>
+
+<details><summary>Drag links between factories</summary>
+
+<p><img src="./assets/drag-n-drop-2.gif" alt="drag-n-drop-2"></p>
+</details>
+
+<details><summary>Drag link to change ports ordering</summary>
+
+<p><img src="./assets/drag-n-drop-6.gif" alt="drag-n-drop-6"></p>
+</details>
+
+<details><summary>Drag to move factory</summary>
+
+<p><img src="./assets/drag-n-drop-3.gif" alt="drag-n-drop-3"></p>
+</details>
+
+<details><summary>Drag on free space to scroll window</summary>
+
+<p><img src="./assets/drag-n-drop-4.gif" alt="drag-n-drop-4"></p>
+</details>
+
+<details><summary>Drag something out of window to automatically scroll</summary>
+
+<p><img src="./assets/drag-n-drop-5.gif" alt="drag-n-drop-5"></p>
+</details>
+
+<h2 id="point-and-click-mode">Point and Click mode</h2>
+<p>In this mode items can be selected with click, and then pasted/moved with another click on target element.</p>
+<details><summary>Paste factory on blueprint</summary>
+
+<p><img src="./assets/point-n-click1.gif" alt="point-n-click1"></p>
+</details>
+
+<details><summary>Paste links between factories</summary>
+
+<p><img src="./assets/point-n-click2.gif" alt="point-n-click2"></p>
+</details>
+
+<details><summary>Change port ordering (should click carefully on free space between ports)</summary>
+
+<p><img src="./assets/point-n-click4.gif" alt="point-n-click4"></p>
+</details>
+
+<details><summary>Move factory</summary>
+
+<p><img src="./assets/point-n-click3.gif" alt="point-n-click3"></p>
+</details>
+
+<h1 id="selecting--recipe">Selecting  recipe</h1>
+<p>Just click on center factory icon to select recipe. Filters also work here.
+If factory has only one recipe - recipes menu won&#39;t be shown.</p>
+<details><summary>Details</summary>
+
+<p><img src="./assets/recipe-selection.png" alt="recipe-selection"></p>
+</details>
+
+<h1 id="factory-rotation">Factory rotation</h1>
+<p>Factory may be rotated to create more pretty looking links.</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/rotation.gif" alt="rotation"></p>
+</details>
+
+<h1 id="factory-count-adjustment">Factory count adjustment</h1>
+<p>Factory count can be set using <code>hamburger</code> factory menu. Optionally <code>Plus</code> and <code>Minus</code> button on factory card face can be turned on in settings. <code>Plus</code> and <code>Minus</code> adjust count by one, while textbox on menu can be used to set fractional counts. There is also <code>Mass Update Count</code> toolbar button, which could be used to apply automatically calculated counts.</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/count-adjustment.gif" alt="count-adjustment"></p>
+</details>
+
+<h1 id="factory-upgrade--downgrade">Factory upgrade / downgrade</h1>
+<p>If factory has next or previous tier version, upgrade option becomes available inside <code>hamburger</code> factory menu. Turning upgrade mode affects all factories.</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/upgrade-mode.gif" alt="upgrade-mode"></p>
+</details>
+
+<h1 id="inspection-of-logistic-transport">Inspection of logistic transport</h1>
+<p>Logistic transport can be inspected for links, which connects items with known transport (conveyors, pipes, manipulators, robotic arms). When clicking on link menu, logistic info will be shown automatically. Specific transport may be locked, in this case locked transport will be preferred for entire blueprint.</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/logistic.gif" alt="logistic"></p>
+</details>
+
+<h1 id="summary-window">Summary window</h1>
+<p>Summary window will show overall consumption / production / building costs of blueprint. Because it is calculated while blueprint is updated - it is recommended to turn it off for very large blueprints. Summary window can work in two modes - simple and expanded. Modes are switched sequentially by corresponding button. Summary window will be empty if blueprint is empty or not calculated. Summary window shows production / consumption only for open ends (not connected to anything).</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/summary.gif" alt="summary"></p>
+</details>
+
+<h1 id="filtering">Filtering</h1>
+<p>Text filter accepts multiple words, these words are split by space and then applied to filter together.
+For example search text <code>it a</code> may be used to search for <code>Item A</code>, or <code>co fu</code> may be used to search for <code>Copper Blast Furnace</code>.</p>
+<h2 id="filtering-on-left-panel">Filtering on left panel</h2>
+<p>Left panel factories may be filtered by input/output item.
+If filter is applied - after adding new factory from left panel to blueprint corresponding recipe will be selected automatically.</p>
+<h2 id="filtering-by-inputoutput-for-factory-on-blueprint">Filtering by input/output for factory on blueprint</h2>
+<p>Input/output adjacent square, which display throughput, may be clicked to quick filter left panel by matching item.
+Because filtered recipe is selected automatically, this way long production lines may be built easier and quicker.</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/factory-filtering.gif" alt="factory-filtering"></p>
+</details>
+
+<h2 id="filtering-on-summary-window">Filtering on summary window</h2>
+<p>Filter can also be applied by clicking icon on summary window.</p>
+<h1 id="solving-graph">Solving graph</h1>
+<p>Graph is solved by clicking on <img src="./assets/solve.png" alt="solve"> toolbar button.
+In automatic mode graph is solved automatically on every change.
+Because solving is slower for larger factory count - manual mode is preferred for very large blueprints.</p>
+<p>Solving is done with fixed precision, which can be changed in <code>Settings</code>.
+The lower number means higher precision and better accuracy.
+Because of this, there will be computation errors if connected factories throughput greatly differs or precision is too low.</p>
+<h2 id="automatic-graph-error-detection">Automatic graph error detection</h2>
+<p>Factory chains may be unbalanced when factory outputs two item types, and these items directly or through production chain will be both feed to another factory at different rate. Production cycles may also be unbalanced. In this case graph solver cannot solve factory io, so entire flow rate will be 0. This is expected, because real production chain of this type will also produce at zero rate after some time, because one output will be clogged or input will be starved.</p>
+<p>Graph solver has automatic error detection and will try to find port which causes error. This is implemented by adding virtual sink with lowest priority to each factory output. If this virtual sink flow is non-zero this means connected factory output is unbalanced, and such output will be highlighted in red color. To resolve this error, some building should be added instead of this virtual sink, which will consume overflown items.</p>
+<p>Only unbalanced outputs are detected automatically, because it is most common case.</p>
+<details><summary>Example</summary>
+
+<p><img src="./assets/unbalanced-graph.gif" alt="unbalanced-graph"></p>
+</details>
+
+<h2 id="special-buildings">Special buildings</h2>
+<p>Almost every game implementation has set of special buildings. These buildings are usually represented as containers (maybe inexistent in real game) which accept all items of some kind (fluid, solid, etc). These buildings have 3 recipes, input, output and input+output. They could be used as utility buildings to tune production flows or for nicer graph layouts.</p>
+<h1 id="fine-tuning-graph-solve-process">Fine-tuning graph solve process</h1>
+<h2 id="locking-factories">Locking factories</h2>
+<p>Initially, if no factories in given line are locked, no input/output can go beyond maximum.
+In this mode calculator will answer the question: where is bottleneck and how many items this line will produce.</p>
+<p>When one or more factories are locked, other factories in the same line can go beyond their maximum count.
+In this mode calculator will answer the question: how many factories will be needed to produce items at this rate.</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/locking.gif" alt="locking"></p>
+</details>
+
+<h2 id="setting-objective">Setting objective</h2>
+<p>Initially graph is calculated using simple mode. In this mode graph solver tries to maximize overall io flow. This is acceptable for simple production chains, but may be adjusted for complex chains with multiple dependent output where maximizing one output will minimize other. It is recommended to set only one final product as main objective. Graph solver will first maximize main objective, and then will try to maximize secondary objective without hurting main objective. If any factory is set as objective - all other factories are excluded from maximization process.</p>
+<details><summary>See in action</summary>
+
+<p><img src="./assets/objective.gif" alt="locking"></p>
+</details>
+
+<h1 id="known-problems-and-limitations">Known problems and limitations</h1>
+<h2 id="too-much-flow-difference-between-connected-factories">Too much flow difference between connected factories</h2>
+<p>When one factory produces/consumes at much higher ratio, than other connected factory (1000x or more), and their numbers are not integers, calculator fails to determine correct count due to insufficient precision. To fix this issue, precision should be set to other (lower) value, although it may not be enough for some cases.</p>
+
+    </article>
+</body>
+
+</html>
