@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { Btn, ModalShell, SearchInput, Select, ToggleSwitch } from './UI';
 import { ProductGrid } from './ProductGrid';
-import { t, isPowerBuilding, HIDDEN_SERIES, isRaw, isPowerItem, getSeriesName } from '../utils';
+import { t, isPowerBuilding, HIDDEN_SERIES, isPowerItem, getSeriesName } from '../utils';
 import { Recipe, Series } from '../types';
 
 // ==================== 建筑等级弹窗 ====================
@@ -152,6 +152,9 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
 
   return (
     <ModalShell open={open} onClose={onClose} title="🧪 建筑与配方">
+      <div style={{ background: '#e3f2fd', color: '#0d47a1', padding: '6px 10px', borderRadius: 4, marginBottom: 8, fontSize: '1rem' }}>
+        关闭某个建筑后，其附属配方不会参与求解（即使配方开关仍开启）
+      </div>
       <SearchInput placeholder="搜索建筑或配方..." value={search} onChange={setSearch} />
       <div className="recipe-panel">
         <div className="category-tabs">
@@ -454,16 +457,17 @@ export const DemandModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   const [selected, setSelected] = useState<string | null>(null);
   const [rate, setRate] = useState(100);
 
-  const items = allItems.sort();
+  const items = [...allItems].sort();
 
   return (
     <ModalShell open={open} onClose={onClose} title="🎯 选择生产目标" maxWidth="700px"
       footer={
         <>
-          <label>产量/分: <input type="number" value={rate} min={0.1} step={1} style={{ width: 80 }}
+          <label>产量/分: <input type="number" value={rate} step={1} style={{ width: 80 }}
             onChange={e => setRate(parseFloat(e.target.value) || 0)} /></label>
+          <span className="hint">负数为必须消耗</span>
           <Btn onClick={() => {
-            if (selected && rate > 0) { addDemand(selected, rate); onClose(); }
+            if (selected && rate !== 0) { addDemand(selected, rate); onClose(); }
           }}>➕ 添加</Btn>
         </>
       }>
@@ -475,43 +479,6 @@ export const DemandModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
         setSearch={setSearch}
         placeholder="搜索物品..."
       />
-    </ModalShell>
-  );
-};
-
-// ==================== 排除产物弹窗 ====================
-export const ExcludeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
-  const allItems = useStore(s => s.allItems);
-  const excludedItems = useStore(s => s.excludedItems);
-  const setExcludedItems = useStore(s => s.setExcludedItems);
-  const translation = useStore(s => s.translation);
-
-  const [search, setSearch] = useState('');
-  const [localExcluded, setLocalExcluded] = useState<Set<string>>(new Set(excludedItems));
-
-  React.useEffect(() => { setLocalExcluded(new Set(excludedItems)); }, [excludedItems, open]);
-
-  const filtered = allItems
-    .filter(i => !isRaw(i) && (i.toLowerCase().includes(search.toLowerCase()) || t(i, translation).includes(search)))
-    .sort();
-
-  return (
-    <ModalShell open={open} onClose={onClose} title="🚫 排除产物（不参与平衡）" maxWidth="700px"
-      footer={<Btn onClick={() => { setExcludedItems([...localExcluded]); onClose(); }}>完成</Btn>}>
-      <SearchInput placeholder="搜索中/英文..." value={search} onChange={setSearch} />
-      <div className="exclude-list">
-        {filtered.map(item => (
-          <div className="exclude-item" key={item}>
-            <input type="checkbox" checked={localExcluded.has(item.toLowerCase())}
-              onChange={e => {
-                const next = new Set(localExcluded);
-                e.target.checked ? next.add(item.toLowerCase()) : next.delete(item.toLowerCase());
-                setLocalExcluded(next);
-              }} />
-            <span className="exclude-item-name">{t(item, translation)} ({item})</span>
-          </div>
-        ))}
-      </div>
     </ModalShell>
   );
 };

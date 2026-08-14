@@ -238,10 +238,8 @@ export function calcResidentDemands(
   let nonFoodUnity = 0;
 
   if (DEBUG) {
-  if (DEBUG) {
     console.log('catMods:', catMods);
     console.log('itemMods:', itemMods);
-  }
   }
   if (numActiveGroups > 0) {
     for (const [grp, enabledList] of Object.entries(activeGroups)) {

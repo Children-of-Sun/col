@@ -54,7 +54,8 @@ const TechPanel: React.FC = () => {
       <h4>🔬 {t('研究', translation)}</h4>
       {items.map(({ res, idx, lvl, nextCost, totalCost }) => (
         <div key={res.name} style={{ marginBottom: 5 }}>
-          <label>{res.name} ({t('最高', translation)} {res.maxLevel}): </label>
+          <label style={{ display: 'inline-block', minWidth: 150 }}>{res.name}: </label>
+          <span style={{ display: 'inline-block', fontSize: '0.78rem', color: '#888', width: 55, textAlign: 'left' }}>max{res.maxLevel}</span>
           <input
             type="number"
             min={0}

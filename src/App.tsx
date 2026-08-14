@@ -3,7 +3,7 @@ import { useStore } from './stores';
 import { MainLevelPanel, PowerPanel, SpaceStationPanel, StatuePanel, DemandPanel } from './components/Panels';
 import { LabPanel } from './components/LabPanel';
 import { OptionsPanel } from './components/OptionsPanel';
-import { LevelModal, RecipeModal, PowerRecipeModal, DemandModal, ExcludeModal } from './components/Modals';
+import { LevelModal, RecipeModal, PowerRecipeModal, DemandModal } from './components/Modals';
 import { Results } from './components/Results';
 import { Btn, Checkbox } from './components/UI';
 import ResidentPanel from './components/ResidentPanel';
@@ -16,7 +16,9 @@ import { buildLp } from './lpBuilder';
 import { t, isMipSuccess, getColValue, getAllActive } from './utils';
 import { isContinuous } from './utils/format';
 import { buildActiveRecipes } from './buildActiveRecipes';
-import SimpleMode from './components/SimpleMode';
+import CalculatorMode from './components/CalculatorMode';
+import PlannerMode from './components/PlannerMode';
+import GraphOneMode from './components/GraphOneMode';
 import { Demand, Recipe } from './types';
 import './App.css';
 
@@ -61,9 +63,11 @@ export default function App() {
   const [recipeModalOpen, setRecipeModalOpen] = useState(false);
   const [powerRecipeModalOpen, setPowerRecipeModalOpen] = useState(false);
   const [demandModalOpen, setDemandModalOpen] = useState(false);
-  const [excludeModalOpen, setExcludeModalOpen] = useState(false);
   const [helpExpanded, setHelpExpanded] = useState(false);
-  const [appMode, setAppMode] = useState<'simple' | 'advanced'>('advanced');
+  const [toast, setToast] = useState<string | null>(null);
+  const [relaxToast, setRelaxToast] = useState<string | null>(null);
+  const [appMode, setAppMode] = useState<'simple' | 'advanced' | 'graph1' | 'graph2'>('advanced');
+  const [dragOver, setDragOver] = useState(false);
   const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'agriculture' | 'resident' | 'edict' | 'office' | 'tech'>('main');
 
   // Worker 复用：避免每次求解创建新 Worker（2GB WASM）
@@ -171,7 +175,7 @@ export default function App() {
             const state = useStore.getState();
             const labBuildings = state.labMeta.map(meta => meta.buildingId);
             for (const buildingId of labBuildings) {
-              const recipesForBuilding = state.recipes.filter(r => r.buildingId === buildingId && r.module === 'special');
+              const recipesForBuilding = state.recipes.filter(r => r.buildingId === buildingId && r.module === 'main');
               const enabledRecipes = recipesForBuilding.filter(r => state.recipeEnabled[r.id]);
               if (enabledRecipes.length > 1) {
                 for (let i = 1; i < enabledRecipes.length; i++) {
@@ -581,6 +585,150 @@ export default function App() {
     }
   };
 
+  // ESC to dismiss relaxToast
+  useEffect(() => {
+    if (!relaxToast) return;
+    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setRelaxToast(null); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, [relaxToast]);
+
+  // Global drag-and-drop: drop JSON file anywhere on page to import
+  const handleGlobalDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.dataTransfer.types.includes('Files')) setDragOver(true);
+  }, []);
+  const handleGlobalDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    if (e.currentTarget === e.target) setDragOver(false);
+  }, []);
+  const handleGlobalDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    setDragOver(false);
+    const file = e.dataTransfer.files[0];
+    if (file && file.name.endsWith('.json')) {
+      try {
+        const j = JSON.parse(await file.text());
+        useStore.getState().importSettings(j);
+        setToast('✅ 配置已导入');
+        setTimeout(() => setToast(null), 2000);
+      } catch (err: any) {
+        setToast('❌ 导入失败');
+        setTimeout(() => setToast(null), 3000);
+      }
+    }
+  }, []);
+
+  // Auto-relaxation helper: try progressively relaxing constraints
+  const autoRelax = useCallback(async (baseParams: any) => {
+    const s = useStore.getState();
+    if (!s.diagnosticMode) return null;
+
+    const RELAX_ITEMS = ['sulfur', 'slag', 'iron ore crushed', 'compost', 'brine', 'water'];
+    const RELAX_KEY = 'autoRelaxConfig';
+
+    let savedOrder: string[][] = [];
+    try { const raw = localStorage.getItem(RELAX_KEY); if (raw) savedOrder = JSON.parse(raw); } catch { /* ignore */ }
+
+    function* combos(items: string[], size: number): Generator<string[]> {
+      function* helper(start: number, current: string[]): Generator<string[]> {
+        if (current.length === size) { yield [...current]; return; }
+        for (let i = start; i < items.length; i++) {
+          current.push(items[i]);
+          yield* helper(i + 1, current);
+          current.pop();
+        }
+      }
+      yield* helper(0, []);
+    }
+
+    const tryRelax = async (exOut: string[], exIn: string[], label: string): Promise<any> => {
+      const trans = useStore.getState().translation;
+      let cnLabel = label;
+      RELAX_ITEMS.forEach(en => { cnLabel = cnLabel.replace(en, trans[en] || en); });
+      setDiagnostic(`🔧 自动松弛尝试: ${cnLabel}`);
+      const relaxLp = buildLp({
+        ...baseParams,
+        excludedOutputs: new Set([...(baseParams.excludedOutputs || []), ...exOut]),
+        excludedInputs: new Set([...(baseParams.excludedInputs || []), ...exIn]),
+      });
+      const result = await runLpSolver(relaxLp.lpString, relaxLp.varNames, 'continuous');
+      if (isMipSuccess(result?.Status)) {
+        useStore.getState().setSolverVarNames(relaxLp.varNames);
+        setSolverMissing(relaxLp.missing);
+        return { result, varNames: relaxLp.varNames, label, exOut, exIn };
+      }
+      return null;
+    };
+
+    const attempts: { exOut: string[]; exIn: string[]; label: string }[] = [];
+    if (savedOrder.length > 0) {
+      attempts.push({
+        exOut: savedOrder.flatMap(([r]: string[]) => [r]),
+        exIn: savedOrder.flatMap(([r]: string[]) => [r]),
+        label: '上次成功配置: ' + savedOrder.flat().join(', '),
+      });
+    }
+
+    for (let size = 1; size <= RELAX_ITEMS.length; size++) {
+      for (const combo of combos(RELAX_ITEMS, size)) {
+        attempts.push({ exOut: combo, exIn: combo, label: `排除产出+输入: ${combo.join(', ')}` });
+      }
+    }
+
+    for (const attempt of attempts) {
+      const r = await tryRelax(attempt.exOut, attempt.exIn, attempt.label);
+      if (r) {
+        let finalExOut = [...attempt.exOut];
+        let finalExIn = [...attempt.exIn];
+        for (const item of attempt.exOut) {
+          const testOut = finalExOut.filter(x => x !== item);
+          const testIn = finalExIn.filter(x => x !== item);
+          const rOut = await tryRelax(testOut, testIn, `优化: ${item} 仅排除产出`);
+          if (rOut) { finalExOut = testOut; finalExIn = testIn; continue; }
+          const rIn = await tryRelax(testOut, [...testIn, item], `优化: ${item} 仅排除输入`);
+          if (rIn) { finalExOut = testOut; finalExIn = [...testIn, item]; continue; }
+        }
+        const config = finalExOut.length > 0 || finalExIn.length > 0
+          ? RELAX_ITEMS.filter(r => finalExOut.includes(r) || finalExIn.includes(r)).map(r => [r])
+          : [];
+        try { localStorage.setItem(RELAX_KEY, JSON.stringify(config)); } catch { /* ignore */ }
+        const finalLp = buildLp({
+          ...baseParams,
+          excludedOutputs: new Set([...(baseParams.excludedOutputs || []), ...finalExOut]),
+          excludedInputs: new Set([...(baseParams.excludedInputs || []), ...finalExIn]),
+        });
+        useStore.getState().setSolverVarNames(finalLp.varNames);
+        setSolverMissing(finalLp.missing);
+        const finalResult = await runLpSolver(finalLp.lpString, finalLp.varNames, 'continuous');
+        if (isMipSuccess(finalResult?.Status)) {
+          setResult(finalResult);
+          setIsSolving(false);
+          const trans = useStore.getState().translation;
+          const cn = (s: string) => trans[s] || s;
+          const outItems = finalExOut.map(cn).join('、');
+          const inItems = finalExIn.map(cn).join('、');
+          let msg = '';
+          if (finalExOut.length > 0 && finalExIn.length > 0) {
+            const both = [...new Set([...finalExOut, ...finalExIn])].map(cn).join('、');
+            msg = `设置有问题，排除输入输出：${both} 后有解`;
+          } else if (finalExOut.length > 0) {
+            msg = `设置有问题，排除输出：${outItems} 后有解`;
+          } else if (finalExIn.length > 0) {
+            msg = `设置有问题，排除输入：${inItems} 后有解`;
+          } else {
+            msg = '求解完成';
+          }
+          setDiagnostic('✅ ' + msg);
+          setRelaxToast('✅ ' + msg);
+          setTimeout(() => setRelaxToast(null), 2000);
+          return true;
+        }
+      }
+    }
+    return null;
+  }, []);
+
   const handleSolve = useCallback(async () => {
     const s = useStore.getState();
     // Guard: prevent concurrent solves
@@ -730,6 +878,7 @@ export default function App() {
     const pass1Lp = buildLp({
       ...lpBaseParams,
       relaxLabor: false,
+      fixResident: true, // 第一趟：居民固定 = 人口/1000，人力不自动调整
     });
 
     if (integerMode === 'milp' && DEBUG) {
@@ -821,7 +970,7 @@ export default function App() {
           }
           // 人力超 → 第二趟
           setDiagnostic(`⚠️ 实际人力(${Math.ceil(actualLabor)})超人口(${pop})，第二趟：加入人力约束...`);
-          const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+          const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false, fixResident: false });
           useStore.getState().setSolverVarNames(pass2Lp.varNames);
           setSolverMissing(pass2Lp.missing);
           const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, 'continuous');
@@ -832,7 +981,7 @@ export default function App() {
           }
         } else {
           setDiagnostic('⚠️ 第一趟不可行，尝试加入人力约束...');
-          const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+          const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false, fixResident: false });
           useStore.getState().setSolverVarNames(pass2Lp.varNames);
           setSolverMissing(pass2Lp.missing);
           const pass2Result = await runLpSolver(pass2Lp.lpString, pass2Lp.varNames, 'continuous');
@@ -857,7 +1006,7 @@ export default function App() {
 
           if (!isMipSuccess(result1?.Status)) {
             setDiagnostic('⚠️ 第一趟不可行，尝试加入人力约束...');
-            const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+            const pass2Lp = buildLp({ ...lpBaseParams, relaxLabor: false, fixResident: false });
             const safe2 = stripIntegerSection(pass2Lp.lpString);
             useStore.getState().setSolverVarNames(pass2Lp.varNames);
             setSolverMissing(pass2Lp.missing);
@@ -947,7 +1096,7 @@ export default function App() {
                 return;
               }
               setDiagnostic('Labor exceeds pop, re-solving...');
-              const p2Lp = buildLp({ ...lpBaseParams, relaxLabor: false });
+              const p2Lp = buildLp({ ...lpBaseParams, relaxLabor: false, fixResident: false });
               const p2Result = await runLpSolver(p2Lp.lpString, p2Lp.varNames, 'milp');
               if (isMipSuccess(p2Result?.Status)) {
                 finalizeResult(p2Result, p2Lp.varNames, 'MILP + labor constraint done.');
@@ -994,19 +1143,75 @@ export default function App() {
         setDiagnostic(`求解器错误: ${err.message}`);
       }
     }
-  }, [getFixedDemands, solarEfficiency, solveCeilMode]);
+
+    // Auto-relaxation: if infeasible and diagnostic mode on
+    if (useStore.getState().diagnosticMode) {
+      const cr = useStore.getState().result;
+      const st = cr?.Status || cr?.status;
+      if (!st || st === 'Infeasible') {
+        await autoRelax(lpBaseParams);
+      }
+    }
+  }, [getFixedDemands, solarEfficiency, solveCeilMode, autoRelax]);
 
   return (
-    <>
+    <div onDragOver={handleGlobalDragOver} onDragLeave={handleGlobalDragLeave} onDrop={handleGlobalDrop} style={{ minHeight: '100vh' }}>
+      {toast && (
+        <div style={{
+          position: 'fixed', top: 12, left: '50%', transform: 'translateX(-50%)', zIndex: 9999,
+          background: '#333', color: '#fff', padding: '8px 20px', borderRadius: 6,
+          fontSize: '0.9rem', boxShadow: '0 2px 10px rgba(0,0,0,0.3)', pointerEvents: 'none',
+        }}>
+          {toast}
+        </div>
+      )}
+      {relaxToast && (
+        <div
+          onClick={() => setRelaxToast(null)}
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 10000,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: 'rgba(0,0,0,0.3)', cursor: 'pointer',
+          }}
+        >
+          <div style={{
+            background: '#1b5e20', color: '#fff', padding: '20px 36px', borderRadius: 10,
+            fontSize: '1.2rem', fontWeight: 600, boxShadow: '0 4px 20px rgba(0,0,0,0.4)',
+            textAlign: 'center',
+          }}>
+            {relaxToast}
+            <div style={{ fontSize: '0.8rem', fontWeight: 400, marginTop: 8, opacity: 0.7 }}>
+              点击任意处或按 ESC 关闭（2秒后自动消失）
+            </div>
+          </div>
+        </div>
+      )}
+      {dragOver && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9998, background: 'rgba(33,150,243,0.08)',
+          border: '4px dashed #2196F3', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none',
+        }}>
+          <div style={{ background: '#2196F3', color: '#fff', padding: '16px 32px', borderRadius: 8, fontSize: '1.2rem' }}>
+            📥 松开以导入配置文件
+          </div>
+        </div>
+      )}
       <h1> 工业巨头量化计算器
         <span style={{ marginLeft: 16, fontSize: '0.9rem' }}>
           <Btn variant={appMode === 'simple' ? 'primary' : 'default'}
                onClick={() => setAppMode('simple')}>🌳 简化</Btn>
           <Btn variant={appMode === 'advanced' ? 'primary' : 'default'}
                onClick={() => setAppMode('advanced')} style={{ marginLeft: 4 }}>⚙️ 高级</Btn>
+          <Btn variant={appMode === 'graph1' ? 'primary' : 'default'}
+               onClick={() => setAppMode('graph1')} style={{ marginLeft: 4 }}>📐 图表一</Btn>
+          <Btn variant={appMode === 'graph2' ? 'primary' : 'default'}
+               onClick={() => setAppMode('graph2')} style={{ marginLeft: 4 }}>📐 图表二</Btn>
         </span>
       </h1>
-      {appMode === 'simple' && <SimpleMode />}
+      {appMode === 'simple' && <CalculatorMode />}
+      {appMode === 'graph1' && <GraphOneMode />}
+      {appMode === 'graph2' && <PlannerMode />}
       {appMode === 'advanced' && (<>
       <div className="section" style={{ marginBottom: 12 }}>
         <div onClick={() => setHelpExpanded(!helpExpanded)}
@@ -1091,7 +1296,7 @@ export default function App() {
         <div className="left-column">
           <div className="section">
             <h3>💾 配置管理</h3>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 8 }}>
               <Btn onClick={() => {
                 const data = useStore.getState().exportSettings();
                 const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -1101,29 +1306,40 @@ export default function App() {
                 a.download = 'factory_settings.json';
                 a.click();
                 setTimeout(() => URL.revokeObjectURL(url), 100);
-              }}>📤 导出全部设置</Btn>
+              }} style={{ flex: 1, fontSize: '0.95rem', padding: '10px 0' }}>📤 导出全部设置</Btn>
               <Btn onClick={() => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.accept = '.json';
-                input.onchange = async (e: any) => {
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.accept = '.json';
+                  input.onchange = async (e: any) => {
                   if (e.target.files[0]) {
-                    const j = JSON.parse(await e.target.files[0].text());
-                    useStore.getState().importSettings(j);
+                    try {
+                      const j = JSON.parse(await e.target.files[0].text());
+                      useStore.getState().importSettings(j);
+                      setToast('✅ 配置已导入');
+                      setTimeout(() => setToast(null), 2000);
+                    } catch (err: any) {
+                      setToast('❌ 导入失败');
+                      setTimeout(() => setToast(null), 3000);
+                    }
                   }
                 };
                 input.click();
-              }}>📥 导入全部设置</Btn>
+              }} style={{ flex: 1, fontSize: '0.95rem', padding: '10px 0' }}>📥 导入全部设置</Btn>
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
               <Btn onClick={() => {
                 try {
                   const s = useStore.getState().exportSettings();
                   localStorage.setItem('factorySettings', JSON.stringify(s));
-                  alert('配置已保存到浏览器');
+                  setToast('✅ 配置已保存');
+                  setTimeout(() => setToast(null), 2000);
                 } catch(e) {
                   console.error('保存配置失败:', e);
-                  alert('保存配置失败: ' + (e instanceof Error ? e.message : String(e)));
+                  setToast('❌ 保存失败: ' + (e instanceof Error ? e.message : String(e)));
+                  setTimeout(() => setToast(null), 3000);
                 }
-              }}>💾 保存当前配置</Btn>
+              }} style={{ flex: 1 }}>💾 保存当前配置</Btn>
               <Btn onClick={() => {
                 if (confirm('恢复默认会丢弃当前设置，确定吗？')) {
                   fetch('./data.json')
@@ -1133,14 +1349,14 @@ export default function App() {
                       localStorage.removeItem('factorySettings');
                     });
                 }
-              }}>🔄 恢复默认</Btn>
+              }} style={{ flex: 1 }} variant="default">🔄 恢复默认</Btn>
             </div>
             <div style={{ marginTop: 8 }}>
               <Checkbox label="显示图标" checked={showIcons} onChange={setShowIcons} />
             </div>
             <span className="hint">下次打开自动加载上次保存的配置</span>
           </div>
-          <OptionsPanel onOpenExcludeModal={() => setExcludeModalOpen(true)} />
+          <OptionsPanel />
           <div className="demand-solve-row">
             <DemandPanel onOpenDemandModal={() => setDemandModalOpen(true)} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1193,10 +1409,9 @@ export default function App() {
       <RecipeModal open={recipeModalOpen} onClose={() => setRecipeModalOpen(false)} />
       <PowerRecipeModal open={powerRecipeModalOpen} onClose={() => setPowerRecipeModalOpen(false)} />
       <DemandModal open={demandModalOpen} onClose={() => setDemandModalOpen(false)} />
-      <ExcludeModal open={excludeModalOpen} onClose={() => setExcludeModalOpen(false)} />
 
       <Results />
     </>)}
-  </>
+    </div>
   );
 }

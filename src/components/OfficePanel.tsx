@@ -114,13 +114,17 @@ const OfficePanel: React.FC = () => {
     if (newVal) {
       if (currentIntegerMode === 'milp') {
         // 仅在混合整数模式下联动冗余
-        if (!currentResources[targetItem]) {
+        const alreadyExisted = !!currentResources[targetItem];
+        if (!alreadyExisted) {
           s.setRedundancyResources({
             ...currentResources,
             [targetItem]: { enabled: true, lower: 100, upper: 100 },
           });
         }
-        s.setRedundancyAutoItems({ ...currentAutoItems, [targetItem]: true });
+        // 仅当物品是自动新增的才标记 auto；手动配置的物品保留其手动状态
+        if (!alreadyExisted) {
+          s.setRedundancyAutoItems({ ...currentAutoItems, [targetItem]: true });
+        }
         if (!s.enableRedundancy) {
           s.setEnableRedundancy(true);
         }
@@ -257,7 +261,8 @@ const OfficePanel: React.FC = () => {
         return (
           <div key={idx} style={{ marginBottom: 10 }}>
             <div>
-              <label>{t(off.name, translation)} (最高 {off.maxLevel}): </label>
+              <label style={{ display: 'inline-block', minWidth: 150 }}>{t(off.name, translation)}: </label>
+              <span style={{ display: 'inline-block', fontSize: '0.78rem', color: '#888', width: 55, textAlign: 'left' }}>max{off.maxLevel}</span>
               <input
                 type="number"
                 min={0}

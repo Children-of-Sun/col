@@ -98,6 +98,13 @@ interface ModalShellProps {
   maxWidth?: string;
 }
 export const ModalShell: React.FC<ModalShellProps> = ({ open, onClose, title, children, footer, maxWidth }) => {
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
   if (!open) return null;
   return (
     <div className="modal" style={{ display: 'block' }}>

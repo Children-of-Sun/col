@@ -10,6 +10,8 @@
     "preview": "vite preview",
     "translate:daxfb": "node scripts/translateDaxfbData.mjs",
     "patch:daxfb": "node scripts/patchDaxfbJs.mjs",
+    "patch:data": "node scripts/patchDataJson.mjs",
+    "update:data": "node scripts/updateDataJson.mjs",
     "predeploy": "npm run build",
     "deploy": "gh-pages -d dist"
   },

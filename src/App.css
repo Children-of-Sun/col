@@ -61,11 +61,11 @@ td:first-child { text-align: left; }
 .btn-danger:hover:not(:disabled) { background: #b8251f; }
 .hint { color: #666; font-size: 13px; }
 .stat { background: #e8f0fe; padding: 8px; border-radius: 6px; margin: 10px 0; }
-.modal { position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; overflow:auto; background:rgba(0,0,0,0.5); }
-.modal-content { background:white; margin:40px auto; padding:20px; border-radius:8px; width:90%; max-width:1000px; max-height:80vh; overflow-y:auto; }
+.modal { position:fixed; z-index:1000; left:0; top:0; width:100%; height:100%; overflow:hidden; background:rgba(0,0,0,0.5); }
+.modal-content { background:white; margin:40px auto; padding:20px 20px 0; border-radius:8px; width:90%; max-width:1000px; max-height:80vh; overflow-y:auto; }
 .modal-header { display:flex; justify-content:space-between; align-items:center; }
 .close-btn { font-size:24px; cursor:pointer; }
-.modal-footer { margin-top:15px; display:flex; gap:10px; }
+.modal-footer { margin:15px -20px 0; display:flex; gap:10px; position:sticky; bottom:0; background:white; z-index:1000; padding:10px 20px 20px; border-top:1px solid #eee; box-shadow:0 -4px 8px rgba(0,0,0,0.06); }
 .recipe-panel { display:flex; gap:15px; }
 .category-tabs { width:180px; border-right:1px solid #ddd; overflow-y:auto; max-height:60vh; }
 .category-tab { padding:6px 10px; cursor:pointer; border-radius:4px; margin:2px 0; }

@@ -46,6 +46,22 @@ npm run build
 npm run deploy
 ```
 
+### 更新游戏数据（data.json）
+
+`public/data.json` 来自 [David-Melo/captain-of-data](https://github.com/David-Melo/captain-of-data) 的 `data/machines_and_buildings.json`，
+并叠加了本项目的少量手工整理（雕像建筑、升级链断开、配方改名、维护迁移等，规则见 `scripts/dataPatchCore.mjs`）。
+上游更新后无需手动重做：
+
+- **GitHub Actions 自动更新**（推荐）：仓库已配置 `.github/workflows/update-data.yml`，
+  每周一自动检查上游 → 应用整理 → 重新构建 → 提交并部署。也可在 Actions 页面手动触发。
+- **本地一键更新**：
+
+```bash
+npm run update:data
+# 只预览差异不写入：
+npm run update:data -- --check
+```
+
 ## 项目结构
 
 ```

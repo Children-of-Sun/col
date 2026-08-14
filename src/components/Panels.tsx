@@ -199,7 +199,13 @@ export const DemandPanel: React.FC<{ onOpenDemandModal: () => void }> = ({ onOpe
     <div className="section">
       <h3>🎯 生产目标</h3>
       <Btn onClick={onOpenDemandModal} disabled={!dataLoaded}>🎯 选择产品</Btn>
-      <ul>{demands.map((d, i) => <li key={`${d.item}_${d.rate}_${i}`}>{t(d.item, translation)} ({d.item}): {d.rate}/分 <Btn variant="danger" onClick={() => removeDemand(i)}>🗑️</Btn></li>)}</ul>
+      <ul>{demands.map((d, i) => (
+        <li key={`${d.item}_${d.rate}_${i}`}>
+          {t(d.item, translation)} ({d.item}): {d.rate}/分
+          {d.rate < 0 && <span className="hint" style={{ color: '#c62828' }}>（必须消耗）</span>}
+          <Btn variant="danger" onClick={() => removeDemand(i)}>🗑️</Btn>
+        </li>
+      ))}</ul>
     </div>
   );
 };

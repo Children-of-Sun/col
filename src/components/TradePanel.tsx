@@ -1,11 +1,18 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { useStore } from '../stores';
 import { TradeContract, Recipe } from '../types';
 import { t } from '../utils';
 import { Btn, ModalShell, SearchInput, Checkbox } from './UI';
 import { buildTradeRecipe } from '../utils/trade';
 
+type SortKey = 'name' | 'buyItem' | 'sellItem' | 'buyPerMin' | 'sellPerMin' | 'unityPerMin' | 'enabled' | '';
 
+/** Sortable table header */
+const SortTh: React.FC<{ label: string; active: boolean; dir: number; onClick: () => void }> = ({ label, active, dir, onClick }) => (
+  <th onClick={onClick} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }}>
+    {label} <span style={{ color: active ? '#2196F3' : '#ccc' }}>{active ? (dir === 1 ? '▲' : '▼') : '⇅'}</span>
+  </th>
+);
 
 interface TradeResult {
   contract: TradeContract;
@@ -52,6 +59,9 @@ export const TradePanel: React.FC = () => {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [tempSelectedIds, setTempSelectedIds] = useState<Set<string>>(new Set(selectedTradeContractIds));
+  const [filterText, setFilterText] = useState('');
+  const [sortKey, setSortKey] = useState<SortKey>('');
+  const [sortDir, setSortDir] = useState<1 | -1>(1);
 
   const baySlots = tradeParams.baySlots;
   const moduleSize = tradeParams.moduleSize;
@@ -128,8 +138,61 @@ export const TradePanel: React.FC = () => {
     return results;
   }, [tradeContracts, baySlots, moduleSize, fuelTypeRaw, travelMode, profitBonusFromOffice, unityDiscountFromOffice, tradeVoyageTime, gameData, fullData, translation, edictLevels, researchLevels]);
 
+  // Filtered + sorted contract results
+  const filteredResults = useMemo(() => {
+    let list = [...allContractResults];
+    // Filter by text
+    if (filterText.trim()) {
+      const q = filterText.toLowerCase();
+      list = list.filter(r =>
+        t(r.contract.buyItem, translation).toLowerCase().includes(q) ||
+        t(r.contract.sellItem, translation).toLowerCase().includes(q) ||
+        (r.contract.name || r.contract.id).toLowerCase().includes(q)
+      );
+    }
+    // Sort
+    if (sortKey) {
+      list.sort((a, b) => {
+        let va: any, vb: any;
+        switch (sortKey) {
+          case 'name': va = t(a.contract.name || a.contract.id, translation); vb = t(b.contract.name || b.contract.id, translation); break;
+          case 'buyItem': va = t(a.contract.buyItem, translation); vb = t(b.contract.buyItem, translation); break;
+          case 'sellItem': va = t(a.contract.sellItem, translation); vb = t(b.contract.sellItem, translation); break;
+          case 'buyPerMin': va = a.buyPerMin; vb = b.buyPerMin; break;
+          case 'sellPerMin': va = a.sellPerMin; vb = b.sellPerMin; break;
+          case 'unityPerMin': va = a.unityPerMin; vb = b.unityPerMin; break;
+          case 'enabled': va = tempSelectedIds.has(a.contract.id) ? 1 : 0; vb = tempSelectedIds.has(b.contract.id) ? 1 : 0; break;
+          default: return 0;
+        }
+        if (typeof va === 'string') return va.localeCompare(vb) * sortDir;
+        return (va - vb) * sortDir;
+      });
+    }
+    return list;
+  }, [allContractResults, filterText, sortKey, sortDir, translation]);
+
+  const handleSortClick = useCallback((key: SortKey) => {
+    if (sortKey === key) setSortDir(d => (d === 1 ? -1 : 1));
+    else { setSortKey(key); setSortDir(1); }
+  }, [sortKey]);
+
+  // Select/deselect all FILTERED results
+  const selectAllFiltered = () => {
+    const newSet = new Set(tempSelectedIds);
+    filteredResults.forEach(r => newSet.add(r.contract.id));
+    setTempSelectedIds(newSet);
+  };
+  const deselectAllFiltered = () => {
+    const newSet = new Set(tempSelectedIds);
+    filteredResults.forEach(r => newSet.delete(r.contract.id));
+    setTempSelectedIds(newSet);
+  };
+
   const openModal = () => {
     setTempSelectedIds(new Set(selectedTradeContractIds));
+    setFilterText('');
+    setSortKey('');
+    setSortDir(1);
     setModalOpen(true);
   };
 
@@ -239,39 +302,76 @@ export const TradePanel: React.FC = () => {
       </div>
 
       <ModalShell open={modalOpen} onClose={cancelModal} title={t('选择贸易合同', translation)} maxWidth="1200px">
-        <div style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+        {/* Filter + batch actions */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <input
+            type="text"
+            placeholder="筛选买入/卖出物品或合同名..."
+            value={filterText}
+            onChange={e => setFilterText(e.target.value)}
+            style={{ flex: 1, minWidth: 200, padding: '5px 8px', borderRadius: 4, border: '1px solid #ccc', fontSize: 13 }}
+          />
+          <Btn onClick={selectAllFiltered} style={{ fontSize: 12 }}>全选筛选</Btn>
+          <Btn onClick={deselectAllFiltered} style={{ fontSize: 12 }}>取消筛选</Btn>
+          <span style={{ fontSize: 12, color: '#888' }}>
+            {filteredResults.filter(r => tempSelectedIds.has(r.contract.id)).length}/{filteredResults.length} 筛选
+          </span>
+        </div>
+        <div>
           <table style={{ width: '100%', fontSize: '12px' }}>
             <thead>
               <tr>
-                <th>{t('启用', translation)}</th><th>{t('合同', translation)}</th><th>{t('买入', translation)}</th>
-                <th>{t('支付', translation)}</th><th>{t('单次买入', translation)}</th><th>{t('单次支付', translation)}</th>
-                <th>{t('航行/装卸/总时间(min)', translation)}</th><th>{t('每分钟买入', translation)}</th>
-                <th>{t('燃料/趟', translation)}</th><th>{t('人力/趟', translation)}</th>
-                <th>{t('维护/趟', translation)}</th><th>{t('凝聚力/分', translation)}</th>
+                <SortTh label={t('启用', translation)} active={sortKey === 'enabled'} dir={sortDir} onClick={() => handleSortClick('enabled')} />
+                <SortTh label={t('合同', translation)} active={sortKey === 'name'} dir={sortDir} onClick={() => handleSortClick('name')} />
+                <SortTh label={t('买入', translation)} active={sortKey === 'buyItem'} dir={sortDir} onClick={() => handleSortClick('buyItem')} />
+                <SortTh label={t('支付', translation)} active={sortKey === 'sellItem'} dir={sortDir} onClick={() => handleSortClick('sellItem')} />
+                <th>{t('单次', translation)}</th>
+                <SortTh label={t('买/分', translation)} active={sortKey === 'buyPerMin'} dir={sortDir} onClick={() => handleSortClick('buyPerMin')} />
+                <SortTh label={t('卖/分', translation)} active={sortKey === 'sellPerMin'} dir={sortDir} onClick={() => handleSortClick('sellPerMin')} />
+                <th>{t('燃料/人力', translation)}</th>
+                <SortTh label={t('凝聚/分', translation)} active={sortKey === 'unityPerMin'} dir={sortDir} onClick={() => handleSortClick('unityPerMin')} />
               </tr>
             </thead>
             <tbody>
-              {allContractResults.map(res => {
+              {filteredResults.map(res => {
                 const fuelLabel = t(fuelTypeRaw, translation);
+                const selected = tempSelectedIds.has(res.contract.id);
                 return (
-                  <tr key={res.contract.id}>
+                  <tr key={res.contract.id} style={{ background: selected ? '#f5f5f5' : 'transparent' }}>
                     <td style={{ textAlign: 'center' }}>
-                      <input type="checkbox" checked={tempSelectedIds.has(res.contract.id)} onChange={e => { const newSet = new Set(tempSelectedIds); e.target.checked ? newSet.add(res.contract.id) : newSet.delete(res.contract.id); setTempSelectedIds(newSet); }} />
+                      <button
+                        onClick={() => {
+                          const newSet = new Set(tempSelectedIds);
+                          selected ? newSet.delete(res.contract.id) : newSet.add(res.contract.id);
+                          setTempSelectedIds(newSet);
+                        }}
+                        style={{
+                          padding: '3px 12px', cursor: 'pointer', borderRadius: 4, border: '1px solid',
+                          fontSize: 11, fontWeight: 600,
+                          background: selected ? '#4caf50' : 'transparent',
+                          color: selected ? '#fff' : '#555',
+                          borderColor: selected ? '#4caf50' : '#ccc',
+                        }}
+                      >
+                        {selected ? '✓ 启用' : '启用'}
+                      </button>
                     </td>
-                    <td>{t(res.contract.name || res.contract.id, translation)}<br/><small>{t('声望要求', translation)} ≥ {res.contract.min_reputation_required || 0}</small></td>
+                    <td><b>{t(res.contract.name || res.contract.id, translation)}</b></td>
                     <td>{t(res.contract.buyItem, translation)}</td>
                     <td>{t(res.contract.sellItem, translation)}</td>
-                    <td>{res.buyAmount}</td>
-                    <td>{res.sellAmount}</td>
-                    <td>{res.travelTime}/{res.loadTime.toFixed(1)}/{res.totalTime.toFixed(1)}</td>
-                    <td>{res.buyPerMin.toFixed(2)}</td>
-                    <td>{fuelLabel} × {res.fuelPerTrip}</td>
-                    <td>{res.workers}</td>
-                    <td>{res.maintI > 0 && `M I:${res.maintI} `}{res.maintII > 0 && `M II:${res.maintII} `}{res.maintIII > 0 && `M III:${res.maintIII}`}</td>
-                    <td>{res.unityPerMin.toFixed(4)}</td>
+                    <td>{res.buyAmount} / {res.sellAmount}</td>
+                    <td>{res.buyPerMin.toFixed(1)}</td>
+                    <td>{res.sellPerMin.toFixed(1)}</td>
+                    <td style={{ fontSize: 10 }}>{fuelLabel}×{res.fuelPerTrip} / {res.workers}人</td>
+                    <td style={{ color: res.unityPerMin > 0 ? '#ff9800' : '#4caf50' }}>
+                      {res.unityPerMin > 0 ? '+' : ''}{res.unityPerMin.toFixed(2)}
+                    </td>
                   </tr>
                 );
               })}
+              {filteredResults.length === 0 && (
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 20, color: '#888' }}>无匹配合同</td></tr>
+              )}
             </tbody>
           </table>
         </div>

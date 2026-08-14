@@ -97,7 +97,7 @@ export async function solveWithFallback(
           return { ...d, rate: 0 };
         }
         return d;
-      }).filter(d => d.rate > 0);
+      }).filter(d => d.rate !== 0);
     }
 
     const { lpString, varNames, missing } = buildLp({

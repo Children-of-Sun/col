@@ -33,6 +33,8 @@ export interface LpInput {
   relaxLabor?: boolean;
   // 居民模块最小比例（r0 >= value），undefined 表示不加此约束
   minResidentValue?: number;
+  // 居民模块是否固定（true = r0 精确 = minResidentValue，第一趟用；false = >= 允许浮动，第二趟用）
+  fixResident?: boolean;
   // 资源冗余设置
   enableRedundancy?: boolean;
   globalLower?: number;
@@ -59,6 +61,7 @@ export function buildLp(input: LpInput): LpOutput {
     fixedMachines = {},
     relaxLabor = false,
     minResidentValue,
+    fixResident = false,
     enableRedundancy = false,
     globalLower = 100,
     globalUpper = 100,
@@ -495,7 +498,17 @@ export function buildLp(input: LpInput): LpOutput {
     const supply = externalSupplyMap.get(it) || 0;
 
     if (demandSet.has(it)) {
-      const effectiveDr = Math.max(0, totalDr - supply);
+      // 负需求：必须精确消耗 |totalDr - supply|，跳过冗余，直接施加 = 约束
+      const totalDemand = totalDr - supply;
+      if (totalDemand < 0) {
+        if (expr) {
+          lp += ` ${rows[it]}: ${expr} = ${totalDemand}\n`;
+        } else {
+          lp += ` ${rows[it]}: 0 = ${totalDemand}\n`;
+        }
+        continue;
+      }
+      const effectiveDr = Math.max(0, totalDemand);
       const rf = getRedundancyFactors(it);
       if (expr) {
         if (rf) {
@@ -666,8 +679,13 @@ export function buildLp(input: LpInput): LpOutput {
           redundancyAppliedCount++;
           redundancyAppliedItems.push(`${it}(中间产物 L=${rf.lowerFactor.toFixed(2)} U=${rf.upperFactor.toFixed(2)})`);
         } else {
+          // 无消费者的物品：常规模式下禁止产出(=0)，宽松模式下允许(>=0)
           if (!hasConsumer) {
-            lp += ` ${rows[it]}: ${expr} >= 0\n`;
+            if (constraintMode === 'noProdOrCons') {
+              lp += ` ${rows[it]}: ${expr} >= 0\n`;
+            } else {
+              lp += ` ${rows[it]}: ${expr} = 0\n`;
+            }
           } else {
             lp += ` ${rows[it]}: ${expr} = 0\n`;
           }
@@ -699,6 +717,16 @@ export function buildLp(input: LpInput): LpOutput {
 
     // 电力模块方程：仅使用电力配方
     const powerExpr = makeExpr(powerActive, powerVarNames, it);
+
+    // 负需求：蒸汽/机械能等特殊物品也支持"必须精确消耗"
+    const specialDemand = demands.filter(d => d.item === it).reduce((s, d) => s + d.rate, 0);
+    if (specialDemand < 0) {
+      const combined = combineExprs(mainExpr, powerExpr);
+      if (combined) {
+        lp += ` ${rows[it]}_demand: ${combined} = ${specialDemand}\n`;
+      }
+      continue; // 跳过平衡约束
+    }
 
     if (rf) {
       const mainNegExpr = combineExprs(
@@ -763,10 +791,10 @@ export function buildLp(input: LpInput): LpOutput {
     }
   }
 
-  // 居民模块最小比例（r0 >= minResidentValue）
+  // 居民模块约束：fixResident=true 时精确固定（第一趟）；否则 >= 允许浮动（第二趟）
   if (minResidentValue !== undefined && residentVarNames.length > 0) {
-    if (ignored.has('人力')) {
-      // 忽略人力时固定居民模块 = pop/1000，防止浮动
+    if (fixResident || ignored.has('人力')) {
+      // 固定居民模块 = pop/1000（第一趟，或忽略人力时防止浮动）
       lp += ` c_res_fix: ${residentVarNames[0]} = ${minResidentValue}\n`;
     } else {
       lp += ` c_res_min: ${residentVarNames[0]} >= ${minResidentValue}\n`;

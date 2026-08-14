@@ -19,8 +19,8 @@ function getTravelInfo(slots: number, fuelRaw: string, mode: string, gameData: a
     const dock = gameData.ship_fuel_configs[dockKey];
     if (dock && dock[fuelRaw] && dock[fuelRaw][mode]) {
       return {
-        travelTime: dock[fuelRaw][mode].fuel_per_trip,   // 时间（分钟）
-        fuelPerTrip: dock[fuelRaw][mode].travel_time_min, // 燃料（单位）
+        travelTime: dock[fuelRaw][mode].travel_time_min, // 航行时间（分钟）
+        fuelPerTrip: dock[fuelRaw][mode].fuel_per_trip,  // 每趟燃料（单位）
       };
     }
   }

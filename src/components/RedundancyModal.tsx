@@ -152,7 +152,7 @@ export const RedundancyModal: React.FC<{ open: boolean; onClose: () => void }> =
 
   return (
     <ModalShell open={open} onClose={onClose} title="资源冗余设置" maxWidth="900px">
-      <div style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: 8 }}>
+      <div style={{ paddingRight: 8 }}>
         {/* ===== 全局设置区 ===== */}
         <div style={{ marginBottom: 16, padding: 12, background: '#f8fafc', borderRadius: 8, border: '1px solid #e2e8f0' }}>
           <div style={{ marginBottom: 8 }}>

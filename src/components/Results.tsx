@@ -1,11 +1,12 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { useStore } from '../stores';
 import { Btn } from './UI';
-import { t, getMaintenanceReduction, SPACE_CARGO_ITEMS, getColValue } from '../utils';
+import { t, getMaintenanceReduction, SPACE_CARGO_ITEMS, getColValue, isMipSuccess } from '../utils';
 import { Recipe } from '../types';
 import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue, computeRecipeArea, formatFootprint, smartRound, formatPowerSmart, formatComputingSmart, formatNetValue } from '../utils/format';
 import { IconWithFallback } from './IconWithFallback';
 import { computeEmbeddedValues } from '../embeddedValues';
+import ItemDetailModal from './ItemDetailModal';
 
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number, ceilUpkeep: boolean = false) {
   // 取整模式下，建筑数量向上取整（用于维护/人力/电力/算力计算）
@@ -99,7 +100,8 @@ const SummaryTable: React.FC<{
   splitMode?: boolean;
   netWorkers?: number;
   showLaborRow?: boolean;
-}> = React.memo(({ data, showTinyErrors, translation, splitMode = false, netWorkers = 0, showLaborRow = false }) => {
+  onItemClick?: (item: string) => void;
+}> = React.memo(({ data, showTinyErrors, translation, splitMode = false, netWorkers = 0, showLaborRow = false, onItemClick }) => {
   const productIcons = useStore(s => s.productIcons);
   const showIcons = useStore(s => s.showIcons);
   const forcedOrder = ['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii', 'research'];
@@ -145,9 +147,9 @@ const SummaryTable: React.FC<{
           <tbody>
             {finalItems.map(({ item, prod, cons, net }) => {
               const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
-              let prodDisplay = prod.toFixed(2);
-              let consDisplay = cons.toFixed(2);
-              let netDisplay = (net >= 0 ? '+' : '') + net.toFixed(4);
+              let prodDisplay = prod.toFixed(1);
+              let consDisplay = cons.toFixed(1);
+              let netDisplay = (net >= 0 ? '+' : '') + net.toFixed(1);
               if (item === 'electricity') {
                 prodDisplay = formatPowerValue(prod);
                 consDisplay = formatPowerValue(cons);
@@ -160,7 +162,10 @@ const SummaryTable: React.FC<{
               return (
               <React.Fragment key={item}>
                 <tr>
-                  <td className="summary-name-cell" style={{ textAlign: 'center' }}>
+                  <td className="summary-name-cell" style={{ textAlign: 'center', cursor: 'pointer' }}
+                    onClick={() => onItemClick?.(item)}
+                    title={`点击搜索 ${t(item, translation)}`}
+                  >
                     {showIcons && icon ? (
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                         <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
@@ -203,7 +208,10 @@ const SummaryTable: React.FC<{
               const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
               return (
               <tr key={item}>
-                <td className="summary-name-cell" style={{ textAlign: 'center' }}>
+                <td className="summary-name-cell" style={{ textAlign: 'center', cursor: 'pointer' }}
+                    onClick={() => onItemClick?.(item)}
+                    title={`点击搜索 ${t(item, translation)}`}
+                  >
                   {showIcons && icon ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
@@ -226,7 +234,10 @@ const SummaryTable: React.FC<{
               const icon = showIcons ? productIcons[item.toLowerCase()] : undefined;
               return (
               <tr key={item}>
-                <td className="summary-name-cell" style={{ textAlign: 'center' }}>
+                <td className="summary-name-cell" style={{ textAlign: 'center', cursor: 'pointer' }}
+                    onClick={() => onItemClick?.(item)}
+                    title={`点击搜索 ${t(item, translation)}`}
+                  >
                   {showIcons && icon ? (
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
                       <IconWithFallback src={icon} alt="" style={{ width: 24, height: 24 }} />
@@ -250,7 +261,8 @@ const RecipeList: React.FC<{
   translation: Record<string, string>;
   buildingSizes: Record<string, { width: number; height: number }>;
   showFullStats: boolean;
-}> = React.memo(({ recipes, translation, buildingSizes, showFullStats }) => {
+  onItemClick?: (item: string) => void;
+}> = React.memo(({ recipes, translation, buildingSizes, showFullStats, onItemClick }) => {
   const isTrade = recipes.length > 0 && recipes[0].recipe.module === 'trade';
   return (
     <div className="table-wrapper">
@@ -278,8 +290,20 @@ const RecipeList: React.FC<{
             const pm = item.perMin;
             const skipItems = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii']);
             const filteredInputs = Object.entries(pm.inputs).filter(([k]) => !skipItems.has(k));
-            const inputs = filteredInputs.map(([k, v]) => `${t(k, translation)}×${(v as number).toFixed(4)}`).join(', ') || '无';
-            const outputs = Object.entries(pm.outputs).map(([k, v]) => `${t(k, translation)}×${(v as number).toFixed(4)}`).join(', ') || '无';
+            const inputs = filteredInputs.length > 0 ? (
+              <span>{filteredInputs.map(([k, v]) => (
+                <span key={k} onClick={() => onItemClick?.(k)} style={{ cursor: 'pointer', marginRight: 6 }} title={`点击搜索 ${t(k, translation)}`}>
+                  {t(k, translation)}×{(v as number).toFixed(1)}
+                </span>
+              ))}</span>
+            ) : '无';
+            const outputs = Object.entries(pm.outputs).length > 0 ? (
+              <span>{Object.entries(pm.outputs).map(([k, v]) => (
+                <span key={k} onClick={() => onItemClick?.(k)} style={{ cursor: 'pointer', marginRight: 6 }} title={`点击搜索 ${t(k, translation)}`}>
+                  {t(k, translation)}×{(v as number).toFixed(1)}
+                </span>
+              ))}</span>
+            ) : '无';
             const maintParts: string[] = [];
             if (pm.maintI > 0) {
               const mi = smartRound(pm.maintI, showFullStats);
@@ -408,6 +432,8 @@ export const Results: React.FC = () => {
   const [recipeSearch, setRecipeSearch] = useState('');
   const [showCeilMachines, setShowCeilMachines] = useState(false);
   const [showFullStats, setShowFullStats] = useState(false);
+
+  const [itemDetailItem, setItemDetailItem] = useState<string | undefined>(undefined);
   const buildingIcons = useStore(s => s.buildingIcons);
   const handleTabChange = useCallback((name: string) => { setSelectedTab(name); }, []);
 
@@ -817,8 +843,8 @@ export const Results: React.FC = () => {
         .results-container { font-size: 1.1rem; }
         .table-wrapper { overflow: visible; }
         .split-column .data-table { table-layout: fixed; }
-        .data-table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
-        .data-table thead { position: sticky; top: 0; z-index: 1; }
+        .data-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.9rem; }
+        .data-table thead th { position: sticky; top: 0; z-index: 5; background: #f5f5f5; }
         .data-table th { padding: 4px 6px; text-align: left; border-bottom: 2px solid #ddd; background: #f5f5f5; font-weight: 600; white-space: normal; }
         .data-table td { padding: 4px 6px; text-align: left; border-bottom: 1px solid #eee; }
         .recipe-name-cell { max-width: 8em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -854,8 +880,8 @@ export const Results: React.FC = () => {
       `}</style>
 
       {isSolving && <div>🔄 求解中...</div>}
-      {diagnostic && <div style={{ background: '#fff3cd', padding: 8, whiteSpace: 'pre-wrap', fontSize: 13 }} dangerouslySetInnerHTML={{ __html: diagnostic.replace(/</g, '&lt;').replace(/>/g, '&gt;') }} />}
-      {result && resultStatus === 'Optimal' && (
+      {diagnostic && <div style={{ background: '#fff3cd', padding: 8, whiteSpace: 'pre-wrap', fontSize: 13 }} dangerouslySetInnerHTML={{ __html: diagnostic }} />}
+      {result && isMipSuccess(resultStatus) && (
         <>
           <div style={{ marginBottom: 8, display: 'flex', gap: 8 }}>
             <Btn onClick={() => setShowTinyErrors(!showTinyErrors)} variant={showTinyErrors ? 'primary' : 'default'}>
@@ -1115,7 +1141,7 @@ export const Results: React.FC = () => {
           <div className="results-layout">
             <div className="summary-panel">
               <h4>{t('资源平衡', translation)}</h4>
-              {currentData && <SummaryTable data={{ prod: (currentData as any).prod || {}, cons: (currentData as any).cons || {} }} showTinyErrors={showTinyErrors} translation={translation} splitMode={!isOverview} netWorkers={netWorkers} showLaborRow={isOverview} />}
+              {currentData && <SummaryTable data={{ prod: (currentData as any).prod || {}, cons: (currentData as any).cons || {} }} showTinyErrors={showTinyErrors} translation={translation} splitMode={!isOverview} netWorkers={netWorkers} showLaborRow={isOverview} onItemClick={(item) => setItemDetailItem(item)} />}
             </div>
             <div className="detail-panel">
               {selectedTab === '全厂总览' ? (
@@ -1127,7 +1153,7 @@ export const Results: React.FC = () => {
                 <>
                   <h4>{t('配方列表', translation)}</h4>
                   {currentData && (currentData as any).recipes && (currentData as any).recipes.length > 0 ? (
-                    <RecipeList recipes={(currentData as any).recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} buildingSizes={buildingSizes} showFullStats={showFullStats} />
+                    <RecipeList recipes={(currentData as any).recipes.map((item: any) => ({ recipe: item.recipe, count: item.machineCount, perMin: item.perMin }))} translation={translation} buildingSizes={buildingSizes} showFullStats={showFullStats} onItemClick={(item) => setItemDetailItem(item)} />
                   ) : <div className="hint">{t('无配方数据', translation)}</div>}
                 </>
               )}
@@ -1191,7 +1217,8 @@ export const Results: React.FC = () => {
           )}
         </>
       )}
-      {result && resultStatus !== 'Optimal' && <div>❌ 状态: {resultStatus || '未知'}</div>}
+      {result && !isMipSuccess(resultStatus) && <div>❌ 状态: {resultStatus || '未知'}</div>}
+      <ItemDetailModal open={!!itemDetailItem} initialItem={itemDetailItem} onClose={() => setItemDetailItem(undefined)} />
     </div>
   );
 }

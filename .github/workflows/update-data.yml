@@ -1,0 +1,73 @@
+name: 自动更新游戏数据
+
+on:
+  # 每周一 03:00 (UTC) 检查上游是否有更新
+  schedule:
+    - cron: '0 3 * * 1'
+  # 也可在 Actions 页面手动触发
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data
+  cancel-in-progress: false
+
+jobs:
+  update-data:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      # 下载 David-Melo/captain-of-data 最新数据 → 自动应用手工整理 → 更新 public/data.json
+      - name: 更新 data.json
+        run: node scripts/updateDataJson.mjs
+
+      - name: 检查是否有变化
+        id: check
+        run: |
+          if git diff --quiet -- public/data.json; then
+            echo "data.json 无变化，无需更新"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "data.json 有更新"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 重新构建
+        if: steps.check.outputs.changed == 'true'
+        run: npm run build
+
+      - name: 提交并推送到 main（源码分支）
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add public/data.json dist
+          git commit -m "chore: 自动更新游戏数据 $(date +%F)"
+          # 远端 main 若有新提交（如本地手动推送过），先变基再推，避免非快进被拒
+          git pull --rebase origin main || true
+          git push
+
+      # 部署：把 dist 内容推送到 gh-pages 分支（网页源），与现有部署方式一致
+      - name: 部署到 gh-pages 分支（GitHub Pages）
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # 使用 GITHUB_TOKEN 显式指定推送凭据，避免子进程拿不到 checkout 注入的凭据
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          npx gh-pages -d dist

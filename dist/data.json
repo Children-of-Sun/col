@@ -349,10 +349,10 @@
             "name": "Solar panel",
             "category": "Power production",
             "subcategory": "General",
-            "next_tier": "",
+            "next_tier": "Solar panel (mono)",
             "workers": 0,
             "maintenance_cost_units": "Maintenance II",
-            "maintenance_cost_quantity": 0.200,
+            "maintenance_cost_quantity": 0.2001953,
             "electricity_consumed": 0,
             "electricity_generated": 150,
             "computing_consumed": 0,
@@ -387,7 +387,7 @@
             "next_tier": "",
             "workers": 0,
             "maintenance_cost_units": "Maintenance II",
-            "maintenance_cost_quantity": 0.200,
+            "maintenance_cost_quantity": 0.2001953,
             "electricity_consumed": 0,
             "electricity_generated": 200,
             "computing_consumed": 0,
@@ -407,7 +407,24 @@
                     "quantity": 120
                 }
             ],
-            "recipes": []
+            "recipes": [{
+                    "id": "SolarpanelmonoAvgoutput",
+                    "name": "Solar panel (mono) Avg output",
+                    "duration": 20,
+                    "inputs": [
+                        
+                    ],
+                    "outputs": [
+                        {
+                            "name": "Electricity",
+                            "quantity": 160
+                        }
+                        
+                    ],
+                    "power_multiplier": 1
+                }
+                
+            ]
         },
         {
             "id": "DieselGenerator",
@@ -17854,8 +17871,8 @@
                 }
             ],
             "recipes": [ 
-                {   "id": "FPtoRNWconversion",
-                    "name": "FP to RNW conversion",
+                {   "id": "FP_to_RNW_conversion",
+                    "name": "FP_to_RNW_conversion",
                     "duration": 72000,
                     "inputs": [
                         {
@@ -18460,7 +18477,7 @@
             "name": "Nuclear reactor II",
             "category": "Power production",
             "subcategory": "Nuclear",
-            "next_tier": "",
+            "next_tier": "FastBreederReactor",
             "workers": 110,
             "maintenance_cost_units": "Maintenance II",
             "maintenance_cost_quantity": 90,
@@ -19599,8 +19616,8 @@
             "subcategory": "General",
             "next_tier": "",
             "workers": 6,
-            "maintenance_cost_units": "Maintenance III",
-            "maintenance_cost_quantity": 42.4,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
             "electricity_consumed": 4080,
             "electricity_generated": 0,
             "computing_consumed": 0,
@@ -19629,8 +19646,11 @@
                         {
                             "name": "Chilled water",
                             "quantity": 24
+                        },
+                        {
+                            "name": "Maintenance III",
+                            "quantity": 42.39063
                         }
-                        
                     ],
                     "outputs": [
                         {
@@ -19654,7 +19674,7 @@
             "next_tier": "",
             "workers": 0,
             "maintenance_cost_units": "Maintenance III",
-            "maintenance_cost_quantity": 0.8,
+            "maintenance_cost_quantity": 0.7998047,
             "electricity_consumed": 85,
             "electricity_generated": 0,
             "computing_consumed": 0,
@@ -19668,44 +19688,6 @@
                 {
                     "product": "Server",
                     "quantity": 12
-                }
-            ],
-            "recipes": []
-        },
-        {
-            "id": "TheStatueofMaintenance",
-            "name": "The Statue of Maintenance",
-            "category": "Buildings",
-            "subcategory": "",
-            "next_tier": "",
-            "workers": 10,
-            "maintenance_cost_units": "Maintenance I",
-            "maintenance_cost_quantity": 10,
-            "electricity_consumed": 0,
-            "electricity_generated": 0,
-            "computing_consumed": 0,
-            "computing_generated": 0,
-            "product_type": "",
-            "storage_capacity": 0,
-            "unity_cost": 0,
-            "research_speed": 0,
-            "icon_path": "",
-            "build_costs": [
-                {
-                    "product": "Construction Parts III",
-                    "quantity": 200
-                },
-                {
-                    "product": "Concrete Slab",
-                    "quantity": 400
-                },
-                {
-                    "product": "Steel",
-                    "quantity": 300
-                },
-                {
-                    "product": "Copper",
-                    "quantity": 1000
                 }
             ],
             "recipes": []

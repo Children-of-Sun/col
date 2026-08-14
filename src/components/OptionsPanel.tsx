@@ -5,7 +5,7 @@ import { ExcludeContent } from './ExcludeGrid';
 import { RedundancyModal } from './RedundancyModal';
 import { t } from '../utils';
 
-export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onOpenExcludeModal }) => {
+export const OptionsPanel: React.FC = () => {
   const ignoredItems = useStore(s => s.ignoredItems);
   const toggleIgnored = useStore(s => s.toggleIgnored);
   const allowExternal = useStore(s => s.allowExternal);
@@ -134,7 +134,7 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
   const openInputModal = () => { setTempInputs(new Set(excludedInputs)); setInputModalOpen(true); };
   const saveInputs = () => { setExcludedInputs([...tempInputs]); setInputModalOpen(false); };
 
-  const allItemsList = useMemo(() => allItems.sort(), [allItems]);
+  const allItemsList = useMemo(() => [...allItems].sort(), [allItems]);
 
   return (
     <div className="section">
@@ -168,10 +168,11 @@ export const OptionsPanel: React.FC<{ onOpenExcludeModal: () => void }> = ({ onO
         )}
       </div>
 
-      {/* 原有选项 */}
+      {/* 参与计算的资源（打勾=计算，不打勾=不计算） */}
       <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: '0.8rem', color: '#666', marginBottom: 4 }}>参与计算的资源（打勾参与约束，不打勾忽略）:</div>
         {ignoreOptions.map(item => (
-          <Checkbox key={item} label={t(item, translation)} checked={ignoredItems.includes(item)} onChange={() => toggleIgnored(item)} />
+          <Checkbox key={item} label={t(item, translation)} checked={!ignoredItems.includes(item)} onChange={() => toggleIgnored(item)} />
         ))}
       </div>
 

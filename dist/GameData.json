@@ -102,7 +102,7 @@
     { "name": "树木生长速度", "effectPerLevel": [0.01], "maxLevel": 50, "targetCategory": [],            "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2" },
     { "name": "雨水产量", "effectPerLevel": [0.05], "maxLevel": 40, "targetCategory": [],                "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2" },
     { "name": "定居点用水", "effectPerLevel": [-0.02], "maxLevel": 40, "targetCategory": "Water" ,       "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2" },
-    { "name": "凝聚力容量", "effectPerLevel": [0.05], "maxLevel": 40, "targetCategory": [],              "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
+    { "name": "凝聚力容量", "effectPerLevel": [0.05], "maxLevel": 60, "targetCategory": [],              "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
     { "name": "住房容量", "effectPerLevel": [0.05], "maxLevel": 60, "targetCategory": [],                "costFormula": "19200 * (1 + 0.5*x + 1.14^x) / 2"  },
     { "name": "专注点", "effectPerLevel": [0.04], "maxLevel": 25, "targetCategory": [],                  "costFormula": "19200 * (1 + 1*x + 1.4^x) / 2"  },
     { "name": "车辆限制", "effectPerLevel": [5], "maxLevel": 60, "targetCategory": [],                   "costFormula": "19200 * (1 + 0.3*x + 1.07^x) / 2"  },
@@ -116,24 +116,24 @@
   ],
   "ship_fuel_configs": {
     "dock_2": {
-      "Diesel": { "normal": { "fuel_per_trip": 3, "travel_time_min": 210 }, "special": { "fuel_per_trip": 6, "travel_time_min": 147 } },
-      "Heavy Oil": { "normal": { "fuel_per_trip": 3, "travel_time_min": 140 }, "special": { "fuel_per_trip": 6, "travel_time_min": 98 } },
-      "Hydrogen": { "normal": { "fuel_per_trip": 3, "travel_time_min": 263 }, "special": { "fuel_per_trip": 6, "travel_time_min": 184 } }
+      "Diesel": { "normal": { "fuel_per_trip": 210, "travel_time_min": 3 }, "special": { "fuel_per_trip": 147, "travel_time_min": 6 } },
+      "Heavy Oil": { "normal": { "fuel_per_trip": 140, "travel_time_min": 3 }, "special": { "fuel_per_trip": 98, "travel_time_min": 6 } },
+      "Hydrogen": { "normal": { "fuel_per_trip": 263, "travel_time_min": 3 }, "special": { "fuel_per_trip": 184, "travel_time_min": 6 } }
     },
     "dock_4": {
-      "Diesel": { "normal": { "fuel_per_trip": 3, "travel_time_min": 330 }, "special": { "fuel_per_trip": 6, "travel_time_min": 231 } },
-      "Heavy Oil": { "normal": { "fuel_per_trip": 3, "travel_time_min": 220 }, "special": { "fuel_per_trip": 6, "travel_time_min": 154 } },
-      "Hydrogen": { "normal": { "fuel_per_trip": 3, "travel_time_min": 413 }, "special": { "fuel_per_trip": 6, "travel_time_min": 289 } }
+      "Diesel": { "normal": { "fuel_per_trip": 330, "travel_time_min": 3 }, "special": { "fuel_per_trip": 231, "travel_time_min": 6 } },
+      "Heavy Oil": { "normal": { "fuel_per_trip": 220, "travel_time_min": 3 }, "special": { "fuel_per_trip": 154, "travel_time_min": 6 } },
+      "Hydrogen": { "normal": { "fuel_per_trip": 413, "travel_time_min": 3 }, "special": { "fuel_per_trip": 289, "travel_time_min": 6 } }
     },
     "dock_6": {
-      "Diesel": { "normal": { "fuel_per_trip": 3, "travel_time_min": 630 }, "special": { "fuel_per_trip": 6, "travel_time_min": 441 } },
-      "Heavy Oil": { "normal": { "fuel_per_trip": 3, "travel_time_min": 420 }, "special": { "fuel_per_trip": 6, "travel_time_min": 294 } },
-      "Hydrogen": { "normal": { "fuel_per_trip": 3, "travel_time_min": 788 }, "special": { "fuel_per_trip": 6, "travel_time_min": 552 } }
+      "Diesel": { "normal": { "fuel_per_trip": 630, "travel_time_min": 3 }, "special": { "fuel_per_trip": 441, "travel_time_min": 6 } },
+      "Heavy Oil": { "normal": { "fuel_per_trip": 420, "travel_time_min": 3 }, "special": { "fuel_per_trip": 294, "travel_time_min": 6 } },
+      "Hydrogen": { "normal": { "fuel_per_trip": 788, "travel_time_min": 3 }, "special": { "fuel_per_trip": 552, "travel_time_min": 6 } }
     },
     "dock_8": {
-      "Diesel": { "normal": { "fuel_per_trip": 3, "travel_time_min": 810 }, "special": { "fuel_per_trip": 6, "travel_time_min": 567 } },
-      "Heavy Oil": { "normal": { "fuel_per_trip": 3, "travel_time_min": 540 }, "special": { "fuel_per_trip": 6, "travel_time_min": 378 } },
-      "Hydrogen": { "normal": { "fuel_per_trip": 3, "travel_time_min": 1013 }, "special": { "fuel_per_trip": 6, "travel_time_min": 709 } }
+      "Diesel": { "normal": { "fuel_per_trip": 810, "travel_time_min": 3 }, "special": { "fuel_per_trip": 567, "travel_time_min": 6 } },
+      "Heavy Oil": { "normal": { "fuel_per_trip": 540, "travel_time_min": 3 }, "special": { "fuel_per_trip": 378, "travel_time_min": 6 } },
+      "Hydrogen": { "normal": { "fuel_per_trip": 1013, "travel_time_min": 3 }, "special": { "fuel_per_trip": 709, "travel_time_min": 6 } }
     }
   },
   "machines_and_buildings": [
