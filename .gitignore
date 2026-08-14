@@ -16,3 +16,4 @@ tmp_patch.cjs
 # 系统文件
 .DS_Store
 Thumbs.db
+scripts/rewrite-history.ps1
