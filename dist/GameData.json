@@ -651,6 +651,253 @@
             ],
             "recipes": []
                 
+        },
+        {
+            "id": "RocketAssemblyDepot",
+            "name": "Rocket assembly depot",
+            "category": "Buildings",
+            "subcategory": "Rockets",
+            "next_tier": "",
+            "workers": 160,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
+            "electricity_consumed": 2000,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 0,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/RocketAssemblyDepot.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts IV",
+                    "quantity": 1200
+                },
+                {
+                    "product": "Vehicle Parts III",
+                    "quantity": 160
+                }
+            ],
+            "recipes": [
+                {
+                    "id": "RocketT1assembly",
+                    "name": "RocketT1 assembly",
+                    "duration": 480,
+                    "inputs": [
+                        {
+                            "name": "Composite panel",
+                            "quantity": 300
+                        },
+                        {
+                            "name": "Steel",
+                            "quantity": 80
+                        },
+                        {
+                            "name": "Electronics II",
+                            "quantity": 24
+                        }
+                    ],
+                    "outputs": [
+                        {
+                            "name": "RocketT1",
+                            "quantity": 1
+                        }
+                    ],
+                    "power_multiplier": 1
+                },
+                {
+                    "id": "RocketT2assembly",
+                    "name": "RocketT2 assembly",
+                    "duration": 480,
+                    "inputs": [
+                        {
+                            "name": "Composite panel",
+                            "quantity": 480
+                        },
+                        {
+                            "name": "Titanium alloy",
+                            "quantity": 120
+                        },
+                        {
+                            "name": "Steel",
+                            "quantity": 80
+                        },
+                        {
+                            "name": "Electronics III",
+                            "quantity": 16
+                        }
+                    ],
+                    "outputs": [
+                        {
+                            "name": "RocketT2",
+                            "quantity": 1
+                        }
+                    ],
+                    "power_multiplier": 1
+                }
+
+            ]
+        },
+        {
+            "id": "RocketLaunchPad",
+            "name": "Rocket launch pad",
+            "category": "Buildings",
+            "subcategory": "Rockets",
+            "next_tier": "",
+            "workers": 30,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
+            "electricity_consumed": 0,
+            "electricity_generated": 0,
+            "computing_consumed": 0,
+            "computing_generated": 0,
+            "product_type": "",
+            "storage_capacity": 0,
+            "unity_cost": 0,
+            "research_speed": 0,
+            "icon_path": "Assets/Unity/Generated/Icons/LayoutEntity/RocketLaunchPad.png",
+            "build_costs": [
+                {
+                    "product": "Construction Parts IV",
+                    "quantity": 300
+                },
+                {
+                    "product": "Concrete slab",
+                    "quantity": 1000
+                },
+                {
+                    "product": "Steel",
+                    "quantity": 800
+                }
+            ],
+            "recipes": [
+                {
+                    "id": "RocketT1launchRLP",
+                    "name": "RocketT1 launch RLP",
+                    "duration": 480,
+                    "inputs": [
+                        {
+                            "name": "RocketT1",
+                            "quantity": 1
+                        },
+                        {
+                            "name": "Hydrogen",
+                            "quantity": 140
+                        },
+                        {
+                            "name": "Oxygen",
+                            "quantity": 40
+                        },
+                        {
+                            "name": "Water",
+                            "quantity": 160
+                        }
+                    ],
+                    "outputs": [
+                        {
+                            "name": "Rocket T1 RLP",
+                            "quantity": 1
+                        }
+                    ],
+                    "power_multiplier": 1
+                },
+                {
+                    "id": "RocketT1launchthing",
+                    "name": "RocketT1 launch thing",
+                    "duration": 480,
+                    "inputs": [
+                        {
+                            "name": "RocketT1",
+                            "quantity": 1
+                        },
+                        {
+                            "name": "Hydrogen",
+                            "quantity": 140
+                        },
+                        {
+                            "name": "Oxygen",
+                            "quantity": 40
+                        },
+                        {
+                            "name": "Water",
+                            "quantity": 160
+                        }
+                    ],
+                    "outputs": [
+                        {
+                            "name": "Rocket T1 thing",
+                            "quantity": 1
+                        }
+                    ],
+                    "power_multiplier": 1
+                },
+                {
+                    "id": "RocketT2launchRLP",
+                    "name": "RocketT2 launch RLP",
+                    "duration": 480,
+                    "inputs": [
+                        {
+                            "name": "RocketT2",
+                            "quantity": 1
+                        },
+                        {
+                            "name": "Hydrogen",
+                            "quantity": 320
+                        },
+                        {
+                            "name": "Oxygen",
+                            "quantity": 90
+                        },
+                        {
+                            "name": "Water",
+                            "quantity": 160
+                        }
+                    ],
+                    "outputs": [
+                        {
+                            "name": "Rocket T2 RLP",
+                            "quantity": 1
+                        }
+                    ],
+                    "power_multiplier": 1
+                },
+                {
+                    "id": "RocketT2launchthing",
+                    "name": "RocketT2 launch thing",
+                    "duration": 480,
+                    "inputs": [
+                        {
+                            "name": "RocketT2",
+                            "quantity": 1
+                        },
+                        {
+                            "name": "Hydrogen",
+                            "quantity": 320
+                        },
+                        {
+                            "name": "Oxygen",
+                            "quantity": 90
+                        },
+                        {
+                            "name": "Water",
+                            "quantity": 160
+                        }
+                    ],
+                    "outputs": [
+                        {
+                            "name": "Rocket T2 thing",
+                            "quantity": 1
+                        }
+                    ],
+                    "power_multiplier": 1
+                }
+
+
+
+
+            ]
         }
 
 

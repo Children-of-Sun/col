@@ -202,7 +202,7 @@
     "High-pressure turbine": false,
     "Low-pressure turbine": false,
     "Solar panel": false,
-    "Solar panel (mono)": true,
+    "Solar panel (mono)": false,
     "Diesel generator": false,
     "Diesel generator II": false,
     "Boiler": false,
@@ -260,7 +260,7 @@
     "OceanWaterPumping2x": true,
     "OceanWaterPumpingT2": true,
     "OceanWaterPumping2xT2": true,
-    "SteamGenerationCoal": false,
+    "SteamGenerationCoal": true,
     "SteamGenerationWood": false,
     "SteamGenerationBiomass": true,
     "SteamGenerationAnimalFeed": false,
@@ -468,11 +468,11 @@
     "SugarToEthanolFermentation": true,
     "CornToEthanolFermentation": true,
     "AntibioticsFermentation": true,
-    "GoldSettling": true,
+    "GoldSettling": false,
     "UraniumLeaching": true,
     "FluorideLeaching": true,
     "RedMudSettling": false,
-    "RedMudSettlingAcid": true,
+    "RedMudSettlingAcid": false,
     "SteamHpCondensation": true,
     "SteamLpCondensation": true,
     "SteamDepletedCondensation": true,
@@ -508,8 +508,8 @@
     "SlagCrushingT2": true,
     "RockCrushingT2": true,
     "GravelCrushingT2": true,
-    "QuartzCrushingT2": true,
-    "QuartzMillingT2": true,
+    "QuartzCrushingT2": false,
+    "QuartzMillingT2": false,
     "UraniumCrushingT2": true,
     "GoldOreCrushingT2": true,
     "GoldOreMillingT2": true,
@@ -541,19 +541,19 @@
     "CopperSmeltingArc": true,
     "GlassSmeltingArc": true,
     "GlassSmeltingArcWithBroken": true,
-    "SiliconSmeltingArc2": true,
+    "SiliconSmeltingArc2": false,
     "AluminumSmeltingScrapArcT2": true,
-    "IlmeniteSmeltingArc2": true,
+    "IlmeniteSmeltingArc2": false,
     "TitaniumSmeltingArc2": true,
     "AluminumElectrolysis": true,
     "SteelCastingCooled": true,
-    "SteelCastingCooledT2": true,
+    "SteelCastingCooledT2": false,
     "TitaniumAlloyCastingT2": true,
     "IronCasting": true,
     "CopperCasting": true,
     "AluminumCasting": true,
     "IronCastingCooled": false,
-    "CopperCastingCooled": true,
+    "CopperCastingCooled": false,
     "AluminumCastingT2": true,
     "TitaniumAlloyMixing": true,
     "CopperElectrolysisProcess": true,
@@ -623,8 +623,8 @@
     "AnestheticsProduction": true,
     "MorphineProduction": true,
     "BauxiteDigestion": true,
-    "TitaniumChlorination": true,
-    "TitaniumChlorideReduction": true,
+    "TitaniumChlorination": false,
+    "TitaniumChlorideReduction": false,
     "ChemicalFuelProduction": true,
     "MoxRodsAssemblyT1": true,
     "BlanketFuelFromDepleted": true,
@@ -636,7 +636,7 @@
     "CrudeOilRefiningT1": true,
     "CrudeOilRefiningT2": true,
     "HeavyDistillateRefining": true,
-    "TitaniumPurification": true,
+    "TitaniumPurification": false,
     "RubberProductionNaphtha": true,
     "RubberProductionNaphthaAlt": false,
     "RubberProductionEthanol": true,
@@ -781,11 +781,11 @@
     "Crop_Flowers_Product_FertilizerOrganic": false,
     "ChickenFarm": true,
     "ResearchLab2": true,
-    "ResearchLab21": true,
+    "ResearchLab21": false,
     "ResearchLab3": true,
-    "ResearchLab31": true,
+    "ResearchLab31": false,
     "ResearchLab4": true,
-    "ResearchLab41": true,
+    "ResearchLab41": false,
     "ResearchLab5": false,
     "ResearchLab51": true,
     "ThermalStorage": true,
@@ -885,7 +885,7 @@
   "statueCount": 0,
   "labLevel": "ResearchLab5",
   "labCount": 0,
-  "steamLowMode": "internal",
+  "steamLowMode": "shared",
   "constraintMode": "noProd",
   "showTinyErrors": false,
   "mainBuildingEnabledMap": {
@@ -929,7 +929,7 @@
     "RotaryKiln": true,
     "DiamondReactor": true,
     "LensMaker": true,
-    "MicrochipMachineT2": true,
+    "MicrochipMachineT2": false,
     "MicrochipMachine": true,
     "ElectrolyzerT2": true,
     "Electrolyzer": true,
@@ -952,13 +952,13 @@
     "CasterT2": true,
     "Caster": true,
     "AlloyMixer": true,
-    "CopperElectrolysis": true,
-    "OxygenFurnaceT2": true,
+    "CopperElectrolysis": false,
+    "OxygenFurnaceT2": false,
     "OxygenFurnace": true,
     "GlassMakerT2": true,
     "GlassMakerT1": false,
     "SiliconCrystallizer": true,
-    "SiliconReactor": true,
+    "SiliconReactor": false,
     "GoldFurnace": true,
     "IndustrialMixerT2": true,
     "IndustrialMixer": true,
@@ -1311,7 +1311,7 @@
     0,
     0,
     0,
-    0
+    50
   ],
   "enableTradeModule": true,
   "showIcons": true,
@@ -1320,13 +1320,12 @@
     "maintenance iii",
     "maintenance i",
     "人力",
-    "computing",
-    "electricity"
+    "computing"
   ],
   "enableAgriculture": true,
   "cropRotation": true,
   "globalFertilizerType": "II",
-  "targetFertility": 100,
+  "targetFertility": 140,
   "enableFocusConsumption": false,
   "officeBuildingEnabled": {
     "OfficeI": false,
@@ -1634,7 +1633,7 @@
   "integerMode": "continuous",
   "milpTimeLimit": 30,
   "recipeIntegerEnabled": {},
-  "tradeVoyageTime": 0,
+  "tradeVoyageTime": 252,
   "enableRedundancy": false,
   "useReferenceSizes": false,
   "excludePowerFootprint": false,
@@ -1646,7 +1645,7 @@
   "redundancyMilpDisabled": {},
   "officeCollapsed": {},
   "farmCollapsed": {
-    "FarmT4": true
+    "FarmT4": false
   },
   "demands": [],
   "externalSupplies": [],
@@ -1660,11 +1659,11 @@
       "buildingLevel": 0,
       "duration": 1,
       "inputs": {
-        "slag": 1111.111111111111,
-        "hydrogen": 187.59259259259258
+        "slag": 909.0909090909091,
+        "hydrogen": 153.4848484848485
       },
       "outputs": {
-        "sour water": 444.4444444444444
+        "sour water": 363.6363636363637
       },
       "upkeep": {
         "人力": 76,
@@ -1672,7 +1671,7 @@
         "maintenance i": 32,
         "maintenance ii": 0,
         "maintenance iii": 0,
-        "凝聚力": 0.8897568888888887
+        "凝聚力": 0.7279829090909091
       },
       "powerMultiplier": 1,
       "workers": 76,
@@ -1680,7 +1679,7 @@
       "isHidden": false,
       "module": "trade",
       "tradeUnityPer100": 0.2001953,
-      "tradeUnityDirect": 0.8897568888888887,
+      "tradeUnityDirect": 0.7279829090909091,
       "tradeUnityMaintenance": 0.4003906,
       "_tradeDockName": "Cargo depot (8)",
       "_tradeModuleName": "module (L)",
@@ -1689,5 +1688,227 @@
   ],
   "hideStage": true,
   "diagnosticMode": false,
-  "excludedItems": []
+  "excludedItems": [],
+  "modules": [
+    {
+      "id": "md_msu4e1av",
+      "name": "钢",
+      "category": "Smelting",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "SteelCastingCooledT2",
+          "count": 1
+        },
+        {
+          "recipeId": "SteelSmeltingT2",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "md_msu4e4n1",
+      "name": "铜",
+      "category": "Smelting",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "CopperCastingCooled",
+          "count": 2
+        },
+        {
+          "recipeId": "CopperElectrolysisProcess",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "id": "md_msu4e7hl",
+      "name": "硅",
+      "category": "Smelting",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "SiliconSmeltingArc2",
+          "count": 1
+        },
+        {
+          "recipeId": "SiliconTreatment",
+          "count": 4
+        }
+      ]
+    },
+    {
+      "id": "md_msu4e9nr",
+      "name": "钛",
+      "category": "Smelting",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "TitaniumChlorideReduction",
+          "count": 1
+        },
+        {
+          "recipeId": "TitaniumPurification",
+          "count": 2
+        },
+        {
+          "recipeId": "TitaniumChlorination",
+          "count": 2
+        },
+        {
+          "recipeId": "IlmeniteSmeltingArc2",
+          "count": 2
+        }
+      ]
+    },
+    {
+      "name": "铝",
+      "category": "Smelting",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "AluminaCalcificationHydrogen",
+          "count": 1
+        },
+        {
+          "recipeId": "BauxiteDigestion",
+          "count": 1
+        },
+        {
+          "recipeId": "RedMudSettlingAcid",
+          "count": 2
+        }
+      ],
+      "id": "md_msu4fww8"
+    },
+    {
+      "id": "md_msu4g0n9",
+      "name": "金",
+      "category": "Smelting",
+      "divisor": 4,
+      "parts": [
+        {
+          "recipeId": "GoldSettling",
+          "count": 4
+        },
+        {
+          "recipeId": "GoldOreMillingT2",
+          "count": 2
+        },
+        {
+          "recipeId": "GoldOreCrushingT2",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "md_msu4gbkg",
+      "name": "芯片",
+      "category": "Production",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage1A",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage2A",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage3A",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage1B",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage2B",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage3B",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage1C",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage2C",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage3C",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage1D",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdStage2D",
+          "count": 1
+        },
+        {
+          "recipeId": "MicrochipMachineT2_MicrochipProdFinalStage",
+          "count": 1
+        }
+      ]
+    },
+    {
+      "id": "md_msu4gf4d",
+      "name": "石英制沙",
+      "category": "Production",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "QuartzCrushingT2",
+          "count": 1
+        },
+        {
+          "recipeId": "QuartzMillingT2",
+          "count": 3
+        }
+      ]
+    },
+    {
+      "name": "发电机组",
+      "category": "Buildings",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "PowerGeneratorT2",
+          "count": 1
+        },
+        {
+          "recipeId": "TurbineLowPressT2",
+          "count": 1
+        },
+        {
+          "recipeId": "TurbineHighPressT2",
+          "count": 1
+        }
+      ],
+      "id": "md_msu4mahh"
+    },
+    {
+      "name": "123",
+      "category": "Buildings",
+      "divisor": 1,
+      "parts": [
+        {
+          "recipeId": "SolarPanelMono_solar",
+          "count": 1
+        }
+      ],
+      "id": "md_msu546xx"
+    }
+  ],
+  "moduleEnabled": {
+    "md_msu546xx": true,
+    "md_msu4mahh": false
+  }
 }

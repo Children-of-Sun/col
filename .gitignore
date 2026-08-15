@@ -17,3 +17,6 @@ tmp_patch.cjs
 .DS_Store
 Thumbs.db
 scripts/rewrite-history.ps1
+
+# git 历史备份（重写历史时生成，确认无误后本地删除即可）
+git-history-backup-*.bundle

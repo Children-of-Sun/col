@@ -107,6 +107,10 @@ export const useStore = create<StoreState>((set, get) => ({
 
   enableFocusConsumption: false,
 
+  // 模块：多个配方组合成总配方，可在求解中调用
+  modules: [],
+  moduleEnabled: {},
+
   officeBuildingEnabled: {},
   officeSelectedLevel: {},
   officeRecipeEnabled: {},
@@ -276,6 +280,35 @@ export const useStore = create<StoreState>((set, get) => ({
   setEnableAgriculture: (value: boolean) => set({ enableAgriculture: value }),
   setCropRotation: (value: boolean) => set({ cropRotation: value }),
   setEnableFocusConsumption: (value: boolean) => set({ enableFocusConsumption: value }),
+
+  // 模块操作后自动持久化到 localStorage（与"保存当前配置"相同），防止刷新丢失
+  persistModules: () => {
+    try {
+      localStorage.setItem('factorySettings', JSON.stringify(get().exportSettings()));
+    } catch { /* 忽略存储失败 */ }
+  },
+  setModules: (modules) => set({ modules }),
+  addModule: (bp) => {
+    set(s => ({ modules: [...s.modules, bp] }));
+    get().persistModules();
+  },
+  updateModule: (id, patch) => {
+    set(s => ({ modules: s.modules.map(b => b.id === id ? { ...b, ...patch } : b) }));
+    get().persistModules();
+  },
+  deleteModule: (id) => {
+    set(s => {
+      const modules = s.modules.filter(b => b.id !== id);
+      const moduleEnabled = { ...s.moduleEnabled };
+      delete moduleEnabled[id];
+      return { modules, moduleEnabled };
+    });
+    get().persistModules();
+  },
+  setModuleEnabled: (id, value) => {
+    set(s => ({ moduleEnabled: { ...s.moduleEnabled, [id]: value } }));
+    get().persistModules();
+  },
   setOfficeBuildingEnabled: (id, value) => set(s => ({ officeBuildingEnabled: { ...s.officeBuildingEnabled, [id]: value } })),
   setOfficeLevelById: (id, level) => set(s => ({ officeSelectedLevel: { ...s.officeSelectedLevel, [id]: level } })),
   setOfficeRecipeEnabled: (id, value) => set(s => ({ officeRecipeEnabled: { ...s.officeRecipeEnabled, [id]: value } })),
@@ -422,6 +455,7 @@ export const useStore = create<StoreState>((set, get) => ({
       'demands', 'externalSupplies', 'selectedTradeRecipes',
       'selectedTradeContractIds', 'hideStage', 'diagnosticMode',
       'customWeights', 'tradeParams', 'excludedItems',
+      'modules', 'moduleEnabled',
     ] as const;
     for (const key of simpleFields) {
       if ((s as any)[key] !== undefined) (state as any)[key] = (s as any)[key];
@@ -532,6 +566,9 @@ export const useStore = create<StoreState>((set, get) => ({
       hideStage: s.hideStage,
       diagnosticMode: s.diagnosticMode,
       excludedItems: s.excludedItems,
+      // 模块
+      modules: s.modules,
+      moduleEnabled: s.moduleEnabled,
     };
   },
 

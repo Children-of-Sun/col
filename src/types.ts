@@ -134,6 +134,9 @@ export interface Recipe {
   _tradeDockName?: string;    // 贸易码头显示名称（用于占地面积查找）
   _tradeModuleName?: string;  // 贸易模块显示名称（用于占地面积查找）
   _tradeBaySlots?: number;    // 贸易码头舱位数（用于计算模块总占地面积）
+  _moduleParts?: { recipeId: string; name: string; count: number; buildingId: string; buildingName: string; isSolar: boolean }[];  // 模块内部配方明细
+  _moduleMachineTotal?: number;  // 模块内部机器总数（Σ 各配方数量）
+  _moduleIsAgriculture?: boolean;  // 模块包含农业配方（结果中归入农业模块）
 }
 
 export interface LabMeta {
@@ -247,6 +250,10 @@ export interface StoreState {
 
   enableFocusConsumption: boolean;
 
+  // 模块：多个配方组合成总配方，可在求解中调用
+  modules: Module[];
+  moduleEnabled: Record<string, boolean>;
+
   officeBuildingEnabled: Record<string, boolean>;
   officeSelectedLevel: Record<string, number>;
   officeRecipeEnabled: Record<string, boolean>;
@@ -353,6 +360,12 @@ export interface StoreState {
   toggleCrop: (buildingId: string, cropName: string, enabled: boolean) => void;
   loadAgricultureBuildings: () => void;
   setEnableFocusConsumption: (value: boolean) => void;
+  persistModules: () => void;
+  setModules: (modules: Module[]) => void;
+  addModule: (bp: Module) => void;
+  updateModule: (id: string, patch: Partial<Module>) => void;
+  deleteModule: (id: string) => void;
+  setModuleEnabled: (id: string, value: boolean) => void;
   setOfficeBuildingEnabled: (id: string, value: boolean) => void;
   setOfficeLevelById: (id: string, level: number) => void;
   setOfficeRecipeEnabled: (id: string, value: boolean) => void;
@@ -463,4 +476,18 @@ export interface RedundancyResource {
   enabled: boolean;   // 该资源是否启用冗余
   lower: number;      // 下限百分比 (50-150)
   upper: number;      // 上限百分比 (50-150)
+}
+
+// ==================== 模块类型 ====================
+export interface ModulePart {
+  recipeId: string;   // 内部配方 id
+  count: number;      // 该配方在模块中的数量（可小数，如 1.5 台）
+}
+
+export interface Module {
+  id: string;         // 唯一 id
+  name: string;       // 模块名称
+  category: string;   // 所属类别（结果中按此分类显示）
+  divisor?: number;   // 除数 N（默认 1）：每个配方数量 = 基准数量 ÷ N（用于整体小数化）
+  parts: ModulePart[];
 }

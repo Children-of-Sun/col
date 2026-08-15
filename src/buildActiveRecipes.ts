@@ -12,9 +12,12 @@ import {
   SPACE_CARGO_ITEMS,
   t,
   getSeriesName,
+  computeSolarEfficiency,
 } from './utils';
 import { getAgricultureMultipliers } from './utils/agricultureMultipliers';
 import { buildTradeRecipe } from './utils/trade';
+import { buildModuleRecipe } from './utils/module';
+import { buildAgricultureRecipes } from './utils/agricultureRecipes';
 
 export interface ActiveRecipesResult {
   mainActive: Recipe[];
@@ -35,6 +38,11 @@ export interface ActiveRecipesResult {
   tradeUnityMaintenanceTotal: number;
   positiveDemands: Demand[];
 }
+
+/**
+ * 生成农业系统动态配方（agri_*）：实现见 utils/agricultureRecipes.ts，供求解与模块 UI 共用
+ */
+export { buildAgricultureRecipes } from './utils/agricultureRecipes';
 
 export function buildActiveRecipes(
   state: ReturnType<typeof useStore.getState>,
@@ -118,7 +126,8 @@ export function buildActiveRecipes(
     }
   });
 
-  if (!active.length && !state.enableAgriculture) {
+  const hasEnabledModule = (state.modules || []).some(b => state.moduleEnabled?.[b.id] !== false);
+  if (!active.length && !state.enableAgriculture && !hasEnabledModule) {
     return null;
   }
 
@@ -132,21 +141,34 @@ export function buildActiveRecipes(
     ...r, inputs: { ...r.inputs }, outputs: { ...r.outputs }, upkeep: { ...r.upkeep }
   }));
 
-  // ========== 太阳能加成 ==========
-  let solarBonusMultiplier = 1;
-  if (gameData) {
-    const cleanPanelEdict = gameData.edicts.find(e => e.name === '清洁面板');
-    if (cleanPanelEdict) {
-      const lvl = edictLevels[gameData.edicts.indexOf(cleanPanelEdict)] ?? -1;
-      if (lvl >= 0) solarBonusMultiplier *= (1 + cleanPanelEdict.effectPerLevel[lvl]);
+  // 模块引用的配方（无论启用/关闭）也纳入加成处理链：
+  // 模块独立于配方开关，但其内部配方应同样享受太阳能/维护产量/回收率等加成。
+  // 这些克隆不会进入主模块求解（mainActive 过滤会剔除未启用的配方），仅作为模块数据源。
+  if (state.modules && state.modules.length > 0) {
+    const moduleRecipeIds = new Set<string>();
+    for (const bp of state.modules) {
+      if (state.moduleEnabled?.[bp.id] === false) continue;
+      for (const p of bp.parts || []) {
+        if (p && p.count > 0) moduleRecipeIds.add(p.recipeId);
+      }
     }
-    const solarResearch = gameData.research.find(r => r.name === '太阳能发电');
-    if (solarResearch) {
-      const lvl = researchLevels[gameData.research.indexOf(solarResearch)] || 0;
-      if (lvl > 0) solarBonusMultiplier *= (1 + solarResearch.effectPerLevel[0] * lvl);
+    if (moduleRecipeIds.size > 0) {
+      const existingIds = new Set(modifiedActive.map(r => r.id));
+      for (const id of moduleRecipeIds) {
+        if (existingIds.has(id)) continue;
+        // 优先 main 副本：电力建筑存在同名 power/main 两个副本（如 SolarPanel_solar），
+        // 只有 main 副本参与主模块加成处理（太阳能效率等）
+        const src = state.recipes.find(r => r.id === id && r.module === 'main')
+          || state.recipes.find(r => r.id === id);
+        if (src && src.module === 'main' && !src.isHidden) {
+          modifiedActive.push({ ...src, inputs: { ...src.inputs }, outputs: { ...src.outputs }, upkeep: { ...src.upkeep } });
+        }
+      }
     }
   }
-  const finalSolarEfficiency = solarEfficiency * solarBonusMultiplier;
+
+  // ========== 太阳能加成 ==========
+  const finalSolarEfficiency = computeSolarEfficiency(solarEfficiency, gameData, edictLevels, researchLevels);
 
   modifiedActive.forEach(recipe => {
     if (recipe.isSolar && recipe.outputs['electricity']) {
@@ -161,62 +183,15 @@ export function buildActiveRecipes(
 
   // ========== 农业系统 ==========
   if (state.enableAgriculture) {
-    const calculateRecipe = (crop: CropSetting, ft: number, p: number, fertValue: number) => {
-      const waterPerMin = crop.baseWaterPerMin;
-      const fc = crop.baseFc;
-      let requiredFertility: number;
-      if (ft <= 1.0) {
-        requiredFertility = fc * p - 3 * (1 - ft);
-      } else {
-        requiredFertility = fc * p + 2 * (fc * p + 3) * (ft - 1);
-      }
-      const fertilizerPerMin = Math.max(0, requiredFertility / fertValue);
-      const cropPerMin = crop.baseCropPerMin * ft;
-      return { waterPerMin, fertilizerPerMin, cropPerMin };
-    };
-
-    const fertValue = state.globalFertilizerType === 'organic' ? 1 : (state.globalFertilizerType === 'I' ? 2 : 2.5);
-    const P = state.cropRotation ? 1.0 : 1.5;
-    const FT = state.targetFertility / 100;
-
     const farmBuildingIds = state.farms.map(f => f.buildingId);
     for (let i = modifiedActive.length - 1; i >= 0; i--) {
       if (farmBuildingIds.includes(modifiedActive[i].buildingId)) {
         modifiedActive.splice(i, 1);
       }
     }
-
-    for (const farm of state.farms) {
-      if (!farm.enabled) continue;
-      for (const crop of farm.crops) {
-        if (!crop.enabled) continue;
-        const originalRecipe = state.recipes.find(r => r.id === crop.baseRecipeId);
-        if (!originalRecipe) continue;
-        const { waterPerMin, fertilizerPerMin, cropPerMin } = calculateRecipe(crop, FT, P, fertValue);
-        const finalWaterPerMin = waterPerMin * totalFarmWaterMultiplier;
-        const finalCropPerMin = cropPerMin * farmOutputMultiplier;
-        const fertInputKey = state.globalFertilizerType === 'organic'
-          ? 'fertilizer organic' : `fertilizer ${state.globalFertilizerType.toLowerCase()}`;
-        const newRecipe: Recipe = {
-          id: `agri_${farm.buildingId}_${crop.cropName}`,
-          name: `${t(crop.cropName, translation)} (${t(farm.buildingName, translation)})`,
-          buildingId: farm.buildingId,
-          buildingName: farm.buildingName,
-          category: '农业',
-          buildingLevel: farm.level,
-          duration: 60,
-          inputs: { 'water': finalWaterPerMin, [fertInputKey]: fertilizerPerMin },
-          outputs: { [crop.cropName.toLowerCase()]: finalCropPerMin },
-          upkeep: originalRecipe.upkeep ? { ...originalRecipe.upkeep } : {},
-          powerMultiplier: originalRecipe.powerMultiplier || 1,
-          workers: originalRecipe.workers || 0,
-          isSolar: false,
-          isHidden: false,
-          module: 'main',
-        };
-        modifiedActive.push(newRecipe);
-      }
-    }
+    // 生成 agri_* 动态配方（农业模块设置：目标肥力/肥料类型/轮作 + 农业倍率）
+    const agriRecipes = buildAgricultureRecipes(state, farmOutputMultiplier, totalFarmWaterMultiplier);
+    modifiedActive.push(...agriRecipes);
   }
 
   // ========== 办公室建筑配方 ==========
@@ -702,6 +677,33 @@ export function buildActiveRecipes(
   }
 
   const stationActive = [stationRecipe];
+
+  // ========== 模块模块：将启用的模块展开为总配方（总输入输出，机器数 = 内部数量之和） ==========
+  if (state.modules && state.modules.length > 0) {
+    // 查找源优先用处理过加成的配方（太阳能/农业/办公室/维护回收/维护产量加成），
+    // 找不到（未启用或被替换的配方）再回退原始数据
+    const enrichedRecipes = [...modifiedActive, ...state.recipes];
+    // 模块引用的原始农场配方 → 农业模块动态配方（agri_*）映射：
+    // 农业模块启用时，模块中的农场配方使用农业模块处理后的版本（肥力/肥料/轮作设置）
+    const agriRecipeAlias = new Map<string, string>();
+    if (state.enableAgriculture) {
+      for (const r of state.recipes) {
+        if (r.module === 'main' && r.buildingId && r.buildingId.startsWith('FarmT')) {
+          const crop = Object.keys(r.outputs).find(k => k !== 'water' && k !== 'recyclables' && k !== 'Recyclables');
+          if (crop) agriRecipeAlias.set(r.id, `agri_${r.buildingId}_${crop}`);
+        }
+      }
+    }
+    for (const bp of state.modules) {
+      if (state.moduleEnabled?.[bp.id] === false) continue;
+      // 模块内农业配方应用独立农业加成（产量/水倍率；agri_* 动态配方已含倍率不再重复）
+      const bpRecipe = buildModuleRecipe(bp, enrichedRecipes, {
+        output: farmOutputMultiplier,
+        water: totalFarmWaterMultiplier,
+      }, agriRecipeAlias);
+      if (bpRecipe) mainActive.push(bpRecipe);
+    }
+  }
 
   const totalUnityConsumption = unityConsumption;
 

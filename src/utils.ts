@@ -98,6 +98,29 @@ export function getSeriesName(
 
 import { GameData, Edict, Office, Research, Recipe, TradeContract, SolverResult } from './types';
 
+/** 计算太阳能最终效率 = 用户设置 × 清洁面板法令 × 太阳能发电研究（求解与预览共用） */
+export function computeSolarEfficiency(
+  solarEfficiency: number,
+  gameData: GameData | null,
+  edictLevels: Record<number, number>,
+  researchLevels: number[],
+): number {
+  let mult = 1;
+  if (gameData) {
+    const cleanPanelEdict = gameData.edicts.find(e => e.name === '清洁面板');
+    if (cleanPanelEdict) {
+      const lvl = edictLevels[gameData.edicts.indexOf(cleanPanelEdict)] ?? -1;
+      if (lvl >= 0) mult *= (1 + cleanPanelEdict.effectPerLevel[lvl]);
+    }
+    const solarResearch = gameData.research.find(r => r.name === '太阳能发电');
+    if (solarResearch) {
+      const lvl = researchLevels[gameData.research.indexOf(solarResearch)] || 0;
+      if (lvl > 0) mult *= (1 + solarResearch.effectPerLevel[0] * lvl);
+    }
+  }
+  return solarEfficiency * mult;
+}
+
 export function getRecycleRate(
   base: number,
   edicts: Edict[],

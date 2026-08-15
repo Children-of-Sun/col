@@ -77,7 +77,7 @@ td:first-child { text-align: left; }
 .recipe-sublist { margin-top:4px; margin-left:20px; }
 .recipe-entry { display:flex; align-items:center; gap:10px; margin:2px 0; transition: background-color 0.2s; }
 .recipe-entry:hover { background-color: #f1f3f5 !important; }
-.recipe-info { font-size:12px; color:#555; }
+.recipe-info { font-size:14px; color:#555; }
 .power-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(250px, 1fr)); gap:8px; }
 .power-item { display:flex; align-items:center; gap:8px; }
 .steam-option { margin-top:10px; }

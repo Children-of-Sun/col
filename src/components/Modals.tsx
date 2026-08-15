@@ -2,8 +2,11 @@ import React, { useState, useMemo } from 'react';
 import { useStore } from '../stores';
 import { Btn, ModalShell, SearchInput, Select, ToggleSwitch } from './UI';
 import { ProductGrid } from './ProductGrid';
-import { t, isPowerBuilding, HIDDEN_SERIES, isPowerItem, getSeriesName } from '../utils';
+import { t, isPowerBuilding, HIDDEN_SERIES, isPowerItem, getSeriesName, computeSolarEfficiency } from '../utils';
 import { Recipe, Series } from '../types';
+import { buildModuleRecipe, getModuleNetIO } from '../utils/module';
+import { getAgricultureMultipliers } from '../utils/agricultureMultipliers';
+import { buildAgricultureRecipes } from '../utils/agricultureRecipes';
 
 // ==================== 建筑等级弹窗 ====================
 export const LevelModal: React.FC<{ open: boolean; onClose: () => void }> = ({ open, onClose }) => {
@@ -59,6 +62,52 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   const mainBuildingEnabledMap = useStore(s => s.mainBuildingEnabledMap);
   const setMainBuildingEnabled = useStore(s => s.setMainBuildingEnabled);
   const translation = useStore(s => s.translation);
+  const modules = useStore(s => s.modules);
+  const moduleEnabled = useStore(s => s.moduleEnabled);
+  const setModuleEnabled = useStore(s => s.setModuleEnabled);
+  // 农业加成（模块内农业配方预览同样应用）
+  const gameData = useStore(s => s.gameData);
+  const edictLevels = useStore(s => s.edictLevels);
+  const officeLevels = useStore(s => s.officeLevels);
+  const researchLevels = useStore(s => s.researchLevels);
+  const enableAgriculture = useStore(s => s.enableAgriculture);
+  const farms = useStore(s => s.farms);
+  const globalFertilizerType = useStore(s => s.globalFertilizerType);
+  const targetFertility = useStore(s => s.targetFertility);
+  const cropRotation = useStore(s => s.cropRotation);
+  const agriMultipliers = React.useMemo(
+    () => getAgricultureMultipliers(gameData, edictLevels, officeLevels, researchLevels),
+    [gameData, edictLevels, officeLevels, researchLevels]
+  );
+  // 农业系统动态配方（agri_*）纳入模块预览
+  const agriRecipes = React.useMemo(() => {
+    if (!enableAgriculture) return [];
+    return buildAgricultureRecipes(useStore.getState(), agriMultipliers.output, agriMultipliers.water);
+  }, [enableAgriculture, farms, globalFertilizerType, targetFertility, cropRotation, agriMultipliers]);
+  // 同 id 优先 main 副本（避免命中未加成/重复的 power 副本）
+  const allRecipes = React.useMemo(() => {
+    const list = [...recipes, ...agriRecipes];
+    const map = new Map<string, (typeof list)[number]>();
+    for (const r of list) {
+      const ex = map.get(r.id);
+      if (!ex || (r.module === 'main' && ex.module !== 'main')) map.set(r.id, r);
+    }
+    return [...map.values()];
+  }, [recipes, agriRecipes]);
+  // 太阳能加成（模块预览与求解一致）
+  const solarEfficiency = useStore(s => s.solarEfficiency);
+  const finalSolarEfficiency = React.useMemo(
+    () => computeSolarEfficiency(solarEfficiency, gameData, edictLevels, researchLevels),
+    [solarEfficiency, gameData, edictLevels, researchLevels]
+  );
+  const previewRecipes = React.useMemo(
+    () => finalSolarEfficiency !== 1
+      ? allRecipes.map(r => r.isSolar && r.outputs['electricity']
+        ? { ...r, outputs: { ...r.outputs, electricity: r.outputs['electricity'] * finalSolarEfficiency } }
+        : r)
+      : allRecipes,
+    [allRecipes, finalSolarEfficiency]
+  );
 
   const [search, setSearch] = useState('');
   const [activeCat, setActiveCat] = useState<string>('');
@@ -118,6 +167,7 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
 
   const cats = useMemo(() => {
     const c = [...new Set(entries.map(e => e.category))].sort();
+    c.unshift('📐 模块');
     c.push('🚫 已禁用');
     return c;
   }, [entries]);
@@ -125,6 +175,7 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   const currentCat = activeCat || cats[0] || '';
 
   const filtered = useMemo(() => {
+    if (currentCat === '📐 模块') return [];
     const result: any[] = [];
     for (const e of entries) {
       let matchedRecipes: any[] | undefined;
@@ -153,7 +204,7 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
   return (
     <ModalShell open={open} onClose={onClose} title="🧪 建筑与配方">
       <div style={{ background: '#e3f2fd', color: '#0d47a1', padding: '6px 10px', borderRadius: 4, marginBottom: 8, fontSize: '1rem' }}>
-        关闭某个建筑后，其附属配方不会参与求解（即使配方开关仍开启）
+        关闭某个建筑后，其附属配方不会参与求解（即使配方开关仍开启）；模块在「📐 模块」分类中管理是否使用
       </div>
       <SearchInput placeholder="搜索建筑或配方..." value={search} onChange={setSearch} />
       <div className="recipe-panel">
@@ -164,14 +215,79 @@ export const RecipeModal: React.FC<{ open: boolean; onClose: () => void }> = ({ 
           ))}
         </div>
         <div className="building-list">
-          {!filtered.length ? <span className="hint">无匹配建筑</span> :
+          {currentCat === '📐 模块' ? (
+            modules.length === 0 ? (
+              <span className="hint">暂无模块，请到「📐 模块」模式创建</span>
+            ) : modules.map(bp => {
+              const enabled = moduleEnabled[bp.id] !== false;
+              const bpDiv = bp.divisor && bp.divisor > 0 ? bp.divisor : 1;
+              const machineTotal = (bp.parts || []).reduce((s, p) => s + (p.count > 0 ? p.count : 0), 0) / bpDiv;
+              const bpRecipe = buildModuleRecipe(bp, previewRecipes, agriMultipliers);
+              const netIO = bpRecipe ? getModuleNetIO(bpRecipe) : null;
+              return (
+                <div key={bp.id} className="building-block"
+                  style={{ backgroundColor: enabled ? '#e8f5e9' : '#fafafa', border: enabled ? '1px solid #4caf50' : '1px solid #ddd', borderRadius: 6, marginBottom: 8, overflow: 'hidden' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', cursor: 'pointer', userSelect: 'none' }}
+                    onClick={() => setModuleEnabled(bp.id, !enabled)}>
+                    <input type="checkbox" checked={enabled} readOnly style={{ cursor: 'pointer' }} />
+                    <span style={{ fontWeight: 'bold' }}>{bp.name}</span>
+                    <span style={{ fontSize: 13, color: '#888' }}>
+                      分类: {t(bp.category || '模块', translation)} | {bp.parts.length} 个配方 | 内部机器 {machineTotal} 台
+                    </span>
+                    <span style={{ marginLeft: 'auto', fontSize: 13, color: enabled ? '#2e7d32' : '#999' }}>
+                      {enabled ? '✓ 使用中' : '未使用'}
+                    </span>
+                  </div>
+                  {netIO && (
+                    <div style={{ padding: '6px 10px 8px 30px', fontSize: '0.95rem', color: '#333', lineHeight: 1.7 }}>
+                      <div>
+                        <span style={{ color: '#c62828', fontWeight: 600 }}>净输入: </span>
+                        {Object.keys(netIO.inputs).length
+                          ? Object.entries(netIO.inputs).map(([k, v]) => `${t(k, translation)}×${v.toFixed(2)}`).join('、')
+                          : '无'}
+                      </div>
+                      <div>
+                        <span style={{ color: '#2e7d32', fontWeight: 600 }}>净输出: </span>
+                        {Object.keys(netIO.outputs).length
+                          ? Object.entries(netIO.outputs).map(([k, v]) => `${t(k, translation)}×${v.toFixed(2)}`).join('、')
+                          : '无'}
+                      </div>
+                      {bp.parts.length > 0 && (
+                        <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                          {bp.parts.map(p => {
+                            const r = recipes.find(x => x.id === p.recipeId);
+                            return r ? (
+                              <span key={p.recipeId} style={{
+                                background: '#f0f4ff', border: '1px solid #b8c8e8', color: '#333',
+                                borderRadius: 10, padding: '1px 8px', fontSize: '0.85rem',
+                              }}>
+                                {t(r.name, translation)} ×{p.count}
+                              </span>
+                            ) : (
+                              <span key={p.recipeId} style={{
+                                background: '#fdecea', border: '1px solid #e8b8b8', color: '#c62828',
+                                borderRadius: 10, padding: '1px 8px', fontSize: '0.85rem',
+                              }}>
+                                ⚠ {p.recipeId} ×{p.count}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          ) : !filtered.length ? <span className="hint">无匹配建筑</span> : (
             filtered.map(e => (
               <BuildingBlock key={e.buildingId} entry={e} openByDefault={!!search}
                 translation={translation} recipeEnabled={recipeEnabled}
                 onToggleBuilding={e.onToggleBuilding}
                 onToggleRecipe={(rid, checked) => setRecipeEnabled(rid, checked)}
               />
-            ))}
+            ))
+          )}
         </div>
       </div>
     </ModalShell>
@@ -320,7 +436,7 @@ const BuildingBlock: React.FC<{
               >
                 <span style={{ flex: 1, minWidth: 0 }}>
                   <span>{t(r.name, translation)}</span>
-                  <span className="recipe-info" style={{ marginLeft: '10px', fontSize: '0.8rem' }}>
+                  <span className="recipe-info" style={{ marginLeft: '10px' }}>
                     投入: {imp} → 产出: {oup}
                   </span>
                 </span>

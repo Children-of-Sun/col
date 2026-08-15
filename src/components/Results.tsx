@@ -6,6 +6,7 @@ import { Recipe } from '../types';
 import { isContinuous, formatPowerSigned, formatPowerValue, formatComputingSigned, formatComputingValue, computeRecipeArea, formatFootprint, smartRound, formatPowerSmart, formatComputingSmart, formatNetValue } from '../utils/format';
 import { IconWithFallback } from './IconWithFallback';
 import { computeEmbeddedValues } from '../embeddedValues';
+import { getNetFromRecords } from '../utils/module';
 import ItemDetailModal from './ItemDetailModal';
 
 function computeRecipePerMin(recipe: Recipe, machineCount: number, reductionFactor: number, ceilUpkeep: boolean = false) {
@@ -265,88 +266,139 @@ const RecipeList: React.FC<{
 }> = React.memo(({ recipes, translation, buildingSizes, showFullStats, onItemClick }) => {
   const isTrade = recipes.length > 0 && recipes[0].recipe.module === 'trade';
   return (
-    <div className="table-wrapper">
-      <table className="data-table">
-        <thead>
-          <tr>
-            <th className="recipe-name-cell">{t('         配方         ', translation)}</th>
-            <th className="col-narrow">{t('建筑', translation)}</th>
-            <th className="col-narrow">{t('理论机器数', translation)}</th>
-            <th className="col-narrow">{t('实际机器数', translation)}</th>
-            <th className="col-narrow">{t('占地', translation)}</th>
-            <th className="col-narrow">{t('人力', translation)}</th>
-            <th className="col-narrow">{t('电力', translation)}</th>
-            <th className="col-narrow">{t('算力', translation)}</th>
-            <th className="col-narrow">{t('维护', translation)}</th>
-            {isTrade && <th className="col-narrow">{t('凝聚力消耗', translation)}</th>}
-            <th className="col-wide">{t('投入', translation)}</th>
-            <th className="col-wide">{t('产出', translation)}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {recipes.map((item, idx) => {
-            const r = item.recipe;
-            const cnt = item.count;
-            const pm = item.perMin;
-            const skipItems = new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii']);
-            const filteredInputs = Object.entries(pm.inputs).filter(([k]) => !skipItems.has(k));
-            const inputs = filteredInputs.length > 0 ? (
-              <span>{filteredInputs.map(([k, v]) => (
-                <span key={k} onClick={() => onItemClick?.(k)} style={{ cursor: 'pointer', marginRight: 6 }} title={`点击搜索 ${t(k, translation)}`}>
-                  {t(k, translation)}×{(v as number).toFixed(1)}
+    <div>
+      {recipes.map((item) => {
+        const r = item.recipe;
+        const cnt = item.count;
+        const pm = item.perMin;
+        // 模块：投入/产出显示净额（内部相互抵消），电力/算力参与显示
+        const isModule = !!r._moduleParts;
+        const skipItems = isModule
+          ? new Set(['人力', 'maintenance i', 'maintenance ii', 'maintenance iii'])
+          : new Set(['人力', 'electricity', 'computing', 'maintenance i', 'maintenance ii', 'maintenance iii']);
+        const ioInputs = isModule
+          ? getNetFromRecords(pm.inputs, pm.outputs).inputs
+          : pm.inputs;
+        const ioOutputs = isModule
+          ? getNetFromRecords(pm.inputs, pm.outputs).outputs
+          : pm.outputs;
+        const filteredInputs = Object.entries(ioInputs).filter(([k]) => !skipItems.has(k));
+        const inputChips = filteredInputs.length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {filteredInputs.map(([k, v]) => (
+              <span key={k} onClick={() => onItemClick?.(k)} title={`点击搜索 ${t(k, translation)}`}
+                style={{ cursor: 'pointer', background: '#fdecea', border: '1px solid #ef9a9a', color: '#333', borderRadius: 10, padding: '1px 8px', fontSize: '0.8rem' }}>
+                {t(k, translation)}×{(v as number).toFixed(1)}
+              </span>
+            ))}
+          </div>
+        ) : <span className="hint">无</span>;
+        const outputChips = Object.entries(ioOutputs).length > 0 ? (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+            {Object.entries(ioOutputs).map(([k, v]) => (
+              <span key={k} onClick={() => onItemClick?.(k)} title={`点击搜索 ${t(k, translation)}`}
+                style={{ cursor: 'pointer', background: '#e8f5e9', border: '1px solid #a5d6a7', color: '#333', borderRadius: 10, padding: '1px 8px', fontSize: '0.8rem' }}>
+                {t(k, translation)}×{(v as number).toFixed(1)}
+              </span>
+            ))}
+          </div>
+        ) : <span className="hint">无</span>;
+        const maintParts: string[] = [];
+        if (pm.maintI > 0) {
+          const mi = smartRound(pm.maintI, showFullStats);
+          maintParts.push(`M I:${mi.text}`);
+        }
+        if (pm.maintII > 0) {
+          const mii = smartRound(pm.maintII, showFullStats);
+          maintParts.push(`M II:${mii.text}`);
+        }
+        if (pm.maintIII > 0) {
+          const miii = smartRound(pm.maintIII, showFullStats);
+          maintParts.push(`M III:${miii.text}`);
+        }
+        const maintStr = maintParts.join(' ') || '-';
+        const maintTitle = maintParts.length > 0 ? maintParts.join(' ') : '-';
+        let cohesionConsumption = '';
+        if (isTrade) {
+          cohesionConsumption = (pm.cohesion || 0).toFixed(1);
+        }
+        // 模块：名称只显示模块名，内部明细放悬浮提示
+        const bpDetail = r._moduleParts
+          ? r._moduleParts.map(p => `${t(p.name, translation)}×${p.count}`).join('、')
+          : '';
+        const fullName = t(r.name, translation);
+        const nameTitle = bpDetail ? `${fullName}（${bpDetail}）` : fullName;
+        const workersR = smartRound(pm.workers, showFullStats);
+        const powerR = formatPowerSmart(pm.electricity, showFullStats);
+        const computingR = formatComputingSmart(pm.computing, showFullStats);
+        // 模块：机器数显示内部机器总数（单元数 × 内部数量之和）
+        const machineDisplay = r._moduleParts
+          ? (cnt * (r._moduleMachineTotal || 1)).toFixed(2)
+          : cnt.toFixed(2);
+        const actualMachineDisplay = r._moduleParts
+          ? (pm.machineCount * (r._moduleMachineTotal || 1)).toFixed(2)
+          : pm.machineCount.toFixed(2);
+        const area = computeRecipeArea(item.recipe, item.count, buildingSizes);
+        // 统计信息标签化
+        const statChips: { label: string; text: string; title?: string }[] = [
+          { label: '🏭 理论机器', text: machineDisplay },
+          { label: '🏭 实际机器', text: actualMachineDisplay },
+          { label: '📐 占地', text: formatFootprint(area), title: area.toFixed(1) + ' 小格' },
+          { label: '👷 人力', text: workersR.text, title: workersR.title },
+          { label: '⚡ 电力', text: powerR.text, title: powerR.title },
+          { label: '💻 算力', text: computingR.text, title: computingR.title },
+          { label: '🔧 维护', text: maintStr, title: maintTitle },
+        ];
+        if (isTrade) statChips.push({ label: '💎 凝聚力', text: cohesionConsumption });
+        return (
+          <div key={r.id} style={{
+            border: isModule ? '1px solid #b8c8e8' : '1px solid #e0e0e0',
+            borderRadius: 6, padding: '4px 10px', marginBottom: 4, background: '#fff',
+          }}>
+            {/* 第一行：名称 */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              {isModule && (
+                <span style={{
+                  background: '#e3f2fd', color: '#0d47a1', padding: '0 8px', borderRadius: 10,
+                  fontSize: '0.7rem', fontWeight: 600,
+                }}>📐 模块</span>
+              )}
+              <span title={nameTitle} style={{ fontWeight: 600, fontSize: '0.9rem', cursor: isModule ? 'help' : 'default' }}>
+                {fullName}
+              </span>
+              <span style={{ color: '#666', fontSize: '0.75rem' }}>🏭 {t(r.buildingName, translation)}</span>
+            </div>
+            {/* 第二行：汇总统计 */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 2 }}>
+              {statChips.map(s => (
+                <span key={s.label} title={s.title}
+                  style={{
+                    background: '#f5f5f5', border: '1px solid #ddd', color: '#555',
+                    borderRadius: 8, padding: '0 6px', fontSize: '0.72rem',
+                  }}>
+                  {s.label}: {s.text}
                 </span>
-              ))}</span>
-            ) : '无';
-            const outputs = Object.entries(pm.outputs).length > 0 ? (
-              <span>{Object.entries(pm.outputs).map(([k, v]) => (
-                <span key={k} onClick={() => onItemClick?.(k)} style={{ cursor: 'pointer', marginRight: 6 }} title={`点击搜索 ${t(k, translation)}`}>
-                  {t(k, translation)}×{(v as number).toFixed(1)}
-                </span>
-              ))}</span>
-            ) : '无';
-            const maintParts: string[] = [];
-            if (pm.maintI > 0) {
-              const mi = smartRound(pm.maintI, showFullStats);
-              maintParts.push(`M I:${mi.text}`);
-            }
-            if (pm.maintII > 0) {
-              const mii = smartRound(pm.maintII, showFullStats);
-              maintParts.push(`M II:${mii.text}`);
-            }
-            if (pm.maintIII > 0) {
-              const miii = smartRound(pm.maintIII, showFullStats);
-              maintParts.push(`M III:${miii.text}`);
-            }
-            const maintStr = maintParts.join(' ') || '-';
-            const maintTitle = maintParts.length > 0 ? maintParts.join(' ') : '-';
-            let cohesionConsumption = '';
-            if (isTrade) {
-              cohesionConsumption = (pm.cohesion || 0).toFixed(1);
-            }
-            const fullName = t(r.name, translation);
-            const displayName = fullName.length > 5 ? fullName.slice(0, 5) + '…' : fullName;
-            const workersR = smartRound(pm.workers, showFullStats);
-            const powerR = formatPowerSmart(pm.electricity, showFullStats);
-            const computingR = formatComputingSmart(pm.computing, showFullStats);
-            return (
-              <tr key={r.id}>
-                <td className="recipe-name-cell" title={fullName}>{displayName}</td>
-                <td>{t(r.buildingName, translation)}</td>
-                <td>{cnt.toFixed(2)}</td>
-                <td>{pm.machineCount.toFixed(2)}</td>
-                <td title={(() => { const a = computeRecipeArea(item.recipe, item.count, buildingSizes); return a.toFixed(1) + ' 小格'; })()}>{formatFootprint(computeRecipeArea(item.recipe, item.count, buildingSizes))}</td>
-                <td title={workersR.title}>{workersR.text}</td>
-                <td title={powerR.title}>{powerR.text}</td>
-                <td title={computingR.title}>{computingR.text}</td>
-                <td title={maintTitle}>{maintStr}</td>
-                {isTrade && <td>{cohesionConsumption}</td>}
-                <td className="col-wide">{inputs}</td>
-                <td className="col-wide">{outputs}</td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+              ))}
+            </div>
+            {/* 第三行：投入 | 产出（两列并排，产出列固定位置垂直对齐） */}
+            <div style={{ display: 'flex', gap: 12, marginTop: 2 }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 4px', alignItems: 'center' }}>
+                  <span style={{ color: '#c62828', fontWeight: 600, fontSize: '0.75rem', marginRight: 2 }}>📥 投入</span>
+                  {inputChips}
+                </div>
+              </div>
+              <div style={{ flex: 1, minWidth: 0, borderLeft: '1px solid #eee', paddingLeft: 10 }}>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 4px', alignItems: 'center' }}>
+                  <span style={{ color: '#2e7d32', fontWeight: 600, fontSize: '0.75rem', marginRight: 2 }}>📤 产出</span>
+                  {outputChips}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+      {recipes.length === 0 && <div className="hint">{t('无配方数据', translation)}</div>}
     </div>
   );
 });
@@ -460,7 +512,21 @@ export const Results: React.FC = () => {
       const varName = solverVarNames[idx];
       const machineCount = varValues[varName] || 0;
       if (machineCount < 1e-6) return;
-      const count = showCeilMachines ? Math.ceil(machineCount) : machineCount;
+      const units = showCeilMachines ? Math.ceil(machineCount) : machineCount;
+      // 模块：拆成内部机器，按内部建筑聚合（不再作为一个"模块"条目）
+      if (recipe._moduleParts && recipe._moduleParts.length > 0) {
+        for (const part of recipe._moduleParts) {
+          // 太阳能面板按等效机器数 0.01 计（与 LP 目标一致）
+          const cnt = units * part.count * (part.isSolar ? 0.01 : 1);
+          const bid = part.buildingId || `md_${part.buildingName}`;
+          if (!byBuilding[bid]) {
+            byBuilding[bid] = { buildingId: bid, buildingName: part.buildingName, iconPath: buildingIcons[bid] || '', count: 0 };
+          }
+          byBuilding[bid].count += cnt;
+        }
+        return;
+      }
+      const count = units * (recipe._moduleMachineTotal || 1);
       const bid = recipe.buildingId;
       if (!byBuilding[bid]) {
         byBuilding[bid] = { buildingId: bid, buildingName: recipe.buildingName, iconPath: buildingIcons[bid] || '', count: 0 };
@@ -593,7 +659,7 @@ export const Results: React.FC = () => {
     for (const item of recipeData) {
       const r = item.recipe;
       const pm = item.perMin;
-      if (r.module === 'main' && r.category === '农业') {
+      if (r.module === 'main' && (r.category === '农业' || r._moduleIsAgriculture)) {
         agricultureRecipes.push(item);
       } else if (r.module === 'main' && r.category === '办公室') {
         officeRecipes.push(item);
@@ -611,8 +677,10 @@ export const Results: React.FC = () => {
         catObj.maintI += pm.maintI;
         catObj.maintII += pm.maintII;
         catObj.maintIII += pm.maintIII;
-        catObj.machineCount += item.machineCount;
-        catObj.actualMachineCount += pm.machineCount;
+        // 模块机器数按内部机器总数计
+        const bpFactor = r._moduleMachineTotal || 1;
+        catObj.machineCount += item.machineCount * bpFactor;
+        catObj.actualMachineCount += pm.machineCount * bpFactor;
       } else if (r.module === 'power') powerRecipes.push(item);
       else if (r.module === 'trade') tradeRecipes.push(item);
       else if (r.module === 'resident' || r.module === 'station' || r.module === 'special') specialRecipes.push(item);
@@ -741,6 +809,22 @@ export const Results: React.FC = () => {
   }, [selectedTab, categoryData]);
 
   const moduleRows = useMemo(() => {
+    // 净产出/净消耗映射，与 SummaryTable 相同的微小误差过滤规则：
+    // 未开启"显示微小误差"时，净差 < 0.01 或相对净差 < 1% 的项不显示
+    const buildNetMap = (p: Record<string, number>, c: Record<string, number>): Record<string, number> => {
+      const netMap: Record<string, number> = {};
+      const allItems = new Set([...Object.keys(p), ...Object.keys(c)]);
+      for (const item of allItems) {
+        const prod = p[item] || 0, cons = c[item] || 0, net = prod - cons;
+        if (Math.abs(net) <= 1e-6) continue;
+        if (!showTinyErrors) {
+          const maxVal = Math.max(prod, cons);
+          if (Math.abs(net) < 0.01 || (maxVal > 0 && Math.abs(net) / maxVal < 0.01)) continue;
+        }
+        netMap[item] = net;
+      }
+      return netMap;
+    };
     const rows: any[] = [];
     const catArea = (recipes: typeof recipeData) => recipes.reduce((s, r) => s + computeRecipeArea(r.recipe, r.machineCount, buildingSizes), 0);
     for (const [name, cat] of Object.entries(categoryData.mainCategories)) {
@@ -749,12 +833,7 @@ export const Results: React.FC = () => {
       const prodElec = p['electricity'] || 0, consElec = c['electricity'] || 0;
       const netElectricity = prodElec - consElec;
       const totalMaintenance = cat.maintI + cat.maintII + cat.maintIII;
-      const allItems = new Set([...Object.keys(p), ...Object.keys(c)]);
-      const netMap: Record<string, number> = {};
-      for (const item of allItems) {
-        const prod = p[item] || 0, cons = c[item] || 0, net = prod - cons;
-        if (Math.abs(net) > 1e-6) netMap[item] = net;
-      }
+      const netMap = buildNetMap(p, c);
       const netProds = Object.entries(netMap).filter(([, net]) => net > 0).map(([item, net]) => ({ item, net }));
       const netCons = Object.entries(netMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net }));
       rows.push({ name, machineCount: cat.machineCount, actualMachineCount: cat.actualMachineCount || 0, workers: cat.workers, netElectricity, computing: cat.computing, totalMaintenance, footprint: catArea(cat.recipes || []), netProds, netCons });
@@ -763,12 +842,7 @@ export const Results: React.FC = () => {
     const pp = categoryData.power.prod as Record<string, number>;
     const pc = categoryData.power.cons as Record<string, number>;
     const powerNetElec = (pp['electricity'] || 0) - (pc['electricity'] || 0);
-    const powerAllItems = new Set([...Object.keys(pp), ...Object.keys(pc)]);
-    const powerNetMap: Record<string, number> = {};
-    for (const item of powerAllItems) {
-      const prod = pp[item] || 0, cons = pc[item] || 0, net = prod - cons;
-      if (Math.abs(net) > 1e-6) powerNetMap[item] = net;
-    }
+    const powerNetMap = buildNetMap(pp, pc);
     rows.push({
       name: '电力模块', machineCount: categoryData.power.machineCount, actualMachineCount: categoryData.power.actualMachineCount, workers: categoryData.power.workers,
       netElectricity: powerNetElec, computing: categoryData.power.computing,
@@ -781,12 +855,7 @@ export const Results: React.FC = () => {
     const tp = categoryData.trade.prod as Record<string, number>;
     const tc = categoryData.trade.cons as Record<string, number>;
     const tradeNetElec = (tp['electricity'] || 0) - (tc['electricity'] || 0);
-    const tradeAllItems = new Set([...Object.keys(tp), ...Object.keys(tc)]);
-    const tradeNetMap: Record<string, number> = {};
-    for (const item of tradeAllItems) {
-      const prod = tp[item] || 0, cons = tc[item] || 0, net = prod - cons;
-      if (Math.abs(net) > 1e-6) tradeNetMap[item] = net;
-    }
+    const tradeNetMap = buildNetMap(tp, tc);
     rows.push({
       name: '贸易模块', machineCount: categoryData.trade.machineCount, actualMachineCount: categoryData.trade.actualMachineCount, workers: categoryData.trade.workers,
       netElectricity: tradeNetElec, computing: categoryData.trade.computing,
@@ -799,12 +868,7 @@ export const Results: React.FC = () => {
     const ap = categoryData.agriculture.prod as Record<string, number>;
     const ac = categoryData.agriculture.cons as Record<string, number>;
     const agriNetElec = (ap['electricity'] || 0) - (ac['electricity'] || 0);
-    const agriAllItems = new Set([...Object.keys(ap), ...Object.keys(ac)]);
-    const agriNetMap: Record<string, number> = {};
-    for (const item of agriAllItems) {
-      const prod = ap[item] || 0, cons = ac[item] || 0, net = prod - cons;
-      if (Math.abs(net) > 1e-6) agriNetMap[item] = net;
-    }
+    const agriNetMap = buildNetMap(ap, ac);
     rows.push({
       name: '农业模块', machineCount: categoryData.agriculture.machineCount, actualMachineCount: categoryData.agriculture.actualMachineCount, workers: categoryData.agriculture.workers,
       netElectricity: agriNetElec, computing: categoryData.agriculture.computing,
@@ -817,12 +881,7 @@ export const Results: React.FC = () => {
     const sp = categoryData.special.prod as Record<string, number>;
     const sc = categoryData.special.cons as Record<string, number>;
     const specialNetElec = (sp['electricity'] || 0) - (sc['electricity'] || 0);
-    const specialAllItems = new Set([...Object.keys(sp), ...Object.keys(sc)]);
-    const specialNetMap: Record<string, number> = {};
-    for (const item of specialAllItems) {
-      const prod = sp[item] || 0, cons = sc[item] || 0, net = prod - cons;
-      if (Math.abs(net) > 1e-6) specialNetMap[item] = net;
-    }
+    const specialNetMap = buildNetMap(sp, sc);
     rows.push({
       name: '特殊模块', machineCount: categoryData.special.machineCount, actualMachineCount: categoryData.special.actualMachineCount, workers: categoryData.special.workers,
       netElectricity: specialNetElec, computing: categoryData.special.computing,
@@ -832,7 +891,7 @@ export const Results: React.FC = () => {
       netCons: Object.entries(specialNetMap).filter(([, net]) => net < 0).map(([item, net]) => ({ item, net })),
     });
     return rows;
-  }, [categoryData, buildingSizes]);
+  }, [categoryData, buildingSizes, showTinyErrors]);
 
   if (!result && !isSolving && !diagnostic) return null;
   const resultStatus = result?.Status ?? result?.status;

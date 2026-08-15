@@ -57,6 +57,16 @@ export function computeRecipeArea(
   buildingSizes: Record<string, { width: number; height: number }>
 ): number {
   if (machineCount < 1e-6) return 0;
+  // 模块：占地 = Σ 内部建筑占地 × 数量 × 单元数
+  if (recipe._moduleParts && recipe._moduleParts.length > 0) {
+    let area = 0;
+    for (const part of recipe._moduleParts) {
+      const key = part.buildingName?.toLowerCase?.() || '';
+      const size = buildingSizes[key];
+      if (size) area += size.width * size.height * part.count;
+    }
+    return area * machineCount;
+  }
   if (recipe.module === 'trade') {
     let area = 0;
     const dockKey = (recipe._tradeDockName || '').toLowerCase();

@@ -100,7 +100,8 @@ export function buildLp(input: LpInput): LpOutput {
     for (const recipe of allRecipes) {
       let coeff = 0;
       if (target === 'machines') {
-        coeff = recipe.isSolar ? 0.01 : 1;
+        // 模块按内部机器总数计（单元数 × 内部数量之和），与结果展示一致
+        coeff = recipe.isSolar ? 0.01 : (recipe._moduleMachineTotal || 1);
       } else if (target === 'labor') {
         coeff = recipe.upkeep['人力'] || 0;
       } else if (target === 'cohesion') {
@@ -111,8 +112,18 @@ export function buildLp(input: LpInput): LpOutput {
           coeff = (buyRate / 100) * unityPer100;
         }
       } else if (target === 'area') {
+        // 模块：占地 = Σ 内部建筑占地 × 数量（÷N 后的台数），与结果展示一致
+        if (recipe._moduleParts && recipe._moduleParts.length > 0) {
+          let area = 0;
+          for (const part of recipe._moduleParts) {
+            const key = part.buildingName?.toLowerCase?.() || '';
+            const size = buildingSizes[key];
+            if (size) area += size.width * size.height * part.count;
+          }
+          coeff = area || 1;
+        }
         // 电力模块不计入占地 → 系数=0
-        if (excludePowerFootprint && recipe.module === 'power') {
+        else if (excludePowerFootprint && recipe.module === 'power') {
           coeff = 0;
         } else if (recipe.module === 'trade') {
           // 贸易不计入占地 → 系数=0
@@ -411,7 +422,7 @@ export function buildLp(input: LpInput): LpOutput {
   [...items].forEach((it, idx) => rows[it] = `c${idx}`);
 
   // ========== 1. 定义需要在电力模块单独处理的物品 ==========
-  const powerSpecialItems = new Set(['steam (high)', 'steam (super)', 'mechanical power']);
+  const powerSpecialItems = new Set(['steam (high)', 'steam (super)', 'mechanical power', 'steam (depleted)']);
 
   // ========== 2. 辅助函数：合并多个表达式 ==========
   const combineExprs = (...exprs: string[]): string => {
@@ -702,8 +713,8 @@ export function buildLp(input: LpInput): LpOutput {
   }
 
   for (const it of allSpecialItems) {
-    // 低压蒸汽：有生产者+无消费者 或 无生产者+有消费者 都跳过约束
-    if (it === 'steam (low)' && (!producers.has(it) || !consumers.has(it))) continue;
+    // 低压蒸汽/乏汽：有生产者+无消费者 或 无生产者+有消费者 都跳过约束（可放空）
+    if ((it === 'steam (low)' || it === 'steam (depleted)') && (!producers.has(it) || !consumers.has(it))) continue;
     const rf = getRedundancyFactors(it);
 
     // 主模块方程：仅使用非电力配方

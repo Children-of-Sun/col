@@ -251,7 +251,7 @@
             "name": "Power generator",
             "category": "Power production",
             "subcategory": "General",
-            "next_tier": "Power generator (large)",
+            "next_tier": "",
             "workers": 0,
             "maintenance_cost_units": "Maintenance I",
             "maintenance_cost_quantity": 1,
@@ -352,7 +352,7 @@
             "next_tier": "",
             "workers": 0,
             "maintenance_cost_units": "Maintenance II",
-            "maintenance_cost_quantity": 0.200,
+            "maintenance_cost_quantity": 0.2001953,
             "electricity_consumed": 0,
             "electricity_generated": 150,
             "computing_consumed": 0,
@@ -372,12 +372,7 @@
                     "quantity": 120
                 }
             ],
-            "recipes": [
-                
-
-
-
-            ]
+            "recipes": []
         },
         {
             "id": "SolarPanelMono",
@@ -387,7 +382,7 @@
             "next_tier": "",
             "workers": 0,
             "maintenance_cost_units": "Maintenance II",
-            "maintenance_cost_quantity": 0.200,
+            "maintenance_cost_quantity": 0.2001953,
             "electricity_consumed": 0,
             "electricity_generated": 200,
             "computing_consumed": 0,
@@ -17853,26 +17848,7 @@
                     "quantity": 500
                 }
             ],
-            "recipes": [ 
-                {   "id": "FPtoRNWconversion",
-                    "name": "FP to RNW conversion",
-                    "duration": 72000,
-                    "inputs": [
-                        {
-                            "name": "Fission product",
-                            "quantity": 2400
-                        }
-                    ],
-                    "outputs": [
-                        {
-                            "name": "Retired waste",
-                            "quantity": 2400
-                        }
-
-                    ],
-                    "power_multiplier": 1
-                }   
-            ]
+            "recipes": []
         },
         {
             "id": "ThermalStorage",
@@ -19234,65 +19210,7 @@
                     "quantity": 160
                 }
             ],
-            "recipes": [
-                {
-                    "id": "RocketT1assembly",
-                    "name": "RocketT1 assembly",
-                    "duration": 480,
-                    "inputs": [
-                        {
-                            "name": "Composite panel",
-                            "quantity": 300
-                        },
-                        {
-                            "name": "Steel",
-                            "quantity": 80
-                        },
-                        {
-                            "name": "Electronics II",
-                            "quantity": 24
-                        }
-                    ],
-                    "outputs": [
-                        {
-                            "name": "RocketT1",
-                            "quantity": 1
-                        }
-                    ],
-                    "power_multiplier": 1
-                },
-                {
-                    "id": "RocketT2assembly",
-                    "name": "RocketT2 assembly",
-                    "duration": 480,
-                    "inputs": [
-                        {
-                            "name": "Composite panel",
-                            "quantity": 480
-                        },
-                        {
-                            "name": "Titanium alloy",
-                            "quantity": 120
-                        },
-                        {
-                            "name": "Steel",
-                            "quantity": 80
-                        },
-                        {
-                            "name": "Electronics III",
-                            "quantity": 16
-                        }
-                    ],
-                    "outputs": [
-                        {
-                            "name": "RocketT2",
-                            "quantity": 1
-                        }
-                    ],
-                    "power_multiplier": 1
-                }
-
-            ]
+            "recipes": []
         },
         {
             "id": "RocketLaunchPad",
@@ -19326,132 +19244,7 @@
                     "quantity": 800
                 }
             ],
-            "recipes": [
-                {
-                    "id": "RocketT1launchRLP",
-                    "name": "RocketT1 launch RLP",
-                    "duration": 480,
-                    "inputs": [
-                        {
-                            "name": "RocketT1",
-                            "quantity": 1
-                        },
-                        {
-                            "name": "Hydrogen",
-                            "quantity": 140
-                        },
-                        {
-                            "name": "Oxygen",
-                            "quantity": 40
-                        },
-                        {
-                            "name": "Water",
-                            "quantity": 160
-                        }
-                    ],
-                    "outputs": [
-                        {
-                            "name": "Rocket T1 RLP",
-                            "quantity": 1
-                        }
-                    ],
-                    "power_multiplier": 1
-                },
-                {
-                    "id": "RocketT1launchthing",
-                    "name": "RocketT1 launch thing",
-                    "duration": 480,
-                    "inputs": [
-                        {
-                            "name": "RocketT1",
-                            "quantity": 1
-                        },
-                        {
-                            "name": "Hydrogen",
-                            "quantity": 140
-                        },
-                        {
-                            "name": "Oxygen",
-                            "quantity": 40
-                        },
-                        {
-                            "name": "Water",
-                            "quantity": 160
-                        }
-                    ],
-                    "outputs": [
-                        {
-                            "name": "Rocket T1 thing",
-                            "quantity": 1
-                        }
-                    ],
-                    "power_multiplier": 1
-                },
-                {
-                    "id": "RocketT2launchRLP",
-                    "name": "RocketT2 launch RLP",
-                    "duration": 480,
-                    "inputs": [
-                        {
-                            "name": "RocketT2",
-                            "quantity": 1
-                        },
-                        {
-                            "name": "Hydrogen",
-                            "quantity": 320
-                        },
-                        {
-                            "name": "Oxygen",
-                            "quantity": 90
-                        },
-                        {
-                            "name": "Water",
-                            "quantity": 160
-                        }
-                    ],
-                    "outputs": [
-                        {
-                            "name": "Rocket T2 RLP",
-                            "quantity": 1
-                        }
-                    ],
-                    "power_multiplier": 1
-                },
-                {
-                    "id": "RocketT2launchthing",
-                    "name": "RocketT2 launch thing",
-                    "duration": 480,
-                    "inputs": [
-                        {
-                            "name": "RocketT2",
-                            "quantity": 1
-                        },
-                        {
-                            "name": "Hydrogen",
-                            "quantity": 320
-                        },
-                        {
-                            "name": "Oxygen",
-                            "quantity": 90
-                        },
-                        {
-                            "name": "Water",
-                            "quantity": 160
-                        }
-                    ],
-                    "outputs": [
-                        {
-                            "name": "Rocket T2 thing",
-                            "quantity": 1
-                        }
-                    ],
-                    "power_multiplier": 1
-                }
-
-
-
-
-            ]
+            "recipes": []
         },
         {
             "id": "WasteSortingPlant",
@@ -19599,9 +19392,9 @@
             "subcategory": "General",
             "next_tier": "",
             "workers": 6,
-            "maintenance_cost_units": "Maintenance III",
-            "maintenance_cost_quantity": 42.4,
-            "electricity_consumed": 4080,
+            "maintenance_cost_units": "",
+            "maintenance_cost_quantity": 0,
+            "electricity_consumed": 0,
             "electricity_generated": 0,
             "computing_consumed": 0,
             "computing_generated": 0,
@@ -19629,8 +19422,15 @@
                         {
                             "name": "Chilled water",
                             "quantity": 24
+                        },
+                        {
+                            "name": "Maintenance III",
+                            "quantity": 42.39063
+                        },
+                        {
+                            "name": "Electricity",
+                            "quantity": 4080
                         }
-                        
                     ],
                     "outputs": [
                         {
@@ -19654,7 +19454,7 @@
             "next_tier": "",
             "workers": 0,
             "maintenance_cost_units": "Maintenance III",
-            "maintenance_cost_quantity": 0.8,
+            "maintenance_cost_quantity": 0.7998047,
             "electricity_consumed": 85,
             "electricity_generated": 0,
             "computing_consumed": 0,
@@ -19668,44 +19468,6 @@
                 {
                     "product": "Server",
                     "quantity": 12
-                }
-            ],
-            "recipes": []
-        },
-        {
-            "id": "TheStatueofMaintenance",
-            "name": "The Statue of Maintenance",
-            "category": "Buildings",
-            "subcategory": "",
-            "next_tier": "",
-            "workers": 10,
-            "maintenance_cost_units": "Maintenance I",
-            "maintenance_cost_quantity": 10,
-            "electricity_consumed": 0,
-            "electricity_generated": 0,
-            "computing_consumed": 0,
-            "computing_generated": 0,
-            "product_type": "",
-            "storage_capacity": 0,
-            "unity_cost": 0,
-            "research_speed": 0,
-            "icon_path": "",
-            "build_costs": [
-                {
-                    "product": "Construction Parts III",
-                    "quantity": 200
-                },
-                {
-                    "product": "Concrete Slab",
-                    "quantity": 400
-                },
-                {
-                    "product": "Steel",
-                    "quantity": 300
-                },
-                {
-                    "product": "Copper",
-                    "quantity": 1000
                 }
             ],
             "recipes": []

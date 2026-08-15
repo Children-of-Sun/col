@@ -19,6 +19,7 @@ import { buildActiveRecipes } from './buildActiveRecipes';
 import CalculatorMode from './components/CalculatorMode';
 import PlannerMode from './components/PlannerMode';
 import GraphOneMode from './components/GraphOneMode';
+import ModulePanel from './components/ModulePanel';
 import { Demand, Recipe } from './types';
 import './App.css';
 
@@ -66,7 +67,7 @@ export default function App() {
   const [helpExpanded, setHelpExpanded] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [relaxToast, setRelaxToast] = useState<string | null>(null);
-  const [appMode, setAppMode] = useState<'simple' | 'advanced' | 'graph1' | 'graph2'>('advanced');
+  const [appMode, setAppMode] = useState<'simple' | 'advanced' | 'graph1' | 'graph2' | 'module'>('advanced');
   const [dragOver, setDragOver] = useState(false);
   const [rightTab, setRightTab] = useState<'main' | 'power' | 'stationStatueLab' | 'trade' | 'agriculture' | 'resident' | 'edict' | 'office' | 'tech'>('main');
 
@@ -1207,11 +1208,14 @@ export default function App() {
                onClick={() => setAppMode('graph1')} style={{ marginLeft: 4 }}>📐 图表一</Btn>
           <Btn variant={appMode === 'graph2' ? 'primary' : 'default'}
                onClick={() => setAppMode('graph2')} style={{ marginLeft: 4 }}>📐 图表二</Btn>
+          <Btn variant={appMode === 'module' ? 'primary' : 'default'}
+               onClick={() => setAppMode('module')} style={{ marginLeft: 4 }}>📐 模块</Btn>
         </span>
       </h1>
       {appMode === 'simple' && <CalculatorMode />}
       {appMode === 'graph1' && <GraphOneMode />}
       {appMode === 'graph2' && <PlannerMode />}
+      {appMode === 'module' && <ModulePanel />}
       {appMode === 'advanced' && (<>
       <div className="section" style={{ marginBottom: 12 }}>
         <div onClick={() => setHelpExpanded(!helpExpanded)}
