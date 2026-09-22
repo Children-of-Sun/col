@@ -1,6 +1,7 @@
 import React from 'react';
 import { useStore } from '../stores';
 import { t } from '../utils';
+import { computeLabResearchOutput } from '../utils/research';
 import { Btn, ModalShell } from './UI';
 
 export const LabPanel: React.FC = () => {
@@ -23,79 +24,17 @@ export const LabPanel: React.FC = () => {
   const meta = labMeta.find(l => l.buildingId === labLevel);
   if (!meta) return null;
 
-  // 判断是否为不消耗设备的基础研究所
-  const isBasicLab = labLevel === 'ResearchLab' || meta.name?.toLowerCase() === 'research lab';
+  // 研究所产出计算（与科研时间计算共用同一份逻辑）
+  const labOut = computeLabResearchOutput({
+    labLevel, labCount, labMeta, recipeEnabled,
+    gameData, population, edictLevels, officeLevels, stationLevel,
+  });
 
-  // 获取当前启用的配方（只应有一个）
-  const enabledRecipe = meta.recipes.find(r => recipeEnabled[r.id]);
-
-  // 计算基础产出和设备消耗
-  let baseOutput = 0;
-  let equipmentConsumption = 0;
-  let equipmentDetails: { name: string; rate: number }[] = [];
-
-  if (isBasicLab) {
-    baseOutput = 3 * labCount;
-  } else if (enabledRecipe) {
-    // 计算设备消耗总量及明细
-    for (const [item, qty] of Object.entries(enabledRecipe.inputs)) {
-      if (item.toLowerCase().includes('lab equipment')) {
-        const rate = (60 / enabledRecipe.duration) * (qty as number) * labCount;
-        equipmentConsumption += rate;
-        equipmentDetails.push({ name: item, rate });
-      }
-    }
-    baseOutput = equipmentConsumption; // 每消耗1设备产出1研究
-  }
-
-  // 计算总加成倍率（memoized）
-  const { totalMultiplier, popBonusPercent, edictBonusPercent, officeBonusPercent, stationBonusPercent } = React.useMemo(() => {
-    let mult = 1;
-
-    // 人口加成
-    mult *= (1 + population * 0.00005);
-
-    // 法令”研究效率”
-    let edictPct = 0;
-    if (gameData) {
-      const edict = gameData.edicts.find(e => e.name === '研究效率');
-      if (edict) {
-        const idx = gameData.edicts.indexOf(edict);
-        const lvl = edictLevels[idx] ?? -1;
-        if (lvl >= 0) {
-          mult *= (1 + (edict.effectPerLevel[lvl] || 0));
-          edictPct = (edict.effectPerLevel[lvl] || 0) * 100;
-        }
-      }
-    }
-
-    // 办公”研究效率”
-    let officePct = 0;
-    if (gameData) {
-      const office = gameData.office.find(o => o.name === '研究效率');
-      if (office) {
-        const idx = gameData.office.indexOf(office);
-        const lvl = officeLevels[idx] || 0;
-        if (lvl > 0) {
-          mult *= (1 + (office.effectPerLevel || 0) * lvl);
-          officePct = ((office.effectPerLevel || 0) * lvl) * 100;
-        }
-      }
-    }
-
-    // 空间站等级
-    mult *= (1 + stationLevel * 0.05);
-
-    return {
-      totalMultiplier: mult,
-      popBonusPercent: population * 0.005,
-      edictBonusPercent: edictPct,
-      officeBonusPercent: officePct,
-      stationBonusPercent: stationLevel * 5,
-    };
-  }, [population, gameData, edictLevels, officeLevels, stationLevel]);
-
-  const finalOutput = baseOutput * totalMultiplier;
+  const {
+    isBasicLab, hasRecipe: hasEnabledRecipe,
+    baseOutput, equipmentConsumption, equipmentDetails,
+    multipliers: multiplierEntries, totalMultiplier, finalOutput,
+  } = labOut;
 
   return (
     <div className="section">
@@ -117,7 +56,7 @@ export const LabPanel: React.FC = () => {
       {/* 显示当前启用的配方及消耗材料 */}
       {!isBasicLab && (
         <div className="stat" style={{ marginTop: 8 }}>
-          {enabledRecipe ? (
+          {hasEnabledRecipe ? (
             <>
               <div>🔧 消耗材料明细:</div>
               {equipmentDetails.length > 0 ? (
@@ -145,10 +84,13 @@ export const LabPanel: React.FC = () => {
       <div style={{ marginTop: 8, borderTop: '1px solid #ddd', paddingTop: 8 }}>
         <strong>🌟 研究产出加成（乘算）</strong>
         <ul style={{ margin: '4px 0', paddingLeft: 20 }}>
-          <li>人口 ({population.toLocaleString()}人): +{popBonusPercent.toFixed(2)}% → {(1 + popBonusPercent/100).toFixed(3)}x</li>
-          {edictBonusPercent > 0 && <li>法令 "研究效率": +{edictBonusPercent.toFixed(0)}% → {(1 + edictBonusPercent/100).toFixed(3)}x</li>}
-          {officeBonusPercent > 0 && <li>办公 "研究效率": +{officeBonusPercent.toFixed(0)}% → {(1 + officeBonusPercent/100).toFixed(3)}x</li>}
-          <li>空间站等级 Lv{stationLevel}: +{stationBonusPercent}% → {(1 + stationBonusPercent/100).toFixed(3)}x</li>
+          {multiplierEntries
+            .filter(m => m.kind === 'population' || m.kind === 'station' || m.percent > 0)
+            .map(m => (
+              <li key={m.label}>
+                {m.label}: {m.percent >= 0 ? '+' : ''}{m.percent.toFixed(m.kind === 'population' ? 2 : 0)}% → {m.factor.toFixed(3)}x
+              </li>
+            ))}
         </ul>
         <div style={{ marginTop: 4, fontWeight: 'bold' }}>合计倍率: {totalMultiplier.toFixed(3)}x</div>
         <div style={{ marginTop: 4, fontSize: '1.1em', color: '#2563eb' }}>🎓 最终研究产出: {finalOutput.toFixed(2)} /分</div>

@@ -83,6 +83,7 @@ export const useStore = create<StoreState>((set, get) => ({
   edictLevels: {},
   officeLevels: [],
   researchLevels: [],
+  researchTargets: {},
 
   tradeContracts: [],
   tradeSetup: { contractId: '', dockLevel: 1, fuelName: 'Diesel' },
@@ -266,6 +267,22 @@ export const useStore = create<StoreState>((set, get) => ({
     levels[idx] = lvl;
     return { researchLevels: levels };
   }),
+  // 开启某科技的规划：默认目标等级 = 满级
+  setResearchTargetEnabled: (idx: number, enabled: boolean) => set(s => {
+    const prev = s.researchTargets[idx];
+    const res = s.gameData?.research?.[idx];
+    const target = prev?.target ?? (res ? res.maxLevel : 0);
+    return { researchTargets: { ...s.researchTargets, [idx]: { enabled, target } } };
+  }),
+  setResearchTargetLevel: (idx: number, lvl: number) => set(s => {
+    const prev = s.researchTargets[idx];
+    return {
+      researchTargets: {
+        ...s.researchTargets,
+        [idx]: { enabled: prev?.enabled ?? true, target: Math.max(0, lvl) },
+      },
+    };
+  }),
 
   setTradeContracts: (contracts) => set({ tradeContracts: contracts }),
   setTradeContract: (contractId) => set(state => ({ tradeSetup: { ...state.tradeSetup, contractId } })),
@@ -441,7 +458,7 @@ export const useStore = create<StoreState>((set, get) => ({
       'stationLevel', 'rocketType', 'statueCount', 'labLevel', 'labCount',
       'steamLowMode', 'constraintMode', 'showTinyErrors', 'allowExternal',
       'solarEfficiency', 'population', 'housingIndex', 'selectedMedical',
-      'edictLevels', 'officeLevels', 'researchLevels', 'optimizationMode',
+      'edictLevels', 'officeLevels', 'researchLevels', 'researchTargets', 'optimizationMode',
       'enableTradeModule', 'showIcons', 'ignoredItems',
       'enableAgriculture', 'cropRotation', 'globalFertilizerType',
       'targetFertility', 'enableFocusConsumption',
@@ -531,6 +548,7 @@ export const useStore = create<StoreState>((set, get) => ({
       edictLevels: s.edictLevels,
       officeLevels: s.officeLevels,
       researchLevels: s.researchLevels,
+      researchTargets: s.researchTargets,
       enableTradeModule: s.enableTradeModule,
       showIcons: s.showIcons,
       ignoredItems: s.ignoredItems,

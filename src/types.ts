@@ -233,6 +233,8 @@ export interface StoreState {
   edictLevels: Record<number, number>;
   officeLevels: number[];
   researchLevels: number[];
+  // 科研规划：每项科技是否参与时间计算，以及目标等级
+  researchTargets: Record<number, { enabled: boolean; target: number }>;
 
   tradeContracts: TradeContract[];
   tradeSetup: TradeSetup;
@@ -343,6 +345,8 @@ export interface StoreState {
   setEdictLevel: (idx: number, lvl: number) => void;
   setOfficeLevel: (idx: number, lvl: number) => void;
   setResearchLevel: (idx: number, lvl: number) => void;
+  setResearchTargetEnabled: (idx: number, enabled: boolean) => void;
+  setResearchTargetLevel: (idx: number, lvl: number) => void;
   setTradeContracts: (contracts: TradeContract[]) => void;
   setTradeContract: (contractId: string) => void;
   setTradeDockLevel: (level: number) => void;
