@@ -11,7 +11,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: update-data
+  # 与部署 workflow 共用同一并发组，避免两个部署互相冲突
+  group: gh-pages-deploy
   cancel-in-progress: false
 
 jobs:

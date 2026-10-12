@@ -1,0 +1,43 @@
+name: 构建并部署
+
+on:
+  # 推送到 main 即自动构建并部署到 gh-pages
+  push:
+    branches: [main]
+  # 也可在 Actions 页面手动触发
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+# 与数据更新 workflow 共用同一并发组，避免两个部署互相冲突
+concurrency:
+  group: gh-pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 构建
+        run: npm run build
+
+      # 部署：把 dist 内容推送到 gh-pages 分支（GitHub Pages 源）
+      - name: 部署到 gh-pages 分支（GitHub Pages）
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          npx gh-pages -d dist
