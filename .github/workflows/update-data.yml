@@ -66,6 +66,8 @@ jobs:
       # 部署：把 dist 内容推送到 gh-pages 分支（网页源），与现有部署方式一致
       - name: 部署到 gh-pages 分支（GitHub Pages）
         if: steps.check.outputs.changed == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
