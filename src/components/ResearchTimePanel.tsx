@@ -50,21 +50,6 @@ const ResearchTimePanel: React.FC = () => {
 
   const research = React.useMemo(() => gameData?.research ?? [], [gameData]);
 
-  // —— 单项快速计算：直接选择科技并输入当前/目标等级 ——
-  const [quickIdx, setQuickIdx] = React.useState(0);
-  const [quickFrom, setQuickFrom] = React.useState(0);
-  const [quickTo, setQuickTo] = React.useState(0);
-  const quickTech = research[quickIdx];
-  // 切换科技时，用该科技的当前等级与满级初始化
-  React.useEffect(() => {
-    const r = research[quickIdx];
-    if (!r) return;
-    const cur = Math.min(Math.max(researchLevels[quickIdx] || 0, 0), r.maxLevel);
-    setQuickFrom(cur);
-    setQuickTo(r.maxLevel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quickIdx, gameData]);
-
   // —— 自动科研点产量（来自研究所设置）——
   const labOut = React.useMemo(() => computeLabResearchOutput({
     labLevel, labCount, labMeta, recipeEnabled,
@@ -101,15 +86,6 @@ const ResearchTimePanel: React.FC = () => {
   const minutes = rate > 0 ? totalPoints / rate : 0;
   const hasResult = totalPoints > 0 && rate > 0;
 
-  // —— 单项快速计算结果（纯算术，即时） ——
-  const quickCost = React.useMemo(() => {
-    if (!quickTech) return null;
-    const from = Math.min(Math.max(Math.floor(quickFrom) || 0, 0), quickTech.maxLevel);
-    const to = Math.min(Math.max(Math.floor(quickTo) || 0, from), quickTech.maxLevel);
-    return researchCostBetween(quickTech.costFormula, from, to);
-  }, [quickTech, quickFrom, quickTo]);
-  const quickMinutes = quickCost && rate > 0 ? quickCost.total / rate : 0;
-
   return (
     <div className="section">
       <h3>⏱️ 科研时间计算</h3>
@@ -144,49 +120,6 @@ const ResearchTimePanel: React.FC = () => {
           </span>
         )}
       </div>
-
-      {/* —— 单项快速计算：选科技 + 输入当前/目标等级 —— */}
-      {research.length > 0 && (
-        <div style={{ marginTop: 10, padding: 8, border: '1px solid #b8c8e8', borderRadius: 6, background: '#f0f4ff' }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>🔎 单项计算（选择科技 → 输入当前/目标等级 → 即时出时间）</div>
-          <div className="flex-row" style={{ gap: 8, flexWrap: 'wrap' }}>
-            <label>科技:{' '}
-              <select value={quickIdx} onChange={e => setQuickIdx(parseInt(e.target.value) || 0)}
-                style={{ padding: 2, maxWidth: 220 }}>
-                {research.map((r, i) => (
-                  <option key={r.name} value={i}>{t(r.name, translation)}（max{r.maxLevel}）</option>
-                ))}
-              </select>
-            </label>
-            <label>当前等级:{' '}
-              <input type="number" min={0} max={quickTech?.maxLevel ?? 0} value={quickFrom}
-                onChange={e => setQuickFrom(Math.max(0, parseInt(e.target.value) || 0))}
-                style={{ width: 70 }} />
-            </label>
-            <label>目标等级:{' '}
-              <input type="number" min={0} max={quickTech?.maxLevel ?? 0} value={quickTo}
-                onChange={e => setQuickTo(Math.max(0, parseInt(e.target.value) || 0))}
-                style={{ width: 70 }} />
-            </label>
-          </div>
-          <div style={{ marginTop: 4, fontSize: '0.95rem' }}>
-            {quickCost && quickCost.levels > 0 ? (
-              rate > 0 ? (
-                <>
-                  需要 <b>{formatPoints(quickCost.total)}</b> 科研点（{quickCost.levels} 级），
-                  预计 <b style={{ color: '#2563eb' }}>{formatDuration(quickMinutes)}</b>
-                  <span className="hint">（按 {rate.toFixed(2)} 点/分）</span>
-                  {quickCost.missing && <span className="hint" style={{ color: '#c62828' }}>（部分等级公式无法解析，已跳过）</span>}
-                </>
-              ) : (
-                <span style={{ color: '#c62828' }}>科研点产量为 0，请先配置研究所或勾选"手动输入科研点产量"</span>
-              )
-            ) : (
-              <span className="hint">目标等级需大于当前等级</span>
-            )}
-          </div>
-        </div>
-      )}
 
       <div className="stat" style={{ marginTop: 8 }}>
         {plan.length === 0 ? (
