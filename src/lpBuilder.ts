@@ -422,7 +422,7 @@ export function buildLp(input: LpInput): LpOutput {
   [...items].forEach((it, idx) => rows[it] = `c${idx}`);
 
   // ========== 1. 定义需要在电力模块单独处理的物品 ==========
-  const powerSpecialItems = new Set(['steam (high)', 'steam (super)', 'mechanical power', 'steam (depleted)']);
+  const powerSpecialItems = new Set(['steam (high)', 'steam (super)', 'mechanical power']);
 
   // ========== 2. 辅助函数：合并多个表达式 ==========
   const combineExprs = (...exprs: string[]): string => {
@@ -713,8 +713,8 @@ export function buildLp(input: LpInput): LpOutput {
   }
 
   for (const it of allSpecialItems) {
-    // 低压蒸汽/乏汽：有生产者+无消费者 或 无生产者+有消费者 都跳过约束（可放空）
-    if ((it === 'steam (low)' || it === 'steam (depleted)') && (!producers.has(it) || !consumers.has(it))) continue;
+    // 低压蒸汽：有生产者+无消费者 或 无生产者+有消费者 都跳过约束（可放空）
+    if (it === 'steam (low)' && (!producers.has(it) || !consumers.has(it))) continue;
     const rf = getRedundancyFactors(it);
 
     // 主模块方程：仅使用非电力配方
