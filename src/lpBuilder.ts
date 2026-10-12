@@ -15,7 +15,7 @@ export interface LpInput {
   demands: Demand[];
   externalSupplies: { item: string; rate: number }[];
   reductionFactor: number;
-  steamLowMode: 'internal' | 'shared';
+  steamLowMode: 'internal' | 'shared' | 'mainonly';
   excludedOutputs: Set<string>;
   excludedInputs: Set<string>;
   constraintMode?: 'noProd' | 'noProdOrCons';
@@ -484,8 +484,8 @@ export function buildLp(input: LpInput): LpOutput {
 
     // 普通物品：全局平衡（所有配方一起）
     if (it === 'steam (low)') {
-      // 根据 steamLowMode 决定是内部平衡还是全局平衡（已在全局平衡中）
-      if (steamLowMode === 'shared') {
+      // 蒸汽处理设置只作用于低压蒸汽：shared/mainonly 为全局平衡，internal 由电力模块单独处理
+      if (steamLowMode === 'shared' || steamLowMode === 'mainonly') {
         const se = allExpr(it);
         if (se) {
           // 宽松模式下无消费者则跳过

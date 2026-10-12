@@ -20,3 +20,14 @@ scripts/rewrite-history.ps1
 
 # git 历史备份（重写历史时生成，确认无误后本地删除即可）
 git-history-backup-*.bundle
+
+# 本地系统维护脚本/截图（与项目无关，勿上传）
+/TrimServices.ps1
+/battery.html
+/显示诊断.ps1
+/桌面截图.png
+/原电源方案GUID备份.txt
+/清理Avast启动项残留.reg
+/精简自启服务*.cmd
+/还原自启服务*.cmd
+/*.reg

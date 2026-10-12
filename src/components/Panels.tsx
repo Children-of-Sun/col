@@ -69,10 +69,11 @@ export const PowerPanel: React.FC<{ onOpenPowerRecipeModal: () => void }> = ({ o
       </div>
       <div style={{ marginTop: 8 }}><Btn onClick={onOpenPowerRecipeModal} disabled={!dataLoaded}>🧪 电力配方选择</Btn></div>
       <div className="steam-option">
-        <strong>蒸汽处理：</strong>
+        <strong>蒸汽处理（仅低压蒸汽）：</strong>
         {(['internal', 'shared'] as const).map(mode => (
           <label key={mode} style={{ marginLeft: 10 }}><input type="radio" name="steamLowMode" value={mode} checked={steamLowMode === mode} onChange={() => setSteamLowMode(mode)} /> {mode === 'internal' ? '内部处理' : '内部主模块共用'}</label>
         ))}
+        <span className="hint" style={{ marginLeft: 8 }}>（高压/超高压蒸汽始终按主模块与电力模块分别平衡，不受此项影响）</span>
       </div>
       <div style={{ marginTop: 12, borderTop: '1px solid #ddd', paddingTop: 8 }}>
         <label>☀️ {t('太阳能有效功率', translation)} (%): </label>
